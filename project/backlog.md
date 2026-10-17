@@ -900,6 +900,80 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- Left out: the standard library's checked and debug modes, ThreadSanitizer, the pool and GLib switches, template and RTTI traps, and `compile_commands.json`. The code uses no C++ library, threads, pools, templates, or classes, and the Makefile passes clang-tidy its flags itself.
 		- Left to the C item: CodeQL, the cross-file analyzer, and the heaptrack soak. They'd check the same code again.
 
+- Implement leak and static checks of the Rust, Go, and Python code run as part of CI/CD
+	- ID: 2026101711245585
+	- Type: Feature
+	- Status: Queued
+	- Priority: Avg
+	- Opened: 20261017-112455
+	- Opened by: JC
+	- Related IDs: 2026101619042485, 2026101707542552, 2026101512024161
+	- Requirements:
+		- For all 3:
+			- The checks cover first-party and third-party code. Vendored code is included.
+				- On third-party code, run the leak, memory, and correctness checks named here, not style lints. Style findings in someone else's crate or module aren't ours to fix.
+				- CodeQL reports only on source inside the database's root. For its run, vendor the dependencies into the tree first (`cargo vendor`, `go mod vendor`, unpacked sdists for Python).
+			- Any report fails the test that made it.
+			- Suppressions list third-party code only, matched by crate, module, or package name. A leak in our code is fixed. If the fix has to wait, it gets a backlog item, and the test that shows it turns the check off with that item's ID beside it.
+			- A `--leakcheck` flag adds the slow checks:
+				- CodeQL, from a pinned CLI run locally. No hosted service.
+				- A soak test. It loops through the program's main actions headless, and fails if the heap at round 2N is larger than at round N by more than a set margin. The heap report is kept as a pipeline artifact.
+			- Every tool is pinned and runs in the build container or lint image, never installed on the host.
+			- Each new gate is watched to fail before it's trusted, by planting the leak it's meant to catch and seeing it go red.
+			- Known-advisory scans run on every full run: `cargo deny check advisories` or `cargo audit`, `govulncheck`, and `pip-audit`. They cover third-party code only, which is the point.
+		- For Rust:
+			- Safe Rust leaks only through `Rc` or `Arc` cycles, `mem::forget`, `Box::leak`, and collections that grow forever. Real leaks and memory errors come from `unsafe` and FFI, in our crates or in dependencies.
+			- Every full run builds the whole test suite with AddressSanitizer and LeakSanitizer, in a build dir of its own.
+				- `RUSTFLAGS=-Zsanitizer=address cargo +NIGHTLY test -Zbuild-std --target x86_64-unknown-linux-gnu`.
+				- That needs a dated nightly, pinned beside the stable toolchain. Sanitizers aren't stable.
+				- Every crate built from source is instrumented, dependencies included.
+			- If the code starts threads, every full run also builds the tests with ThreadSanitizer (`-Zsanitizer=thread`), in another build dir.
+			- Every full run runs the test suite under Miri: `cargo +NIGHTLY miri test`. It catches undefined behavior in `unsafe` code, ours and dependencies', and fails on memory still allocated at exit.
+				- It moves behind `--leakcheck` only if a full run measures too slow.
+			- A heap-growth test with `dhat` in testing mode reads `dhat::HeapStats` at round N and 2N in-process. It's the soak test for a library with no main program.
+			- clippy runs with `-D warnings`, plus `clippy::mem_forget` and `clippy::undocumented_unsafe_blocks`.
+			- Every `unsafe` block has a `// SAFETY:` comment.
+			- Traps:
+				- Without `-Zbuild-std`, std isn't instrumented. ASan mostly copes, but TSan gives false reports.
+				- Without an explicit `--target`, the sanitizer flags reach build scripts and proc macros, and the build fails in odd places.
+				- LSan reports at process exit, so a leak fails the whole test binary, not one test. Rerun with `--test-threads=1` and a test-name filter to find which.
+				- Miri can't call FFI and has limited file and network access. A test that needs them gets `#[cfg_attr(miri, ignore)]` with a one-line reason. It's not silently left out.
+				- Miri doesn't count memory reachable from a `static` as a leak, so a cache in a static that grows forever passes. The soak test catches that.
+				- heaptrack and dhat both see only the global allocator. A crate that maps memory itself, or a custom allocator, hides it.
+				- ASan and TSan can't share a build, and heaptrack can't share one with either. The soak test uses a plain build.
+		- For Go:
+			- Go leaks are goroutines that never exit, and references held too long: a map or slice that only grows, or a small slice keeping a big backing array alive.
+			- Every package's tests run `goleak.VerifyTestMain(m)` from `go.uber.org/goleak`, pinned in go.mod. A goroutine still running after the tests fails the run, whether our code or a dependency started it.
+			- Every full run runs the whole test suite with `-race`.
+			- If the code uses cgo, every full run also runs the tests with `-asan`, in a build dir of its own.
+			- Every full run runs `go vet` and `staticcheck`. `go vet`'s `lostcancel` and `copylocks` checks are the leak-related ones.
+			- The soak test reads `runtime.MemStats.HeapInuse` and `runtime.NumGoroutine()` at round N and 2N, after `runtime.GC()`. Its heap profile (`pprof`) is kept as the artifact, and `go tool pprof -base` shows what grew.
+			- Traps:
+				- `goleak.VerifyNone` per test doesn't work with `t.Parallel()`. Use `VerifyTestMain`.
+				- goleak ignores by function name. That's the only form of suppression allowed, and only for third-party functions.
+				- `go test` caches a pass. Run with `-count=1`.
+				- One `runtime.GC()` can leave garbage behind. Call it twice before reading the stats, or the margin has to be wide enough to hide a real leak.
+				- `-race` needs cgo on some platforms. A job with `CGO_ENABLED=0` fails to build it or skips it, so check the job's env.
+				- `-race` is 2 to 20 times slower and uses 5 to 10 times the memory. Size the job's timeout for it.
+		- For Python:
+			- Python leaks are references held too long: module-level caches, `functools.lru_cache` on a method, closures kept in a global list, and C extensions that drop a reference count.
+			- Every full run runs the tests with `-X dev` and `-W error::ResourceWarning`, so an unclosed file or socket fails the test.
+			- Every full run runs the tests under `pytest-memray`. Each test that loops gets `@pytest.mark.limit_leaks(...)` with a margin. memray sees native allocations, so leaks in C extensions show up, third-party ones included.
+			- After the tests, `gc.collect()` runs, and `gc.garbage` must be empty.
+			- The soak test takes `tracemalloc` snapshots at round N and 2N and fails on growth past the margin. The top lines of `snapshot.compare_to()` are kept as the artifact.
+			- ruff runs `B019` (`lru_cache` on a method), `SIM115` (`open` with no context manager), and `B006` (mutable default argument).
+			- `--leakcheck` also runs the tests on a CPython built with `--with-address-sanitizer`, under `PYTHONMALLOC=malloc`, for C extensions.
+				- The interpreter's own reports are suppressed by library name, `libpython` only.
+			- Traps:
+				- Start `tracemalloc` before importing the code under test, or allocations made at import aren't traced.
+				- The first rounds fill caches: the regex cache, interned strings, freelists, and lazy imports. That's why it's round N against 2N, never 0 against N.
+				- `tracemalloc` sees only allocations made through Python's allocator. A C extension calling `malloc` directly is invisible to it. memray covers that.
+				- memray runs on Linux and macOS only. On Windows, the test exits as skipped, not passed.
+				- pytest keeps the traceback of a failed test, which keeps its frames alive. A leak count from a run with failures means nothing.
+				- `ResourceWarning` shows only in dev mode or with `-W`. A plain run hides it.
+				- Without `PYTHONMALLOC=malloc`, ASan can't see inside pymalloc's pools.
+	- Note: The Rust crate has no `unsafe` and no FFI, and only `tests/files.rs` starts threads. The Go module has no cgo, and only one test in `files_test.go` starts a goroutine. The only Python is `cicd/c_cases.py` and `cicd/fuzz.py`, since the Python wrapper isn't started. clippy already runs with `-D warnings` and `clippy::pedantic`, and go vet, staticcheck, and ruff run on every gate. No advisory scan runs yet. cicd runs its tools on the host today, checked against `cicd/tool-pins.env`.
+
 - Write into a folder that doesn't exist says IO on 1.2 and 2.0, and NotFound on 3.0
 	- ID: 2026101518385490
 	- Type: Bug
