@@ -29,7 +29,7 @@ docker build --quiet --file "${here}/C.Dockerfile" \
 network=none
 if [[ "${mode}" == leakcheck ]]; then network=bridge; fi
 
-exec docker run --rm --network="${network}" \
+exec docker run --rm --user "$(id -u):$(id -g)" --network="${network}" \
 	--mount "type=bind,src=${root},dst=/src,readonly" \
 	--mount "type=bind,src=${work},dst=/work" \
 	--mount "type=bind,src=${artifacts},dst=/artifacts" \
