@@ -64,7 +64,13 @@ static view trim(view v) {
 	return v;
 }
 
-static view trimmed(const lines *f, size_t i) { return trim(f->v[i].text); }
+static view trimmed(const lines *f, size_t i) {
+	if (!f->v || i >= f->n) {
+		view empty = {"", 0};
+		return empty;
+	}
+	return trim(f->v[i].text);
+}
 static bool blank(const line *l) { return trim(l->text).n == 0; }
 
 static void push(lines *f, view text, const char *end) {
@@ -490,15 +496,23 @@ shclw_kind shclw_i_finish_info(const char *text, size_t len, shclw_i_info info, 
 
 static bool contains(const char *text, size_t len, const char *word) {
 	size_t n = zlen(word);
-	for (size_t i = 0; i + n <= len; i++) {
-		const char *at = (const char *)memchr(text + i, word[0], len - n + 1 - i);
-		if (!at) {
+	if (n == 0) {
+		return true;
+	}
+	if (n > len) {
+		return false;
+	}
+	size_t start = 0;
+	while (start <= len - n) {
+		const char *found = (const char *)memchr(text + start, word[0], len - n + 1 - start);
+		if (!found) {
 			return false;
 		}
-		i = (size_t)(at - text);
-		if (!memcmp(at, word, n)) {
+		start = (size_t)(found - text);
+		if (!memcmp(found, word, n)) {
 			return true;
 		}
+		start++;
 	}
 	return false;
 }

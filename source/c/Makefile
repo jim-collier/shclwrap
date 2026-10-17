@@ -34,6 +34,9 @@ OUT      ?= build/v$(SHCLW_SHCL)
 CC       ?= gcc
 CXX      ?= g++
 CC15     ?= gcc-15
+CLANG    ?= clang
+CLANG_TIDY ?= clang-tidy
+CLANG_FORMAT ?= clang-format
 
 LIB   := shclw.c info.c shclw$(SHCLW_SHCL).c run.c
 # 3.0 needs no SHCLW_SHCL, and the build leaves it out to show that.
@@ -41,7 +44,7 @@ PICK  := $(if $(filter 3,$(SHCLW_SHCL)),,-DSHCLW_SHCL=$(SHCLW_SHCL))
 WARN  := -Wall -Wextra -Wpedantic -Wshadow -Wvla -Wconversion -Werror
 CFLAGS_ALL := -std=c11 -O1 -g $(WARN) $(PICK) -I. -I$(SHCL_DIR)
 CXXFLAGS_ALL := -std=c++20 -O1 -g -Wall -Wextra -Wpedantic -Wshadow -Wconversion -Werror $(PICK) -I. -I$(SHCL_DIR)
-SAN   := -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer
+SAN   := -fsanitize=address,leak,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer
 # shcl is first-party in its own repo; here it's built as a program would.
 SHCL_FLAGS := -std=c11 -O1 -g -I$(SHCL_DIR)
 # shcl 2.0, renamed, for the upgrade check. Its 2 files see 2.0's shcl.h and
@@ -53,7 +56,7 @@ V2_DEPS := shclw3_v2.h shclw3_v2_names.h $(SHCL2_DIR)/shcl.h
 
 FORMATTED := $(wildcard *.c *.h tests/*.c)
 
-.PHONY: all test drive strict lint names pick format format-check clean
+.PHONY: all test drive drive-plain strict lint analyze analyze-ctu names pick format format-check clean
 all: test drive strict
 
 $(OUT)/asan $(OUT)/plain $(OUT)/cxx:
@@ -97,6 +100,8 @@ impl = $(OUT)/$(1)/shcl_impl.o $(if $(IS3),$(OUT)/$(1)/shclw3_v2_impl.o)
 
 $(OUT)/shclw-drive: $(call objs,asan) $(OUT)/asan/shclw-drive.o $(call impl,asan)
 	$(CC) $(SAN) $^ -lm -o $@
+$(OUT)/shclw-drive-plain: $(call objs,plain) $(OUT)/plain/shclw-drive.o $(call impl,plain)
+	$(CC) $^ -lm -o $@
 $(OUT)/api-test-asan: $(call objs,asan) $(OUT)/asan/api_test.o $(call impl,asan)
 	$(CC) $(SAN) $^ -lm -o $@
 $(OUT)/api-test-plain: $(call objs,plain) $(OUT)/plain/api_test.o $(call impl,plain)
@@ -106,8 +111,10 @@ $(OUT)/api-test-cxx: $(call objs,cxx) $(OUT)/cxx/api_test.o $(call impl,plain)
 
 drive: $(OUT)/shclw-drive
 
+drive-plain: $(OUT)/shclw-drive-plain
+
 test: $(if $(IS3),names) $(OUT)/api-test-asan $(OUT)/api-test-plain $(OUT)/api-test-cxx
-	$(OUT)/api-test-asan
+	LSAN_OPTIONS=suppressions=$(CURDIR)/lsan.supp:print_suppressions=1 ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 $(OUT)/api-test-asan
 	$(OUT)/api-test-plain
 	$(OUT)/api-test-cxx
 
@@ -121,8 +128,19 @@ strict:
 	$(if $(IS3),$(CC15) -std=c17 $(WARN) -I. -I$(SHCL2_DIR) -fsyntax-only shclw3_v2.c)
 
 lint:
-	clang-tidy --quiet $(LIB) shclw-drive.c tests/api_test.c -- -std=c11 $(PICK) -I. -I$(SHCL_DIR)
-	$(if $(IS3),clang-tidy --quiet shclw3_v2.c -- -std=c11 -I. -I$(SHCL2_DIR))
+	$(CLANG_TIDY) --quiet $(LIB) shclw-drive.c tests/api_test.c -- -std=c11 $(PICK) -I. -I$(SHCL_DIR)
+	$(if $(IS3),$(CLANG_TIDY) --quiet shclw3_v2.c -- -std=c11 -I. -I$(SHCL2_DIR))
+
+# Analyzer diagnostics must be clean; -Werror makes both compiler frontends fail.
+ANALYZE_C := $(LIB) shclw-drive.c tests/api_test.c tests/pick.c
+analyze:
+	@set -e; for file in $(ANALYZE_C); do \
+		$(CC15) -std=c17 -O1 -g $(WARN) -Werror $(PICK) -I. -I$(SHCL_DIR) -fanalyzer -c -o /dev/null "$$file"; \
+		$(CLANG) --analyze -std=c11 -O1 -g $(WARN) -Werror $(PICK) -I. -I$(SHCL_DIR) -Xanalyzer -analyzer-output=text -o /dev/null "$$file"; \
+	done
+	$(CC15) -std=c17 -O1 -g $(WARN) -Werror -isystem $(SHCL_DIR) -I. -fanalyzer -c -o /dev/null tests/shcl_impl.c
+	$(CLANG) --analyze -std=c11 -O1 -g $(WARN) -Werror -isystem $(SHCL_DIR) -I. -Xanalyzer -analyzer-output=text -o /dev/null tests/shcl_impl.c
+	$(if $(IS3),$(CC15) -std=c17 -O1 -g $(WARN) -Werror -I. -isystem $(SHCL2_DIR) -fanalyzer -c -o /dev/null shclw3_v2.c && $(CLANG) --analyze -std=c11 -O1 -g $(WARN) -Werror -I. -isystem $(SHCL2_DIR) -Xanalyzer -analyzer-output=text -o /dev/null shclw3_v2.c && $(CC15) -std=c17 -O1 -g $(WARN) -Werror -I. -isystem $(SHCL2_DIR) -fanalyzer -c -o /dev/null shclw3_v2_impl.c && $(CLANG) --analyze -std=c11 -O1 -g $(WARN) -Werror -I. -isystem $(SHCL2_DIR) -Xanalyzer -analyzer-output=text -o /dev/null shclw3_v2_impl.c)
 
 # Each shcl.h with each SHCLW_SHCL, or none, in C and C++: only the right one
 # compiles. 1.2's and 2.0's headers define the same macros, so a wrong pick
@@ -143,9 +161,9 @@ pick:
 	$(foreach p,$(PICKS),$(call pick_one,$(CXX) -x c++ -std=c++20 $(WARN),$(p)))
 
 format:
-	clang-format -i $(FORMATTED)
+	$(CLANG_FORMAT) -i $(FORMATTED)
 format-check:
-	clang-format --dry-run -Werror $(FORMATTED)
+	$(CLANG_FORMAT) --dry-run -Werror $(FORMATTED)
 
 # The default OUT is a folder per version under build.
 clean:

@@ -15,6 +15,7 @@
 ##	  Options:
 ##	   --gate          format check, lint, and tests only; what the pre-push hook runs
 ##	   --quick         a short fuzz stage
+##	   --leakcheck     add CodeQL, CTU analysis, and the heaptrack soak
 ##	   -q, --quiet     no preflight block and no prompt
 ##	   -y, --yes       no prompt
 ##	   --no-sync       skip the remote sync stage
@@ -51,10 +52,11 @@ export PATH="${HOME}/.cargo/bin:${PATH}"
 ## Half the cores, since a workstation is usually running something else.
 cpuCap=$(( $(nproc 2>/dev/null || echo 2) / 2 )); if ((cpuCap < 1)); then cpuCap=1; fi
 
-doGate=0; doQuick=0; doQuiet=0; assumeYes=0; doSync=1; doFuzz=1
+doGate=0; doQuick=0; doLeakcheck=0; doQuiet=0; assumeYes=0; doSync=1; doFuzz=1
 while (($#)); do case "$1" in
 	--gate)     doGate=1; doFuzz=0; shift ;;
 	--quick)    doQuick=1; shift ;;
+	--leakcheck) doLeakcheck=1; shift ;;
 	-q|--quiet) doQuiet=1; assumeYes=1; shift ;;
 	-y|--yes)   assumeYes=1; shift ;;
 	--no-sync)  doSync=0; shift ;;
@@ -85,10 +87,7 @@ fCheckPin(){   ## fCheckPin NAME PINNED ACTUAL
 	return 0
 }
 
-## The pinned shcl.h for a C build, fetched by commit into the gitignored cache
-## and checked by sha256, the way Go and Rust get theirs from their package
-## managers. Sets shclDir to the folder holding it.
-shclDir=""
+## Fetches the pinned shcl.h into the gitignored cache and checks its sha256.
 fShclHeader(){   ## fShclHeader REV SHA256
 	local rev="$1" sum="$2"
 	local dir="${root}/cicd/cache/shcl-c/${rev}"
@@ -102,7 +101,6 @@ fShclHeader(){   ## fShclHeader REV SHA256
 		[[ "${got}" == "${sum}" ]] || fDie "shcl.h at ${rev} has sha256 ${got}, and ${sum} is pinned"
 		mv -f "${dir}/shcl.h.part" "${dir}/shcl.h"
 	fi
-	shclDir="${dir}"
 	return 0
 }
 
@@ -188,22 +186,19 @@ fCheckPin staticcheck  "${PIN_STATICCHECK}" "$(staticcheck --version 2>/dev/null
 fCheckPin shellcheck   "${PIN_SHELLCHECK}"  "$(shellcheck --version 2>/dev/null | sed -n 2p || echo missing)"
 fCheckPin ruff         "${PIN_RUFF}"        "$(ruff --version 2>/dev/null || echo missing)"
 fCheckPin gcc          "${PIN_GCC}"         "$(gcc --version 2>/dev/null | sed -n 1p || echo missing)"
-fCheckPin gcc-15       "${PIN_GCC15}"       "$(gcc-15 --version 2>/dev/null | sed -n 1p || echo missing)"
 fCheckPin clang-format "${PIN_CLANG_FORMAT}" "$(clang-format --version 2>/dev/null || echo missing)"
-fCheckPin clang-tidy   "${PIN_CLANG_TIDY}"  "$(clang-tidy --version 2>/dev/null | sed -n 2p || echo missing)"
 (cd "${root}/source/go" && go vet ./... && staticcheck ./...)
 fEcho "OK: go vet, staticcheck"
 (cd "${root}/source/rust" && cargo clippy --quiet -j "${cpuCap}" --all-features --all-targets -- -D warnings -W clippy::pedantic)
 fEcho "OK: clippy"
-fShclHeader "${SHCL1_REV}" "${SHCL1_SHA256}"; shcl1Dir="${shclDir}"
-fShclHeader "${SHCL2_REV}" "${SHCL2_SHA256}"; shcl2Dir="${shclDir}"
-fShclHeader "${SHCL3_REV}" "${SHCL3_SHA256}"; shcl3Dir="${shclDir}"
-shclDirs=("" "${shcl1Dir}" "${shcl2Dir}" "${shcl3Dir}")
-make -s -C "${root}/source/c" SHCL1_DIR="${shcl1Dir}" SHCL2_DIR="${shcl2Dir}" SHCL3_DIR="${shcl3Dir}" pick
+fShclHeader "${SHCL1_REV}" "${SHCL1_SHA256}"
+fShclHeader "${SHCL2_REV}" "${SHCL2_SHA256}"
+fShclHeader "${SHCL3_REV}" "${SHCL3_SHA256}"
+bash "${here}/c-checks.bash" pick 1 "${work}"
 fEcho "OK: C builds only with the right SHCLW_SHCL for each shcl.h"
 for v in 1 2 3; do
-	make -s -C "${root}/source/c" SHCLW_SHCL="${v}" SHCL_DIR="${shclDirs[v]}" SHCL2_DIR="${shcl2Dir}" lint strict
-	fEcho "OK: clang-tidy, and gcc-15 at C17 (C over shcl ${v})"
+	bash "${here}/c-checks.bash" lint "${v}" "${work}"
+	fEcho "OK: clang-tidy, gcc-15 at C17, and static analyzers (C over shcl ${v})"
 done
 mapfile -t shellFiles < <(find "${root}/cicd" -type f \( -name '*.bash' -o -path '*/hooks/*' \) | sort)
 ((${#shellFiles[@]})) || fDie "shellcheck found no files"
@@ -220,11 +215,15 @@ fEcho "OK: Go tests"
 (cd "${root}/source/rust" && TMPDIR="${work}" cargo test --quiet -j "${cpuCap}" --all-features)
 fEcho "OK: Rust tests"
 for v in 1 2 3; do
-	TMPDIR="${work}" make -s -C "${root}/source/c" -j "${cpuCap}" SHCLW_SHCL="${v}" SHCL_DIR="${shclDirs[v]}" SHCL2_DIR="${shcl2Dir}" OUT="${work}/c${v}" test drive
-	fEcho "OK: C API tests over shcl ${v}, sanitized, plain, and as C++"
-	TMPDIR="${work}" python3 "${here}/c_cases.py" --drive "${work}/c${v}/shclw-drive" --version "${v}" --cases "${root}/tests/cases"
-	fEcho "OK: C shared cases over shcl ${v}"
+	bash "${here}/c-checks.bash" test "${v}" "${work}"
+	fEcho "OK: C API tests and shared cases over shcl ${v}, sanitized, plain, and as C++"
 done
+
+if ((doLeakcheck)); then
+	fSection "3/5  C slow leak checks"
+	bash "${here}/c-checks.bash" leakcheck 3 "${work}"
+	fEcho "OK: CodeQL, clang CTU, and heaptrack soak"
+fi
 
 #•••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••
 if ((doFuzz)); then

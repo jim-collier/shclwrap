@@ -344,6 +344,14 @@ static void test_walk(void) {
 		CHECK(nodes[i].line == lines[i] && shclw_int(d, nodes[i].path.p, 0) == values[i]);
 	}
 	free(nodes);
+	for (size_t pass = 0; pass < 16; pass++) {
+		nodes = shclw_each(d, "a.*.b", &n);
+		CHECK(nodes && n == 3);
+		free(nodes);
+		nodes = shclw_each(d, "missing.*.b", &n);
+		CHECK(nodes && n == 0);
+		free(nodes);
+	}
 	char *last = shclw_last(d, "a.*.b", NULL);
 	CHECK(last && shclw_int(d, last, 0) == 4);
 	free(last);

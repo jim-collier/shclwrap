@@ -429,7 +429,8 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 - Implement leak and static checks of the C code run as part of CI/CD
 	- ID: 2026101619042485
 	- Type: Feature
-	- Status: Queued
+	- Status: Waiting for testing
+	- Needs local test suite run?: Yes. Run `cicd/cicd.bash --gate` on the merged tree.
 	- Priority: Avg
 	- Opened: 20261016-190424
 	- Opened by: JC
@@ -455,7 +456,7 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 			- With `-Werror`, analyzer findings print as `error: ... [-Werror=analyzer-*]`, not `warning:`. A parser that only looks for warnings counts 0.
 			- heaptrack and ASan can't share a build. The soak test uses a plain build.
 			- ASan's allocator hides the heap from glibc's own stats, such as `mallinfo2`. A test that reads them should exit as skipped under ASan, not pass.
-	- Note: The Makefile's API tests and driver already build with ASan and UBSan, in the same build dir as the plain ones. There's no suppressions file, no analyzer, and no container. cicd runs its tools on the host today, checked against `cicd/tool-pins.env`.
+	- Note: Pinned C lint, sanitizer, and shared tests pass on shcl 1-3. The slow leakcheck passes CodeQL, CTU, all three failure probes, and heaptrack soak. The merged-tree `cicd/cicd.bash --gate` remains pending.
 
 - Implement leak and static checks of the C++ code run as part of CI/CD
 	- ID: 2026101707542552
