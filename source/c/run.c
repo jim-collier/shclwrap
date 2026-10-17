@@ -233,9 +233,9 @@ static bool split_fields(const char *line, size_t len, fields *f) {
 			return false;
 		}
 		size_t n = 0;
-		for (size_t j = start; j < i; j++) {
+		for (size_t j = start; j < i;) {
 			if (line[j] != '\\' || j + 1 == i) {
-				field[n++] = line[j];
+				field[n++] = line[j++];
 				continue;
 			}
 			const char *at = (const char *)memchr(escaped, line[j + 1], sizeof escaped - 1);
@@ -245,7 +245,7 @@ static bool split_fields(const char *line, size_t len, fields *f) {
 				field[n++] = '\\';
 				field[n++] = line[j + 1];
 			}
-			j++;
+			j += 2;
 		}
 		field[n] = '\0';
 		f->len[f->n] = n;

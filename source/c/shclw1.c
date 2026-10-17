@@ -238,11 +238,13 @@ void shclw_compact(shclw_doc *d) { (void)d; }
 // without them when an edit since made them impossible; shclw_write says why.
 static char *finish(shclw_doc *d, size_t *len) {
 	shcl_str s = shcl_to_canonical(d->d);
+	const char *text = s.p ? s.p : "";
+	size_t text_len = s.p ? s.n : 0;
 	char *out = NULL;
 	size_t n = 0;
-	shclw_kind k = shclw_i_finish_info(s.p ? s.p : "", s.n, d->info, d->stamp, &info_edit, NULL, &out, &n, NULL);
+	shclw_kind k = shclw_i_finish_info(text, text_len, d->info, d->stamp, &info_edit, NULL, &out, &n, NULL);
 	if (k != SHCLW_OK && k != SHCLW_ERR_NO_MEMORY) {
-		out = shclw_i_dup(s.p, s.n, &n);
+		out = shclw_i_dup(text, text_len, &n);
 	}
 	if (len) {
 		*len = out ? n : 0;
@@ -681,6 +683,11 @@ shclw_node *shclw_each(shclw_doc *d, const char *path, size_t *n) {
 	shclw_node *out = NULL;
 	if (nodes) {
 		for (size_t i = 0; i < count; i++) {
+			if (!paths[i]) {
+				free(nodes);
+				shclw_i_free_paths(paths, count);
+				return NULL;
+			}
 			size_t plen = strlen(paths[i]);
 			shcl_str *vals = NULL;
 			size_t nv = shcl_instances(d->d, paths[i], plen, &vals);

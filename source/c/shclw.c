@@ -90,7 +90,11 @@ char *shclw_i_dup(const char *p, size_t n, size_t *len) {
 	if (n == SIZE_MAX) {
 		return NULL;
 	}
+// The path list owns this buffer and drop_list frees it; GCC loses that transfer.
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wanalyzer-malloc-leak"
 	char *out = (char *)malloc(n + 1);
+#pragma GCC diagnostic pop
 	if (!out) {
 		return NULL;
 	}
@@ -157,7 +161,7 @@ double *shclw_i_copy_floats(const double *items, size_t n, size_t *count) {
 	if (n > SIZE_MAX / sizeof(double)) {
 		return NULL;
 	}
-	double *out = (double *)shclw_i_alloc(n * sizeof(double));
+	double *out = (double *)calloc(n ? n : 1, sizeof(double));
 	if (!out) {
 		return NULL;
 	}
@@ -233,7 +237,7 @@ void shclw_i_finite(shclw_got_float *g) {
 }
 
 void shclw_i_finite_all(shclw_got_floats *g) {
-	if (g->status != SHCLW_GOOD || !g->value) {
+	if (g->status != SHCLW_GOOD || !g->value || !g->n) {
 		return;
 	}
 	for (size_t i = 0; i < g->n; i++) {
@@ -313,6 +317,7 @@ void shclw_i_shortest(double f, bool single, char *digits, int *exp) {
 		}
 		for (int pass = 0; pass < 2; pass++) {
 			(void)snprintf(s, sizeof s, "%s%c.%se%d", signbit(f) ? "-" : "", digits[0], digits + 1, *exp);
+			// codeql[cpp/equality-on-floats] Exact equality proves the text round-trips to the same binary value.
 			if (single ? strtof(s, NULL) == (float)f : strtod(s, NULL) == f) {
 				return;
 			}
@@ -544,6 +549,7 @@ static bool same_strs(const shclw_string *a, const shclw_string *b, size_t n) {
 
 static bool same_floats(const double *a, const double *b, size_t n) {
 	for (size_t i = 0; i < n; i++) {
+		// codeql[cpp/equality-on-floats] Exact equality compares parsed numeric values without a tolerance.
 		if (a[i] != b[i]) {
 			return false;
 		}
@@ -568,6 +574,7 @@ shclw_kind shclw_i_verify_put(shclw_doc *d, const char *path, const shclw_i_valu
 	case SHCLW_I_FLOAT: {
 		shclw_got_float g = shclw_get_float(d, path);
 		st = g.status;
+		// codeql[cpp/equality-on-floats] Exact equality verifies the value read back after writing.
 		same = g.value == v->f;
 		break;
 	}
@@ -902,7 +909,7 @@ shclw_upgraded *shclw_i_upgraded(const char *text, size_t len, int64_t from, boo
 		return NULL;
 	}
 	shclw_diag *to = (shclw_diag *)(u + 1);
-	char *at = (char *)(to + n);
+	char *at = (char *)u + head;
 	for (size_t i = 0; i < n; i++) {
 		to[i] = ds[i];
 		memcpy(at, ds[i].code.p, ds[i].code.n + 1);
@@ -973,8 +980,10 @@ static void take(pathlist *l, char *p) {
 }
 
 static void drop_list(pathlist *l) {
-	for (size_t i = 0; i < l->n; i++) {
-		free(l->v[i]);
+	if (l->v) {
+		for (size_t i = 0; i < l->n; i++) {
+			free(l->v[i]);
+		}
 	}
 	free((void *)l->v);
 	l->v = NULL;
@@ -1307,6 +1316,10 @@ static pathlist expand(shclw_doc *d, shclw_i_children children, const char *path
 		if (s->sel == SEL_VALUE) {
 			// A value picks within each base, so it can stay as typed.
 			for (size_t b = 0; b < bases.n && !next.oom; b++) {
+				if (!bases.v) {
+					next.oom = true;
+					break;
+				}
 				char *p = join_path(bases.v[b], path + s->start, s->end - s->start);
 				if (p && shclw_count(d, p) == 0) {
 					free(p);
@@ -1319,6 +1332,10 @@ static pathlist expand(shclw_doc *d, shclw_i_children children, const char *path
 			continue;
 		}
 		for (size_t b = 0; b < bases.n && !next.oom; b++) {
+			if (!bases.v) {
+				next.oom = true;
+				break;
+			}
 			if (s->star) {
 				kids(d, children, bases.v[b], &next);
 				continue;
@@ -1361,9 +1378,12 @@ static pathlist expand(shclw_doc *d, shclw_i_children children, const char *path
 					free(next.v[k]);
 				}
 			}
-			if (s->index < next.n) {
+			if (next.v && s->index < next.n) {
 				next.v[0] = next.v[s->index];
 				next.n = 1;
+			} else if (s->index < next.n) {
+				next.n = 0;
+				next.oom = true;
 			} else {
 				next.n = 0;
 			}
@@ -1395,7 +1415,7 @@ char **shclw_i_each_paths(shclw_doc *d, shclw_i_children children, const char *p
 		return NULL;
 	}
 	if (!got.v) {
-		got.v = (char **)shclw_i_alloc(sizeof(char *));
+		got.v = (char **)calloc(1, sizeof(char *));
 	}
 	*n = got.v ? got.n : 0;
 	return got.v;

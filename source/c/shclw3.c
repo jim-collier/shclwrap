@@ -199,11 +199,13 @@ static const shclw_i_info_edit info_edit = {SHCL_GEN_BANNER, SHCL_FORMAT_MAJOR, 
 // s with the info block and the Format line as asked, or s as it is when an
 // edit since made them impossible; shclw_write says why.
 static char *finish(shclw_doc *d, shcl_str s, size_t *len) {
+	const char *text = s.p ? s.p : "";
+	size_t text_len = s.p ? s.n : 0;
 	char *out = NULL;
 	size_t n = 0;
-	shclw_kind k = shclw_i_finish_info(s.p ? s.p : "", s.n, d->info, d->stamp, &info_edit, NULL, &out, &n, NULL);
+	shclw_kind k = shclw_i_finish_info(text, text_len, d->info, d->stamp, &info_edit, NULL, &out, &n, NULL);
 	if (k != SHCLW_OK && k != SHCLW_ERR_NO_MEMORY) {
-		out = shclw_i_dup(s.p, s.n, &n);
+		out = shclw_i_dup(text, text_len, &n);
 	}
 	shcl_reads_release(d->d);
 	if (len) {
