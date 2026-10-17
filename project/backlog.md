@@ -54,6 +54,42 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- shcl's Go module path is still `.../v2`, and Go won't take a v3 tag on it. Go stays on a commit until that changes.
 		- Quillroute plans to have its release refuse a commit pin. The same check would fit here.
 
+- Implement leak and static checks of the C code run as part of CI/CD
+	- ID: 2026101619042485
+	- Type: Feature
+	- Status: Waiting for testing
+	- Needs local test suite run?: Yes. Run `cicd/cicd.bash --gate` on the merged tree.
+	- Priority: Avg
+	- Opened: 20261016-190424
+	- Opened by: JC
+	- Related IDs: 2026101512024159
+	- Requirements:
+		- Every full run builds the whole test suite with AddressSanitizer, LeakSanitizer, and UndefinedBehaviorSanitizer, in a build dir of its own.
+			- Any report fails the test that made it.
+			- The suppressions file lists third-party libraries only, matched by library name. A leak in our code is fixed. If the fix has to wait, it gets a backlog item, and the test that shows it turns leak detection off with that item's ID beside it.
+			- For a full leak stack, rerun the test with `ASAN_OPTIONS=fast_unwind_on_malloc=0`.
+			- On a GLib project, set `G_SLICE=always-malloc` and `G_DEBUG=gc-friendly`, or GLib hides blocks from the leak check.
+		- Every full run also runs gcc's `-fanalyzer` and the clang static analyzer over every first-party .c file. Vendored code is left out.
+			- Before the gate goes live, every existing finding is fixed, or suppressed at the line with a one-line reason. There's no baseline file.
+			- They move behind a flag only if a full run measures too slow.
+		- A `--leakcheck` flag adds the slow checks:
+			- CodeQL, from a pinned CLI run locally. No hosted service.
+			- The clang analyzer in cross-file (CTU) mode, so it follows calls across .c files.
+			- A heaptrack soak test. It loops through the program's main actions headless, and fails if the heap at round 2N is larger than at round N by more than a set margin. The heaptrack report is kept as a pipeline artifact.
+		- Coverity Scan and Infer aren't used. Coverity uploads the build to a third party.
+		- Every tool is pinned and runs in the build container or lint image, never installed on the host.
+		- Each new gate is watched to fail before it's trusted: plant a leak, a null dereference, and a loop that grows the heap, and see each one go red.
+		- Traps:
+			- `-fanalyzer` does nothing under `-fsyntax-only`. Compile with `-c -o /dev/null`.
+			- With `-Werror`, analyzer findings print as `error: ... [-Werror=analyzer-*]`, not `warning:`. A parser that only looks for warnings counts 0.
+			- heaptrack and ASan can't share a build. The soak test uses a plain build.
+			- ASan's allocator hides the heap from glibc's own stats, such as `mallinfo2`. A test that reads them should exit as skipped under ASan, not pass.
+	- Note: Pinned C lint, sanitizer, and shared tests pass on shcl 1-3. The slow leakcheck passes CodeQL, CTU, all three failure probes, and heaptrack soak. The merged-tree `cicd/cicd.bash --gate` remains pending.
+	- Branch: c-leaks
+	- Commit: 90b409c, dbc9f62
+	- Test case: C API tests and 33 shared cases with 345 operations, over shcl 1-3.
+	- Verified: `cicd/cicd.bash --gate --no-sync -y` passed locally and in the push hook. The pinned slow gate passed CodeQL, CTU, the leak, null, and heap-growth probes, and heaptrack soak on all 3 versions.
+
 - C wrapper
 	- ID: 2026101512024159
 	- Type: Feature
@@ -425,38 +461,6 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- A program that calls shcl directly uses the copy inside.
 		- README's C section says how.
 	- Note: Cobblevale will stop calling shcl directly once it's on the wrapper.
-
-- Implement leak and static checks of the C code run as part of CI/CD
-	- ID: 2026101619042485
-	- Type: Feature
-	- Status: Waiting for testing
-	- Needs local test suite run?: Yes. Run `cicd/cicd.bash --gate` on the merged tree.
-	- Priority: Avg
-	- Opened: 20261016-190424
-	- Opened by: JC
-	- Related IDs: 2026101512024159
-	- Requirements:
-		- Every full run builds the whole test suite with AddressSanitizer, LeakSanitizer, and UndefinedBehaviorSanitizer, in a build dir of its own.
-			- Any report fails the test that made it.
-			- The suppressions file lists third-party libraries only, matched by library name. A leak in our code is fixed. If the fix has to wait, it gets a backlog item, and the test that shows it turns leak detection off with that item's ID beside it.
-			- For a full leak stack, rerun the test with `ASAN_OPTIONS=fast_unwind_on_malloc=0`.
-			- On a GLib project, set `G_SLICE=always-malloc` and `G_DEBUG=gc-friendly`, or GLib hides blocks from the leak check.
-		- Every full run also runs gcc's `-fanalyzer` and the clang static analyzer over every first-party .c file. Vendored code is left out.
-			- Before the gate goes live, every existing finding is fixed, or suppressed at the line with a one-line reason. There's no baseline file.
-			- They move behind a flag only if a full run measures too slow.
-		- A `--leakcheck` flag adds the slow checks:
-			- CodeQL, from a pinned CLI run locally. No hosted service.
-			- The clang analyzer in cross-file (CTU) mode, so it follows calls across .c files.
-			- A heaptrack soak test. It loops through the program's main actions headless, and fails if the heap at round 2N is larger than at round N by more than a set margin. The heaptrack report is kept as a pipeline artifact.
-		- Coverity Scan and Infer aren't used. Coverity uploads the build to a third party.
-		- Every tool is pinned and runs in the build container or lint image, never installed on the host.
-		- Each new gate is watched to fail before it's trusted: plant a leak, a null dereference, and a loop that grows the heap, and see each one go red.
-		- Traps:
-			- `-fanalyzer` does nothing under `-fsyntax-only`. Compile with `-c -o /dev/null`.
-			- With `-Werror`, analyzer findings print as `error: ... [-Werror=analyzer-*]`, not `warning:`. A parser that only looks for warnings counts 0.
-			- heaptrack and ASan can't share a build. The soak test uses a plain build.
-			- ASan's allocator hides the heap from glibc's own stats, such as `mallinfo2`. A test that reads them should exit as skipped under ASan, not pass.
-	- Note: Pinned C lint, sanitizer, and shared tests pass on shcl 1-3. The slow leakcheck passes CodeQL, CTU, all three failure probes, and heaptrack soak. The merged-tree `cicd/cicd.bash --gate` remains pending.
 
 - Implement leak and static checks of the C++ code run as part of CI/CD
 	- ID: 2026101707542552
