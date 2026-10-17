@@ -25,422 +25,6 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 
 ## Issues
 
-- Upgrade passes along a conversion that stopped partway
-	- ID: 2026101513330001
-	- Type: Bug
-	- Status: Waiting on signoff
-	- Severity: High
-	- Opened: 20261015-133300
-	- Opened by: JC
-	- Related IDs: 2026101513330002
-	- Steps to reproduce:
-		- Upgrade a 2.x file that ends inside a raw block that never closes.
-	- Incorrect behavior: The text comes back unconverted and with no Format line. Nothing is counted as lost, and there's no error.
-	- Expected behavior: An error, and the file left alone.
-	- Note: Radixmill refuses any result that doesn't read as the current format. Wovenshell runs shcl's stamped conversion a second time to find out.
-	- Reproduced: 20261015, on 3.0 in Go and Rust, with `from` 0 and 2. The text did come back converted. shcl closed the block at the end of the file and added the info block, so every line after the open fence stays raw text for good. Nothing lost and no error, as the item says. The unconverted text with no Format line is what shcl's own `Migrate` gives.
-	- Actual cause:
-		- shcl's `Upgrade` writes a raw block that never closes as closed, and says nothing. Its `migrate` command refuses the same file. The wrapper passed shcl's answer on.
-	- Decisions:
-		- Refused, as the item asks. The rule is wider than raw blocks: any file taken as 2.x that shcl 2.0 reports an error on is refused, which covers this and 2026101513330002. design.md has it under Decisions.
-	- Actual fix: On 3.0, `Upgrade` and `UpgradeFile` parse a file they take as 2.x with shcl 2.0 first. Any error there is `Refused`, with 2.0's errors in `Diags`. `UpgradeFile` then writes nothing and makes no backup. The 3.0 adapter builds 2.0 in now, and the Rust `shcl3` feature turns on `shcl2`.
-	- Note: shcl friction, a silent wrong answer. `a: 1`, then `b: ```` and `raw`, with no closing fence. `shcl upgrade --write` prints E005 and writes a fresh file with the block closed at the end, at exit 0. `migrate` refuses the same file at exit 7. Expected: `upgrade` and `Upgrade` refuse it too. Checked on shcl's current dev; the library hasn't changed since the pin.
-	- Verified: the gate and a 20 second fuzz, Go against Rust, with no difference.
-	- Branch: upgrade
-	- Commit: 18041cf
-	- Test case: tests/cases/013-upgrade-raw, Go `TestUpgradeRefusesOldErrors`, Rust `upgrade_refuses_old_errors`. They failed before the fix in Go and Rust, and pass after.
-	- Swept: `Upgrade` and `UpgradeFile` in Go `shclw3` and Rust `v3`. The 1.2 and 2.0 adapters convert nothing. 17 files ending in an open block, with `from` 0 and 2, were all refused or `Ambiguous`, the same in Go and Rust.
-	- Acceptance signoff: Waiting. The rule is wider than the item, and the 3.0 adapter now builds shcl 2.0 in.
-
-- Upgrade passes along lines the old shcl refused
-	- ID: 2026101513330002
-	- Type: Bug
-	- Status: Waiting on signoff
-	- Severity: High
-	- Opened: 20261015-133300
-	- Opened by: JC
-	- Related IDs: 2026101513330001
-	- Steps to reproduce:
-		- Upgrade `x: [ab]` as a 2.x file.
-	- Incorrect behavior: It comes back as `x: ab`, with nothing lost. 1.2 and 2.0 refused that line, so the old program never read it.
-	- Expected behavior: The line counts as lost, or the upgrade refuses.
-	- Note: Radixmill refuses a file whose original text has any E019 line. shcl means it to work this way.
-	- Reproduced: 20261015, on 3.0 in Go and Rust, with `from` 2. One detail differs. 1.2 and 2.0 report the line as E015, "missing colon; repaired as an empty value", and still read `x` as `ab`, so the old program read it with an error, and a Strict load failed. E019 is a 3.0 code. A line 2.0 skipped outright, like `z: [ab] c`, came through as written with nothing lost too.
-	- Actual cause:
-		- shcl's conversion reads `x: [ab]` as the 2.x `name:[disc]` form, the same way 2.0 repaired it, and doesn't look at whether 2.x reported an error on the line. Lines 2.x skipped come through as written.
-	- Decisions:
-		- The upgrade refuses, rather than count the line in `Unsure`. A count is easy to skip, and the upgraded file loads clean, so nothing would point at the line again.
-		- Any error shcl 2.0 reports counts, whatever its code, since E019 doesn't exist before 3.0. The same rule covers 2026101513330001. design.md has it under Decisions.
-		- It applies to a file the upgrade takes as 2.x: one shcl converts, or one passed with `from` 2 that doesn't name format 3. A file that loads clean with `from` 0 is still left alone with no check.
-	- Actual fix: The same change as 2026101513330001. On 3.0, a file taken as 2.x that shcl 2.0 reports errors on is `Refused`, with 2.0's errors in `Diags`, and `UpgradeFile` writes nothing.
-	- Note: shcl friction, a silent wrong answer. `x: [a, b]` upgraded with fromV2 comes back current with nothing lost. 2.0 read it as one string, `a, b`, and 3.0 reads 2 items. shcl's conversion counts it lost, but `Upgrade` drops that count when the file loads clean and the conversion leaves its text alone. Expected: Lost 1. The wrapper now refuses this file anyway, since 2.0 reports E015 on it.
-	- Verified: the gate and a 20 second fuzz, Go against Rust, with no difference.
-	- Branch: upgrade
-	- Commit: 18041cf
-	- Test case: tests/cases/014-upgrade-errors, Go `TestUpgradeRefusesOldErrors`, Rust `upgrade_refuses_old_errors`. They failed before the fix in Go and Rust, and pass after.
-	- Swept: `Upgrade` and `UpgradeFile` in Go `shclw3` and Rust `v3`. The 1.2 and 2.0 adapters convert nothing. A format 3 file passed with `from` 2 that 2.0 has errors on, such as `tags: [a, b]`, is still left alone.
-	- Acceptance signoff: Waiting. Refusing was picked over counting, and the item's E019 premise didn't hold as written.
-
-- Go and Rust wrappers over shcl 1.2, 2.0, and 3.0
-	- ID: 2026101512024150
-	- Type: Feature
-	- Status: Waiting on signoff
-	- Priority: High
-	- Opened: 2026-10-15
-	- Opened by: JC
-	- Requirements:
-		- Own small API, with ideas from shcl 4.
-		- Every shcl version, with the version picked in one place.
-		- A way to reach the rest of shcl.
-		- A text command for anything the API doesn't bind.
-	- Progress log:
-		- 20261015: built, with `Inner()` for the rest of shcl and `Run` for ops scripts. The calls are listed in design.md.
-		- 20261015: design.md lists where shcl versions behave differently and what the wrapper does instead.
-	- Branch: go-rust
-	- Test case: tests/cases 001 to 010, Go `api_test.go` and `inner_test.go`, Rust `tests/api.rs`
-
-- CICD pipeline with shared cases and fuzzing
-	- ID: 2026101512024152
-	- Type: Feature
-	- Status: Waiting on signoff
-	- Priority: High
-	- Opened: 2026-10-15
-	- Opened by: JC
-	- Requirements:
-		- Fuzz and parity test every binding.
-		- A regression test for every feature and fix.
-	- Progress log:
-		- 20261015: `cicd/cicd.bash` runs format, lint, tests, and fuzzing. `--gate` is the pre-push hook.
-		- 20261015: Go and Rust read the same want files, so they can't drift.
-		- 20261015: 15,000 fuzz cases in 90 seconds, Go against Rust, with no difference left.
-	- Branch: go-rust
-
-- UpgradeFile puts the old file back when the write fails
-	- ID: 2026101513330005
-	- Type: Feature
-	- Status: Waiting on signoff
-	- Priority: High
-	- Opened: 20261015-133300
-	- Opened by: JC
-	- Requirements:
-		- The original survives any failure.
-		- Before replacing the file, check that it hasn't changed since it was read.
-	- Note: Radixmill, Quillroute, Mossrealm, and Cobblevale each do this themselves. Check what shcl's own UpgradeFile already does first.
-	- Progress log:
-		- 20261015: shcl's own UpgradeFile, at the pinned 3.0 commit, already writes through a temp file and a rename, makes the backup with an exclusive create, checks once that the file hasn't changed, before the backup, and removes the backup when a failed write left the original. It doesn't check again before the replace, or put the original back when a failed replace leaves nothing at the path.
-		- 20261015: the wrapper read the file for its 2.0 check, then shcl read it again to convert it. An edit in between was converted with no check. Reproduced in Go and Rust with a file flipping between a clean 2.x text and one 2.0 has errors on: the refused text was converted within a few rounds.
-	- Decisions:
-		- The 3.0 `UpgradeFile` reads once and does its own backup and write with shcl's parts, in place of calling shcl's `UpgradeFile`.
-		- A changed file is `ErrIO`, as shcl reports it, and not a new error kind. design.md has both under Decisions.
-	- Done: The file is read once, and the 2.0 check, the conversion, and the backup use that text. It's checked for changes before the backup and again before the write. A failed write leaves the original, or moves the backup back when nothing is left at the path, and the backup is removed unless it's all there is. A newer file is now `ErrTooNew`, where it used to pass as current, and a path that isn't a regular file is `ErrIO`. The check and restore are a shared helper that 2026101513330017 and 2026101513330019 can use.
-	- Verified: the gate, and a 20 second fuzz with Go against Rust and no difference. With all cores loaded, Go's edit-while-upgrading test passed 3 times and Rust's once.
-	- Branch: upgrade-file
-	- Commit: efcf6b5
-	- Test case: Go `TestUpgradeFileEditedMeanwhile` and `TestReplaceRead`, Rust `upgrade_file_edited_meanwhile` and `replace_read_*` in tests/files.rs. The edit-while-upgrading test failed before the fix in Go and Rust, and passes after.
-	- Swept: `UpgradeFile` in Go `shclw1` to `shclw3` and Rust `v1` to `v3`. 1.2 and 2.0 read once and never write. No other call reads a file and then writes it.
-	- Acceptance signoff: Waiting. It changes what an upgrade writes and when it gives up, and a changed file could have its own error kind instead of `ErrIO`.
-
-- Say when Write rewrote the whole file
-	- ID: 2026101513330003
-	- Type: Feature
-	- Status: Waiting on signoff
-	- Priority: High
-	- Opened: 20261015-133300
-	- Opened by: JC
-	- Requirements:
-		- Write, or a call made before it, says when 3.0 couldn't keep the file's own lines and wrote the canonical form instead.
-	- Note: Quillroute compares the canonical text with what it read, and adds an "also" line to its plan. Wovenshell checks renames against the canonical form, since the fallback moves comments.
-	- Progress log:
-		- 20261015: at the pinned 3.0 commit, the save that keeps lines falls back to canonical form when its text wouldn't reload as the edited document, when an edit took a kept line it shouldn't have, or when the document wasn't loaded keeping lines or took a merge. shcl's design.md names a child added under a flat dotted line, a value changed where a selector elsewhere names it, and any edit to a file whose canonical order isn't its own.
-		- 20261015: 3.0 says so in both bindings. `ToTextKeepLines` and `SaveFileKeepLines` return a kept flag, which the wrapper dropped. 1.2 and 2.0 have no save that keeps lines, and always save canonical form.
-	- Decisions:
-		- `Rewrites()` is a call made before `Write`, beside `Text` and `Canonical`, rather than a second result from `Write`.
-		- 1.2 and 2.0 say true when the loaded text wasn't canonical, since that's when their save changes the file's lines. A canonical file says false, as 3.0 counts it.
-		- A `New` document says false. The 3.0 `New` now keeps lines from an empty text, which is the same document shcl's own `New` makes.
-		- design.md has these under Decisions, and the call under Loading and saving.
-	- Done: `Rewrites()` in Go and `rewrites()` in Rust, on all 3 versions, and a `rewrites` op for ops scripts.
-	- Verified: the gate, and a 20 second fuzz with Go against Rust and no difference. Before the change the 2 new cases failed in Go and Rust, with no want files and the op unknown. With the 3.0 `New` put back as it was, the new API test failed in Go and Rust.
-	- Branch: rewrote
-	- Commit: 4537b3c
-	- Test case: tests/cases 017-rewrites and 018-rewrites-canonical, Go `TestRewritesNew`, Rust `rewrites_new` in tests/api.rs.
-	- Swept: `Write`, `Text`, and `New` in Go `shclw1` to `shclw3` and Rust `v1` to `v3`, both ops runners, and fuzz.py's op list. `UpgradeFile` writes text it made itself, not a document, so it has no fallback to report.
-
-- Pick the first or last of a repeated key
-	- ID: 2026101513330004
-	- Type: Feature
-	- Status: Waiting on signoff
-	- Priority: High
-	- Opened: 20261015-133300
-	- Opened by: JC
-	- Related IDs: 2026101513330036, 2026101513330034, 2026101515055152, 2026101515055253
-	- Requirements:
-		- A read option that takes the first or the last instance, in place of `Multiple`.
-		- A way to list the other instances' lines, for a "set more than once" warning.
-	- Note: Tallowbase takes the first. Quillroute takes the last and lists the rest as ignored. Folderkite falls back to the default with a warning. Wovenshell, Radixmill, and Tickerwren report the key as set twice.
-	- Progress log:
-		- 20261015: repeated keys checked on 1.2, 2.0, and 3.0 first. `Each` order, each instance's line, blocks merged by name and value, and the lines after a put or a remove came out the same on every version. `Each` order isn't file order for a block written in parts, so `tv.f` can list lines 8, 12, 10.
-		- 20261015: 2 bugs found on the way, logged as 2026101515055152 and 2026101515055253.
-	- Decisions:
-		- `First(path)` and `Last(path)` narrow a path to one instance, so every typed read in both tiers takes it, and so do the edits. Go `d.Int(d.Last("port"), 8080)`, Rust `d.int(&d.last("port"), 8080)`.
-		- `Lines(path)` lists every instance's line in file order, so the others are all but the first or the last. A plain read still says `Multiple`.
-		- First and last go by line, not `Each` order. An instance a put made has no line, and counts as after the rest.
-		- design.md has these under Reads, Walking a document, and Decisions.
-	- Done: `First`, `Last`, and `Lines` in Go and Rust on all 3 versions, `first`, `last`, and `lines` ops, and a fuzz check that a `first` or `last` read is one instance, on the first or last of the path's lines.
-	- Verified: the gate and a 20 second fuzz pass, Go against Rust, with no difference. With the sort by line taken out, the new case failed in Go and Rust, and so did both API tests. With `Last` giving back the path, or the first instance, the fuzz check failed.
-	- Branch: first-last
-	- Commit: 08e831b
-	- Test case: tests/cases/019-first-last, Go `TestFirstLast`, Rust `first_last` in tests/api.rs, and the fuzz check.
-	- Swept: Go `shclw1` to `shclw3` each have the 3 calls, held to it by the `shclw.Doc` interface. Rust has them once, on the `ShclDoc` trait. Both ops runners and fuzz.py's op list have the new ops.
-	- Acceptance signoff: Waiting. It adds API, and the names and the order by line are a choice.
-
-- Info block and Format line
-	- ID: 2026101512024154
-	- Type: Feature
-	- Status: Waiting on signoff
-	- Priority: High
-	- Opened: 2026-10-15
-	- Opened by: JC
-	- Related IDs: 2026101513330010, 2026101513330011
-	- Requirements:
-		- Write and remove shcl's info block, and stamp the Format line.
-	- Notes:
-		- Quillroute, Radixmill, Folderkite, Tickerwren, and Mossrealm each do this by hand today.
-		- 1.2 and 2.0 have no info block, so the wrapper would write it there itself.
-		- Cobblevale wants a way to stamp the Format line without the banner. Its new files had none, and read back like 2.x files.
-		- shcl's own banner setter misses a block that has a line after it, and adds a second one. Folderkite strips the old block itself.
-		- Banners written during the 3.0 betas link a tag that doesn't exist. Wovenshell replaces 4 old spellings at launch.
-		- Radixmill and Cobblevale add the Format line to their test files by hand.
-	- Progress log:
-		- 20261015: `InfoBlock(on)` and `StampFormat()` on every version, in Go and Rust, with the ops `info on|off` and `stamp`. design.md has the rules, under "Format and upgrade".
-		- The banner setter's miss is a block above the first field. shcl's own doc comment says it leaves that one on purpose.
-	- Decisions:
-		- The block names the bound shcl's format, so 1.2 writes format 1 and 2.0 writes format 2. Format 3 everywhere would make 3.0's upgrade skip a file that was never converted. The rest of the block is the same on every version, but for the Syntax link.
-		- 1.2 and 2.0 write the same `##` block 3.0 does, linking their own release's spec. Their own `init` block has no Format line.
-		- Both calls change what the save writes, not the document. 1.2 and 2.0 have no call that edits the comments at the end of a file.
-		- `Rewrites` says the same after either call.
-		- Every old spelling comes off, found by its title line. So does 2.x's `#` block, on every version.
-		- A file naming another format is refused, `ErrRefused` for an older one and `ErrTooNew` for a newer one. On 2.0 that leaves a format 1 file with no way forward, since 2.0 has no upgrade for it.
-		- A file ending in a raw block that never closes is refused, since the block would take in the new lines.
-		- A lone stamp goes right under the last line, where shcl's `Migrate` puts it.
-	- Verified: the gate, and a 20 second fuzz with 10 seconds of Go fuzzing, with no failures. Before the change the new cases printed `error unknownop`, and 3.0 kept the old block above the first field. Each new check failed with its rule taken out of the code.
-	- Branch: info-block
-	- Commit: 6e4627c
-	- Test case: tests/cases/021 to 027. Go `TestInfoTextIsGenBanner`, `TestInfoOldSpellings`, `TestInfoMatchesSetBanner`, and `TestInfoWriteRefused`. Rust `info_text_is_gen_banner`, `info_old_spellings`, and `info_write_refused`. The fuzz info check.
-	- Swept: `Text`, `Canonical`, `Write`, and `Rewrites` in Go `shclw1` to `shclw3` and Rust `v1` to `v3`, the `Doc` interface and `ShclDoc` trait, both ops runners, and design.md's API, ops, and "evens out" sections.
-	- Note: 2026101513330010 and 2026101513330011 can reuse the block finder in `shclw/info.go` and `src/info.rs`, which already finds 2.x's `#` block.
-	- Acceptance signoff: Waiting. New API that changes what a program writes to disk.
-
-- C: format, upgrade, and the info block on shcl 3.0
-	- ID: 2026101516111033
-	- Type: Feature
-	- Status: Waiting on signoff
-	- Priority: High
-	- Opened: 20261015-161111
-	- Opened by: JC
-	- Parent ID: 2026101512024159
-	- Prereq IDs: 2026101516110996
-	- Requirements:
-		- FormatOf, Upgrade, UpgradeFile, InfoBlock, StampFormat, Rewrites, and Check.
-		- The upgrade refuses a 2.x file that shcl 2.0 has errors on, as in Go and Rust, if 2.0 can be built in beside 3.0.
-	- Progress log:
-		- 20261015: `shclw.h` has `shclw_format_of`, `shclw_upgrade`, `shclw_upgrade_file`, `shclw_info_block`, `shclw_stamp_format`, `shclw_rewrites`, `shclw_check`, and `shclw_drop_declared`. The info block code is a port of Go's, in `info.c`, for every version. The checked replace is in `shclw.c`.
-		- All 33 shared cases run whole in C on 3.0 now. `run.c` has no "not yet" ops left, so that went, and `c_cases.py` compares every op.
-		- shcl 2.0 and 3.0 fit in one program with no edit to shcl. Every external symbol 2.0 has is a public `shcl_` call, so 2.0's `shcl.h` goes in 2 files of its own with each call renamed by a macro. A build check fails on any name left as it was. Nothing here waits on a person.
-	- Decisions:
-		- The upgrade's result is one block, `shclw_upgraded`, freed with `free()`, and 2.0's errors on a refused file are in it. Go and Rust put them on the error, but C's error is a fixed struct nobody frees.
-		- `shclw_drop_declared(schema, d)` drops hints from d's own diagnostics. shcl's C binding has no form that takes a list.
-		- A 3.0 C program needs 2.0's `shcl.h` to build, pinned by commit like 3.0's. 2.0 ends the program when memory runs out.
-	- Note: Go's `FormatIn`, which 1.2 and 2.0 use, isn't in C yet. That's for 2026101516111070, with the rest of those 2 versions.
-	- Verified: the gate passes, with all 33 shared cases whole and 345 ops compared in C. Each new check failed with its rule taken out: the 2.0 refusal, the `From` fix, the restore after a failed replace, the hint drop, the raw body check in the info block, a second read of the file during the upgrade, and a 2.0 name left unrenamed.
-	- Branch: c-format
-	- Commit: c71ca83
-	- Test case: `test_replace_read`, `test_upgrade`, `test_upgrade_file`, `test_upgrade_raced`, `test_info`, `test_rewrites`, and `test_check` in `source/c/tests/api_test.c`, the Makefile's `names` check, and the shared cases through `cicd/c_cases.py`.
-	- Swept: every op in design.md's ops table has a C function in `run.c`. Every C call that hands back an upgrade sets it on a failure too, as Go does. design.md's C notes on layout, sharing the code, and the ops runner.
-	- Acceptance signoff: Waiting. New API, and the 3 decisions above are C's own.
-
-- C: shcl 1.2 and 2.0
-	- ID: 2026101516111070
-	- Type: Feature
-	- Status: Waiting on signoff
-	- Needs external testing: C hasn't run on Windows. 1.2's save there has only been compiled. That's for 2026101512024174 with the rest.
-	- Priority: High
-	- Opened: 20261015-161111
-	- Opened by: JC
-	- Parent ID: 2026101512024159
-	- Prereq IDs: 2026101516111033
-	- Related IDs: 2026101518385490, 2026101513330048
-	- Requirements:
-		- The same header over 1.2 and 2.0, told apart by what each `shcl.h` declares.
-		- Every shared case passes on all 3 versions.
-	- Progress log:
-		- 20261015: `shclw1.c` and `shclw2.c` are ports of Go's `shclw1` and `shclw2`, each a copy of the other with its differences. Go's `OneTarget`, `EachPaths`, and `FormatIn` are in the shared `shclw.c` and `info.c`. 1.2's save is a write of the wrapper's own, as in Go and Rust.
-		- All 33 shared cases run whole on all 3 versions. The API tests run on each, sanitized, plain, and as C++, with the 3.0-only ones split out. cicd lints, builds, and tests each version.
-		- On 1.2 and 2.0, reads, text, and edits keep their memory until the document is freed. Those versions have no call that gives it back. 200,000 reads kept about 67 MB. design.md says so.
-		- 20261016: JC OK'd `SHCLW_SHCL`. README.md has a C section now that says how to set it, checked by building its commands and example on all 3 versions.
-	- Decisions:
-		- A program on 1.2 or 2.0 sets `SHCLW_SHCL` to 1 or 2, since their `shcl.h` files define the same macros. With none the build stops and says to set it. A wrong one fails to compile, on a call only 2.0 declares. 3.0 needs none. That settles the open question in design.md, which moved to Decisions.
-		- 2.0's save goes through shcl's own atomic write, as Go's does. So `shclw2.c` won't build with `SHCL_NO_FILE_IO`, and says why.
-		- A write into a folder that doesn't exist is `IO` on 1.2 and 2.0 and `NotFound` on 3.0, as in Go and Rust. Logged as 2026101518385490.
-		- On 1.2 and 2.0 a name holding a NUL can't go in a C path, since those versions quote the NUL as it is. An edit through that path is refused.
-	- Note: 1.2's write in `shclw1.c` is the code 2026101513330048 would need for a build without shcl's file calls.
-	- Verified:
-		- The gate passes.
-		- Go and C gave the same output on 4,435 fuzz cases across the 3 versions, run by hand. Wiring C into the fuzzer is 2026101516111107.
-		- Each check failed with its rule taken out: the several-instances check, Format lines in a raw body, the 1.2 block's link, 2.0's lost-lines refusal, wildcard indexes in Each, Names over several instances, the float rule, Rewrites, 2.0's refusal to upgrade format 1, and 1.2's save keeping the mode and refusing what isn't a file.
-		- Each `shcl.h` with each `SHCLW_SHCL`, or none, compiles only with the right one, in C and C++.
-	- Note: no test reaches the temp file cleanup after a failed 1.2 save, since every failure that can be set up comes before the temp file exists.
-	- Branch: c-old
-	- Commit: c003a9f
-	- Test case: `make pick`, `test_save`, and the 1.2 and 2.0 sides of `test_errors`, `test_upgrade`, `test_info`, and `test_rewrites` in `source/c/tests/api_test.c`. The shared cases on all 3 versions through `cicd/c_cases.py`.
-	- Swept: every row of design.md's "evens out" table has a case or an API test that runs on C 1.2 and 2.0, but the 2.x upgrade refusal, which is 3.0's alone. Every call `shclw3.c` defines is in `shclw1.c` and `shclw2.c`, which each link checks. The notes in `shclw.h` and design.md that hold only on 3.0 now say so.
-	- Acceptance signoff: Waiting. Leaving the 1.2 and 2.0 memory growth as a documented limit was a choice.
-
-- PutSyntax doesn't read its value back
-	- ID: 2026101513330007
-	- Type: Bug
-	- Status: Waiting on signoff
-	- Severity: Avg
-	- Opened: 20261015-133300
-	- Opened by: JC
-	- Steps to reproduce:
-		- PutSyntax `a # b` on a path.
-	- Incorrect behavior: It says ok, and the value reads back as `a`.
-	- Expected behavior: `NoReadBack`, the same as Put.
-	- Note: Cobblevale reads its literal back and falls back to a plain string. Quillroute does the same for its single-quoted paths.
-	- Reproduced: 20261015, on 1.2, 2.0, and 3.0, in Go and Rust. `x#y` loses `#y` the same way.
-	- Actual cause:
-		- shcl reads the text as a value plus a trailing comment and drops the comment. The wrapper never read PutSyntax back.
-		- On 1.2 and 2.0, PutSyntax on a path with several instances also set the first one and said ok, where Put refuses.
-	- Actual fix: PutSyntax now sets the text in a new document and parses `k: text` in another, and the two have to match. The value at the path has to read the same as the parsed one. Otherwise it's `NoReadBack`, with the edit left in place. On 1.2 and 2.0 a path with several instances is `BadPath`, as with Put.
-	- Progress log:
-		- 20261015: the check also catches `[a, b]` on 1.2 and 2.0, which sets `"[a", "b]"` while a file line `k: [a, b]` reads another way. design.md lists both.
-	- Branch: floats
-	- Commit: 9b835f5
-	- Test case: tests/cases/012-syntax. It failed before the fix in Go and Rust on every version, and passes after.
-	- Swept: PutSyntax in Go `shclw1` to `shclw3` and Rust `v1` to `v3`. Comment has the same several-instances gap on 1.2 and 2.0, logged as 2026101514071600.
-	- Acceptance signoff: Waiting. The check is wider than the item asked, since it also flags 1.2 and 2.0 text a file reads another way.
-
-- Float reads take infinity as good
-	- ID: 2026101513330008
-	- Type: Bug
-	- Status: Waiting on signoff
-	- Severity: Avg
-	- Opened: 20261015-133300
-	- Opened by: JC
-	- Steps to reproduce:
-		- Read `x: 1e400` as a float.
-	- Incorrect behavior: `Good`, with infinity as the value.
-	- Expected behavior: `BadType`.
-	- Note: Wovenshell checks every float it reads. Cobblevale found a `NaN` put on 1.2 that reads back as `BadType`.
-	- Reproduced: 20261015, on 1.2 and 2.0, in Go and Rust. 3.0 already says `BadType`, and the fallback reads gave infinity too.
-	- Actual cause:
-		- shcl 1.2 and 2.0 read a number too big for a float as infinity. A put of infinity or NaN wrote it, then read it back as `BadType` and said `NoReadBack`, with the value left in the file.
-		- The ops scripts read `1e400` as infinity in Rust and as a bad value in Go.
-	- Decisions:
-		- A put of infinity or NaN is refused with `BadValue` in every version and changes nothing, as 3.0 does. design.md has it under Decisions.
-		- An array with a bad item reads as `BadType` and keeps its length, with 0 for the bad items, as 3.0 does.
-	- Actual fix: Float reads that find infinity or NaN say `BadType`, and the fallback reads give the fallback. Puts refuse them up front. Ops scripts take `nan`, `inf`, and `-inf`, and read a number too big as infinity in both languages.
-	- Progress log:
-		- 20261015: the fuzzer now makes these values and checks that no `Good` float read gives one.
-	- Branch: floats
-	- Commit: 9b835f5
-	- Test case: tests/cases/011-floats, plus the NaN and infinity half of Go `TestPutFloat32` and Rust `put_f32`. They failed before the fix on 1.2 and 2.0 in both languages, and pass after. On 3.0 only Go's 011 failed, on the ops parser, since 3.0 already refused these.
-	- Swept: GetFloat, GetFloats, Float, and Floats in Go `shclw1` to `shclw3` and Rust `v1` to `v3`. Put for float, float32, and float slices in both. Ints have no such value.
-	- Acceptance signoff: Waiting. Refusing a NaN or infinity put was a choice.
-
-- Put under a key with several instances writes into the first one on 1.2 and 2.0
-	- ID: 2026101515055152
-	- Type: Bug
-	- Status: Waiting on signoff
-	- Severity: Avg
-	- Opened: 20261015-150551
-	- Opened by: JC
-	- Related IDs: 2026101514071600
-	- Steps to reproduce:
-		- Put `tv.g` in a file with `tv: one` and `tv: two`, on 1.2 or 2.0.
-	- Incorrect behavior: It says ok and adds `g` under the first `tv`.
-	- Expected behavior: `BadPath`, as 3.0 says, and nothing changes.
-	- Reproduced: 20261015, on 1.2 and 2.0 in Go and on 1.2 in Rust. 3.0 says `BadPath`.
-	- Possible cause: The 1.2 and 2.0 adapters count the instances of the whole path, and `tv.g` has none yet. 3.0 refuses a path that matches more than one node at any step.
-	- Actual cause: The several-instances check counted the whole path only. 3.0 checks each step that exists, and refuses at the first one with several, even when only one of them has the rest, as with `tv.g` where only the first `tv` has a `g`. Put, PutSyntax, and Comment each called the check on their own, which is how Comment missed it before (2026101514071600).
-	- Progress log:
-		- 20261015: checked 3.0 for each edit, on inner and last steps, with the rest there and not. Put, PutSyntax, and Comment refuse at any step with several, and a selector that picks one there is fine. Remove takes every instance on every version.
-		- 20261015: this is the 4th item today on this one class, after 2026101513330007 and 2026101514071600.
-	- Decisions:
-		- One check in shared code counts each step of the path, and the 1.2 and 2.0 adapters reach shcl's setters only through one `set` call that runs it. A test reads the method list off the Go `Doc` interface and fails on any method not sorted as a read or an edit, and walks every edit over inner and last steps on every version.
-		- Remove still takes every instance, even under a step that repeats. It says how many went, so nothing is picked for the caller.
-		- `Each` narrows every step that repeats, so its paths take edits. `First` and `Last` give that path for a single instance too, since the path as typed can repeat at an inner step and be refused.
-		- design.md has these under Decisions, and the table row covers inner steps.
-	- Actual fix: Put, PutSyntax, and Comment on 1.2 and 2.0 go through one check that refuses with `BadPath` when any step has several instances, and change nothing. `Each`, `First`, and `Last` give paths with an index at each step that repeats, so they still take edits.
-	- Verified: the gate, and a 20 second fuzz with Go against Rust and no difference. Before the fix, the new case failed on all 3 versions in Go and Rust, the Go and Rust edit tests failed, and the new fuzz check failed. They all pass after.
-	- Branch: several
-	- Commit: 1c33f90
-	- Test case: tests/cases/020-several, Go `TestDocMethodsSorted`, `TestEditsRefuseSeveral`, `TestEditsOnOneInstance`, and `TestRemoveTakesAll` in edits_test.go, Rust `several` in tests/api.rs, and the fuzz check that an edit saying ok found one instance at every step.
-	- Sweep: Put, PutSyntax, and Comment in Go `shclw1` and `shclw2`, and Rust `v1` and `v2`.
-	- Swept: Put, PutSyntax, Comment, and Remove in Go `shclw1` to `shclw3` and Rust `v1` to `v3`, each on the first, an inner, and the last step of a path, with the rest there and not there. 3.0 needs no check of its own, since shcl 3.0 refuses these itself, and the test walks it too. Remove takes every instance on every version, as decided. No other `Doc` or `ShclDoc` method edits the document. `Write` and `UpgradeFile` take a file path, not a document path.
-	- Acceptance signoff: Waiting. `First` and `Last` now give a narrowed path for a single instance, which changes what design.md said.
-
-- Each on a wildcard path gives paths that don't read one instance
-	- ID: 2026101515055253
-	- Type: Bug
-	- Status: Waiting on signoff
-	- Severity: Low
-	- Opened: 20261015-150552
-	- Opened by: JC
-	- Related IDs: 2026101513330004
-	- Steps to reproduce:
-		- `Each("a.*.b")` on an `a:` block with `x:` and `z:` under it, each with a `b`.
-	- Incorrect behavior: Every node's line is 0, and its path reads as `Multiple`. `Lines`, `First`, and `Last` get the same.
-	- Expected behavior: Each node's path reads that one node, and has its line. Or a wildcard path is refused.
-	- Reproduced: 20261015. The lines of 0 on 1.2 and 3.0 in Go and Rust, and the path reads in Go.
-	- Note: The wrapper's docs don't mention wildcards, and the fuzzer makes no wildcard paths.
-	- Actual cause: `Each` put an index on the end of the whole path, and an index on a wildcard path is refused on every version.
-	- Decisions:
-		- Each on a wildcard lists the nodes it reaches, each with a path that reads it alone and its line, rather than refusing wildcards. 3.0 does this itself with its field list, so the 3.0 adapter uses that. 1.2 and 2.0 build the same list from counts and child names.
-		- A wildcard slot that reaches no node, or several, is left out, as 3.0 has it. So `Each` can list fewer than `Count`.
-		- Plain reads and `Count` of a wildcard path still differ by version. The wrapper leaves those alone, and design.md says so.
-	- Actual fix: `Each` builds a path per node, with an index at every step that repeats and the wildcard filled in with the child's name. `Lines`, `First`, and `Last` get real lines and paths from it.
-	- Verified: the gate, and a 20 second fuzz with no difference. Before the fix the new case and the Go and Rust wildcard tests failed on every version, and the fuzz first and last check failed once wildcards were in its paths.
-	- Branch: several
-	- Commit: 1c33f90
-	- Test case: tests/cases/020-several, Go `TestEachWildcard`, Rust `several` in tests/api.rs, and the fuzz first and last check, which now makes wildcard paths.
-	- Swept: `Each` in Go `shclw1` to `shclw3` and Rust `v1` to `v3`, and what uses it: `Names` on 1.2 and 2.0, `Lines`, `First`, `Last`, and the `each` and `eachget` ops.
-	- Acceptance signoff: Waiting. Expanding wildcards rather than refusing them was a choice.
-
-- Go and Rust print a float that's an exact tie at its shortest digits differently
-	- ID: 2026101517145204
-	- Type: Bug
-	- Status: Waiting on signoff
-	- Severity: Low
-	- Opened: 20261015-171452
-	- Opened by: JC
-	- Related IDs: 2026101516110996
-	- Steps to reproduce:
-		- `or float missing 2.98023223876953125e-08` in an ops script, or `1125899906842624.25`.
-	- Incorrect behavior: Go prints `2.9802322387695312e-8` and `1125899906842624.2`. Rust prints `...313e-8` and `...624.3`. Each reads back as the same float, and so do the negatives.
-	- Expected behavior: The same text in every language, as design.md's ops section says.
-	- Reproduced: 20261015 on 3.0. Over every double power of 2 and the next float up, these 4 were the only differences.
-	- Possible cause: Go's Dragonbox rounds an exact tie to even, except up at most powers of 2. Rust's formatter rounds it up.
-	- Note: Seen in what the ops print. What a put writes comes from shcl, and wasn't checked.
-	- Actual cause:
-		- Rust's `{:e}` rounds an exact tie at the shortest length away from zero. Go rounds it to even, except at a float32 power of 2, where it rounds up.
-		- The same tie made Rust's `f32` put write another float64 than Go's. About 8.4 million float32 values went in differently, counting both signs. 0.00244140625 went in as 0.0024414063 in Rust and 0.0024414062 in Go.
-	- Decisions:
-		- Go's rule, since only Rust had to change: no want file and no C change. It's the rule shcl 3.0's own Rust `format_float` uses.
-		- Rust and C copy Go's round-up at a float32 power of 2 too, so an `f32` put goes in the same everywhere.
-	- Actual fix: Rust takes the even spelling of the same length when it reads back, in the ops prints and in `f32` puts.
-	- Note: Go's float32 round-up looks like a Go slip. Its float32 code checks for that tie at the float64 exponent, -77, where Dragonbox's own code uses -35 for a float32. It hits 2^-12 and its negative only. If Go fixes it, `TestPutFloat32` fails.
-	- Note: shcl friction, a rough edge. On 1.2 and 2.0, a put of 2^-25 writes `0.000000029802322387695313` from Rust and `0.000000029802322387695312` from Go. A put of 1125899906842624.25 writes `...624.3` and `...624.2`. Both read back as the same float. Expected: the same text, as 3.0's bindings already give. The wrapper doesn't even it out. It would have to write floats as text on 1.2 and 2.0 with its own read-back, for a difference no read can see.
-	- Verified:
-		- The gate and a 20 second fuzz, Go against Rust, with no difference.
-		- Go and Rust print the same text for 17 million doubles: every power of 2 and its neighbors, small mantissas times powers of 2, the neighbors of 2^52 and 2^53, and 3 million random ones. Rust before the fix differed on 42,452 of them.
-		- Every finite float32 goes in as the same float64 in Go and Rust. Before the fix it didn't.
-	- Branch: small-bugs
-	- Commit: f1ff7a9
-	- Test case: tests/cases/032-float-ties, Go `TestPutFloat32`, Rust `put_f32`. The case and `put_f32` failed in Rust before the fix, and pass after. C passes the case.
-	- Swept: every place Rust turns a float into text, `format_float` and `From<f32>`. Go's and C's already follow Go's rule. No other float-to-text site in the 3 wrappers.
-	- Acceptance signoff: Waiting. The tie rule was a pick, and so was copying Go's float32 round-up.
-
 - shcl 4 adapters
 	- ID: 2026101512024163
 	- Type: Feature
@@ -487,6 +71,7 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Progress log:
 		- 20261015: split into 5 parts, each its own item below. This closes when they do.
 		- 20261016: core, read memory, walking and writes, and string lengths are Done. Format and upgrade, and 1.2 and 2.0, wait on signoff. Fuzzing is next.
+		- 20261017: format and upgrade, and 1.2 and 2.0, are Done. Fuzzing is what's left.
 
 - C: fuzz against Go
 	- ID: 2026101516111107
@@ -1172,6 +757,64 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Closed: 20261015-135423
 	- Acceptance signoff: Self-closed: mechanical rename.
 
+- Upgrade passes along a conversion that stopped partway
+	- ID: 2026101513330001
+	- Type: Bug
+	- Status: Done
+	- Severity: High
+	- Opened: 20261015-133300
+	- Opened by: JC
+	- Related IDs: 2026101513330002
+	- Steps to reproduce:
+		- Upgrade a 2.x file that ends inside a raw block that never closes.
+	- Incorrect behavior: The text comes back unconverted and with no Format line. Nothing is counted as lost, and there's no error.
+	- Expected behavior: An error, and the file left alone.
+	- Note: Radixmill refuses any result that doesn't read as the current format. Wovenshell runs shcl's stamped conversion a second time to find out.
+	- Reproduced: 20261015, on 3.0 in Go and Rust, with `from` 0 and 2. The text did come back converted. shcl closed the block at the end of the file and added the info block, so every line after the open fence stays raw text for good. Nothing lost and no error, as the item says. The unconverted text with no Format line is what shcl's own `Migrate` gives.
+	- Actual cause:
+		- shcl's `Upgrade` writes a raw block that never closes as closed, and says nothing. Its `migrate` command refuses the same file. The wrapper passed shcl's answer on.
+	- Decisions:
+		- Refused, as the item asks. The rule is wider than raw blocks: any file taken as 2.x that shcl 2.0 reports an error on is refused, which covers this and 2026101513330002. design.md has it under Decisions.
+	- Actual fix: On 3.0, `Upgrade` and `UpgradeFile` parse a file they take as 2.x with shcl 2.0 first. Any error there is `Refused`, with 2.0's errors in `Diags`. `UpgradeFile` then writes nothing and makes no backup. The 3.0 adapter builds 2.0 in now, and the Rust `shcl3` feature turns on `shcl2`.
+	- Note: shcl friction, a silent wrong answer. `a: 1`, then `b: ```` and `raw`, with no closing fence. `shcl upgrade --write` prints E005 and writes a fresh file with the block closed at the end, at exit 0. `migrate` refuses the same file at exit 7. Expected: `upgrade` and `Upgrade` refuse it too. Checked on shcl's current dev; the library hasn't changed since the pin.
+	- Verified: the gate and a 20 second fuzz, Go against Rust, with no difference.
+	- Branch: upgrade
+	- Commit: 18041cf
+	- Test case: tests/cases/013-upgrade-raw, Go `TestUpgradeRefusesOldErrors`, Rust `upgrade_refuses_old_errors`. They failed before the fix in Go and Rust, and pass after.
+	- Swept: `Upgrade` and `UpgradeFile` in Go `shclw3` and Rust `v3`. The 1.2 and 2.0 adapters convert nothing. 17 files ending in an open block, with `from` 0 and 2, were all refused or `Ambiguous`, the same in Go and Rust.
+	- Closed: 20261017-11325800
+	- Acceptance signoff: Self-closed: the 2.0 check is now required in every build, per 2026101613005800, and the test failed before the fix and passes after.
+
+- Upgrade passes along lines the old shcl refused
+	- ID: 2026101513330002
+	- Type: Bug
+	- Status: Done
+	- Severity: High
+	- Opened: 20261015-133300
+	- Opened by: JC
+	- Related IDs: 2026101513330001
+	- Steps to reproduce:
+		- Upgrade `x: [ab]` as a 2.x file.
+	- Incorrect behavior: It comes back as `x: ab`, with nothing lost. 1.2 and 2.0 refused that line, so the old program never read it.
+	- Expected behavior: The line counts as lost, or the upgrade refuses.
+	- Note: Radixmill refuses a file whose original text has any E019 line. shcl means it to work this way.
+	- Reproduced: 20261015, on 3.0 in Go and Rust, with `from` 2. One detail differs. 1.2 and 2.0 report the line as E015, "missing colon; repaired as an empty value", and still read `x` as `ab`, so the old program read it with an error, and a Strict load failed. E019 is a 3.0 code. A line 2.0 skipped outright, like `z: [ab] c`, came through as written with nothing lost too.
+	- Actual cause:
+		- shcl's conversion reads `x: [ab]` as the 2.x `name:[disc]` form, the same way 2.0 repaired it, and doesn't look at whether 2.x reported an error on the line. Lines 2.x skipped come through as written.
+	- Decisions:
+		- The upgrade refuses, rather than count the line in `Unsure`. A count is easy to skip, and the upgraded file loads clean, so nothing would point at the line again.
+		- Any error shcl 2.0 reports counts, whatever its code, since E019 doesn't exist before 3.0. The same rule covers 2026101513330001. design.md has it under Decisions.
+		- It applies to a file the upgrade takes as 2.x: one shcl converts, or one passed with `from` 2 that doesn't name format 3. A file that loads clean with `from` 0 is still left alone with no check.
+	- Actual fix: The same change as 2026101513330001. On 3.0, a file taken as 2.x that shcl 2.0 reports errors on is `Refused`, with 2.0's errors in `Diags`, and `UpgradeFile` writes nothing.
+	- Note: shcl friction, a silent wrong answer. `x: [a, b]` upgraded with fromV2 comes back current with nothing lost. 2.0 read it as one string, `a, b`, and 3.0 reads 2 items. shcl's conversion counts it lost, but `Upgrade` drops that count when the file loads clean and the conversion leaves its text alone. Expected: Lost 1. The wrapper now refuses this file anyway, since 2.0 reports E015 on it.
+	- Verified: the gate and a 20 second fuzz, Go against Rust, with no difference.
+	- Branch: upgrade
+	- Commit: 18041cf
+	- Test case: tests/cases/014-upgrade-errors, Go `TestUpgradeRefusesOldErrors`, Rust `upgrade_refuses_old_errors`. They failed before the fix in Go and Rust, and pass after.
+	- Swept: `Upgrade` and `UpgradeFile` in Go `shclw3` and Rust `v3`. The 1.2 and 2.0 adapters convert nothing. A format 3 file passed with `from` 2 that 2.0 has errors on, such as `tags: [a, b]`, is still left alone.
+	- Closed: 20261017-11325800
+	- Acceptance signoff: Self-closed: the 2.0 check is now required in every build, per 2026101613005800, and the test failed before the fix and passes after.
+
 - C: header, loading, saving, and reads on shcl 3.0
 	- ID: 2026101516110959
 	- Type: Feature
@@ -1256,6 +899,232 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Acceptance signoff: 20261016, JC. A put per type, plus `shclw_put_float32`, and compacting after a good save, with `shclw_compact` for the rest.
 	- Closed: 20261016-123500
 
+- Go and Rust wrappers over shcl 1.2, 2.0, and 3.0
+	- ID: 2026101512024150
+	- Type: Feature
+	- Status: Done
+	- Priority: High
+	- Opened: 2026-10-15
+	- Opened by: JC
+	- Requirements:
+		- Own small API, with ideas from shcl 4.
+		- Every shcl version, with the version picked in one place.
+		- A way to reach the rest of shcl.
+		- A text command for anything the API doesn't bind.
+	- Progress log:
+		- 20261015: built, with `Inner()` for the rest of shcl and `Run` for ops scripts. The calls are listed in design.md.
+		- 20261015: design.md lists where shcl versions behave differently and what the wrapper does instead.
+	- Branch: go-rust
+	- Test case: tests/cases 001 to 010, Go `api_test.go` and `inner_test.go`, Rust `tests/api.rs`
+	- Closed: 20261017-11325800
+	- Acceptance signoff: Self-closed: built as asked, and every shared case and API test passes. The 1.2 and 2.0 parts go with 2026101613005800.
+
+- CICD pipeline with shared cases and fuzzing
+	- ID: 2026101512024152
+	- Type: Feature
+	- Status: Done
+	- Priority: High
+	- Opened: 2026-10-15
+	- Opened by: JC
+	- Requirements:
+		- Fuzz and parity test every binding.
+		- A regression test for every feature and fix.
+	- Progress log:
+		- 20261015: `cicd/cicd.bash` runs format, lint, tests, and fuzzing. `--gate` is the pre-push hook.
+		- 20261015: Go and Rust read the same want files, so they can't drift.
+		- 20261015: 15,000 fuzz cases in 90 seconds, Go against Rust, with no difference left.
+	- Branch: go-rust
+	- Test case: n/a, it's the test runner. The pre-push hook runs it on every push.
+	- Closed: 20261017-11325800
+	- Acceptance signoff: Self-closed: built as asked for Go and Rust. C fuzzing is 2026101516111107, and Python's is in 2026101512024161.
+
+- UpgradeFile puts the old file back when the write fails
+	- ID: 2026101513330005
+	- Type: Feature
+	- Status: Done
+	- Priority: High
+	- Opened: 20261015-133300
+	- Opened by: JC
+	- Requirements:
+		- The original survives any failure.
+		- Before replacing the file, check that it hasn't changed since it was read.
+	- Note: Radixmill, Quillroute, Mossrealm, and Cobblevale each do this themselves. Check what shcl's own UpgradeFile already does first.
+	- Progress log:
+		- 20261015: shcl's own UpgradeFile, at the pinned 3.0 commit, already writes through a temp file and a rename, makes the backup with an exclusive create, checks once that the file hasn't changed, before the backup, and removes the backup when a failed write left the original. It doesn't check again before the replace, or put the original back when a failed replace leaves nothing at the path.
+		- 20261015: the wrapper read the file for its 2.0 check, then shcl read it again to convert it. An edit in between was converted with no check. Reproduced in Go and Rust with a file flipping between a clean 2.x text and one 2.0 has errors on: the refused text was converted within a few rounds.
+	- Decisions:
+		- The 3.0 `UpgradeFile` reads once and does its own backup and write with shcl's parts, in place of calling shcl's `UpgradeFile`.
+		- A changed file is `ErrIO`, as shcl reports it, and not a new error kind. design.md has both under Decisions.
+	- Done: The file is read once, and the 2.0 check, the conversion, and the backup use that text. It's checked for changes before the backup and again before the write. A failed write leaves the original, or moves the backup back when nothing is left at the path, and the backup is removed unless it's all there is. A newer file is now `ErrTooNew`, where it used to pass as current, and a path that isn't a regular file is `ErrIO`. The check and restore are a shared helper that 2026101513330017 and 2026101513330019 can use.
+	- Verified: the gate, and a 20 second fuzz with Go against Rust and no difference. With all cores loaded, Go's edit-while-upgrading test passed 3 times and Rust's once.
+	- Branch: upgrade-file
+	- Commit: efcf6b5
+	- Test case: Go `TestUpgradeFileEditedMeanwhile` and `TestReplaceRead`, Rust `upgrade_file_edited_meanwhile` and `replace_read_*` in tests/files.rs. The edit-while-upgrading test failed before the fix in Go and Rust, and passes after.
+	- Swept: `UpgradeFile` in Go `shclw1` to `shclw3` and Rust `v1` to `v3`. 1.2 and 2.0 read once and never write. No other call reads a file and then writes it.
+	- Closed: 20261017-11325800
+	- Acceptance signoff: Self-closed: the original survives every failure tested, and `ErrIO` is what shcl already reports. 2026101613005800 builds on it.
+
+- Say when Write rewrote the whole file
+	- ID: 2026101513330003
+	- Type: Feature
+	- Status: Done
+	- Priority: High
+	- Opened: 20261015-133300
+	- Opened by: JC
+	- Requirements:
+		- Write, or a call made before it, says when 3.0 couldn't keep the file's own lines and wrote the canonical form instead.
+	- Note: Quillroute compares the canonical text with what it read, and adds an "also" line to its plan. Wovenshell checks renames against the canonical form, since the fallback moves comments.
+	- Progress log:
+		- 20261015: at the pinned 3.0 commit, the save that keeps lines falls back to canonical form when its text wouldn't reload as the edited document, when an edit took a kept line it shouldn't have, or when the document wasn't loaded keeping lines or took a merge. shcl's design.md names a child added under a flat dotted line, a value changed where a selector elsewhere names it, and any edit to a file whose canonical order isn't its own.
+		- 20261015: 3.0 says so in both bindings. `ToTextKeepLines` and `SaveFileKeepLines` return a kept flag, which the wrapper dropped. 1.2 and 2.0 have no save that keeps lines, and always save canonical form.
+	- Decisions:
+		- `Rewrites()` is a call made before `Write`, beside `Text` and `Canonical`, rather than a second result from `Write`.
+		- 1.2 and 2.0 say true when the loaded text wasn't canonical, since that's when their save changes the file's lines. A canonical file says false, as 3.0 counts it.
+		- A `New` document says false. The 3.0 `New` now keeps lines from an empty text, which is the same document shcl's own `New` makes.
+		- design.md has these under Decisions, and the call under Loading and saving.
+	- Done: `Rewrites()` in Go and `rewrites()` in Rust, on all 3 versions, and a `rewrites` op for ops scripts.
+	- Verified: the gate, and a 20 second fuzz with Go against Rust and no difference. Before the change the 2 new cases failed in Go and Rust, with no want files and the op unknown. With the 3.0 `New` put back as it was, the new API test failed in Go and Rust.
+	- Branch: rewrote
+	- Commit: 4537b3c
+	- Test case: tests/cases 017-rewrites and 018-rewrites-canonical, Go `TestRewritesNew`, Rust `rewrites_new` in tests/api.rs.
+	- Swept: `Write`, `Text`, and `New` in Go `shclw1` to `shclw3` and Rust `v1` to `v3`, both ops runners, and fuzz.py's op list. `UpgradeFile` writes text it made itself, not a document, so it has no fallback to report.
+	- Closed: 20261017-11325800
+	- Acceptance signoff: Self-closed: did what the item asked, and its tests failed before and pass after.
+
+- Pick the first or last of a repeated key
+	- ID: 2026101513330004
+	- Type: Feature
+	- Status: Done
+	- Priority: High
+	- Opened: 20261015-133300
+	- Opened by: JC
+	- Related IDs: 2026101513330036, 2026101513330034, 2026101515055152, 2026101515055253
+	- Requirements:
+		- A read option that takes the first or the last instance, in place of `Multiple`.
+		- A way to list the other instances' lines, for a "set more than once" warning.
+	- Note: Tallowbase takes the first. Quillroute takes the last and lists the rest as ignored. Folderkite falls back to the default with a warning. Wovenshell, Radixmill, and Tickerwren report the key as set twice.
+	- Progress log:
+		- 20261015: repeated keys checked on 1.2, 2.0, and 3.0 first. `Each` order, each instance's line, blocks merged by name and value, and the lines after a put or a remove came out the same on every version. `Each` order isn't file order for a block written in parts, so `tv.f` can list lines 8, 12, 10.
+		- 20261015: 2 bugs found on the way, logged as 2026101515055152 and 2026101515055253.
+	- Decisions:
+		- `First(path)` and `Last(path)` narrow a path to one instance, so every typed read in both tiers takes it, and so do the edits. Go `d.Int(d.Last("port"), 8080)`, Rust `d.int(&d.last("port"), 8080)`.
+		- `Lines(path)` lists every instance's line in file order, so the others are all but the first or the last. A plain read still says `Multiple`.
+		- First and last go by line, not `Each` order. An instance a put made has no line, and counts as after the rest.
+		- design.md has these under Reads, Walking a document, and Decisions.
+	- Done: `First`, `Last`, and `Lines` in Go and Rust on all 3 versions, `first`, `last`, and `lines` ops, and a fuzz check that a `first` or `last` read is one instance, on the first or last of the path's lines.
+	- Verified: the gate and a 20 second fuzz pass, Go against Rust, with no difference. With the sort by line taken out, the new case failed in Go and Rust, and so did both API tests. With `Last` giving back the path, or the first instance, the fuzz check failed.
+	- Branch: first-last
+	- Commit: 08e831b
+	- Test case: tests/cases/019-first-last, Go `TestFirstLast`, Rust `first_last` in tests/api.rs, and the fuzz check.
+	- Swept: Go `shclw1` to `shclw3` each have the 3 calls, held to it by the `shclw.Doc` interface. Rust has them once, on the `ShclDoc` trait. Both ops runners and fuzz.py's op list have the new ops.
+	- Closed: 20261017-11325800
+	- Acceptance signoff: Self-closed: the names and the order by line are what a person reading the file would expect, and the tests failed before and pass after.
+
+- Info block and Format line
+	- ID: 2026101512024154
+	- Type: Feature
+	- Status: Done
+	- Priority: High
+	- Opened: 2026-10-15
+	- Opened by: JC
+	- Related IDs: 2026101513330010, 2026101513330011
+	- Requirements:
+		- Write and remove shcl's info block, and stamp the Format line.
+	- Notes:
+		- Quillroute, Radixmill, Folderkite, Tickerwren, and Mossrealm each do this by hand today.
+		- 1.2 and 2.0 have no info block, so the wrapper would write it there itself.
+		- Cobblevale wants a way to stamp the Format line without the banner. Its new files had none, and read back like 2.x files.
+		- shcl's own banner setter misses a block that has a line after it, and adds a second one. Folderkite strips the old block itself.
+		- Banners written during the 3.0 betas link a tag that doesn't exist. Wovenshell replaces 4 old spellings at launch.
+		- Radixmill and Cobblevale add the Format line to their test files by hand.
+	- Progress log:
+		- 20261015: `InfoBlock(on)` and `StampFormat()` on every version, in Go and Rust, with the ops `info on|off` and `stamp`. design.md has the rules, under "Format and upgrade".
+		- The banner setter's miss is a block above the first field. shcl's own doc comment says it leaves that one on purpose.
+	- Decisions:
+		- The block names the bound shcl's format, so 1.2 writes format 1 and 2.0 writes format 2. Format 3 everywhere would make 3.0's upgrade skip a file that was never converted. The rest of the block is the same on every version, but for the Syntax link.
+		- 1.2 and 2.0 write the same `##` block 3.0 does, linking their own release's spec. Their own `init` block has no Format line.
+		- Both calls change what the save writes, not the document. 1.2 and 2.0 have no call that edits the comments at the end of a file.
+		- `Rewrites` says the same after either call.
+		- Every old spelling comes off, found by its title line. So does 2.x's `#` block, on every version.
+		- A file naming another format is refused, `ErrRefused` for an older one and `ErrTooNew` for a newer one. On 2.0 that leaves a format 1 file with no way forward, since 2.0 has no upgrade for it.
+		- A file ending in a raw block that never closes is refused, since the block would take in the new lines.
+		- A lone stamp goes right under the last line, where shcl's `Migrate` puts it.
+	- Verified: the gate, and a 20 second fuzz with 10 seconds of Go fuzzing, with no failures. Before the change the new cases printed `error unknownop`, and 3.0 kept the old block above the first field. Each new check failed with its rule taken out of the code.
+	- Branch: info-block
+	- Commit: 6e4627c
+	- Test case: tests/cases/021 to 027. Go `TestInfoTextIsGenBanner`, `TestInfoOldSpellings`, `TestInfoMatchesSetBanner`, and `TestInfoWriteRefused`. Rust `info_text_is_gen_banner`, `info_old_spellings`, and `info_write_refused`. The fuzz info check.
+	- Swept: `Text`, `Canonical`, `Write`, and `Rewrites` in Go `shclw1` to `shclw3` and Rust `v1` to `v3`, the `Doc` interface and `ShclDoc` trait, both ops runners, and design.md's API, ops, and "evens out" sections.
+	- Note: 2026101513330010 and 2026101513330011 can reuse the block finder in `shclw/info.go` and `src/info.rs`, which already finds 2.x's `#` block.
+	- Closed: 20261017-11325800
+	- Acceptance signoff: Self-closed: the output was checked against shcl's own banner, and each rule's test failed with the rule taken out.
+
+- C: format, upgrade, and the info block on shcl 3.0
+	- ID: 2026101516111033
+	- Type: Feature
+	- Status: Done
+	- Priority: High
+	- Opened: 20261015-161111
+	- Opened by: JC
+	- Parent ID: 2026101512024159
+	- Prereq IDs: 2026101516110996
+	- Requirements:
+		- FormatOf, Upgrade, UpgradeFile, InfoBlock, StampFormat, Rewrites, and Check.
+		- The upgrade refuses a 2.x file that shcl 2.0 has errors on, as in Go and Rust, if 2.0 can be built in beside 3.0.
+	- Progress log:
+		- 20261015: `shclw.h` has `shclw_format_of`, `shclw_upgrade`, `shclw_upgrade_file`, `shclw_info_block`, `shclw_stamp_format`, `shclw_rewrites`, `shclw_check`, and `shclw_drop_declared`. The info block code is a port of Go's, in `info.c`, for every version. The checked replace is in `shclw.c`.
+		- All 33 shared cases run whole in C on 3.0 now. `run.c` has no "not yet" ops left, so that went, and `c_cases.py` compares every op.
+		- shcl 2.0 and 3.0 fit in one program with no edit to shcl. Every external symbol 2.0 has is a public `shcl_` call, so 2.0's `shcl.h` goes in 2 files of its own with each call renamed by a macro. A build check fails on any name left as it was. Nothing here waits on a person.
+	- Decisions:
+		- The upgrade's result is one block, `shclw_upgraded`, freed with `free()`, and 2.0's errors on a refused file are in it. Go and Rust put them on the error, but C's error is a fixed struct nobody frees.
+		- `shclw_drop_declared(schema, d)` drops hints from d's own diagnostics. shcl's C binding has no form that takes a list.
+		- A 3.0 C program needs 2.0's `shcl.h` to build, pinned by commit like 3.0's. 2.0 ends the program when memory runs out.
+	- Note: Go's `FormatIn`, which 1.2 and 2.0 use, isn't in C yet. That's for 2026101516111070, with the rest of those 2 versions.
+	- Verified: the gate passes, with all 33 shared cases whole and 345 ops compared in C. Each new check failed with its rule taken out: the 2.0 refusal, the `From` fix, the restore after a failed replace, the hint drop, the raw body check in the info block, a second read of the file during the upgrade, and a 2.0 name left unrenamed.
+	- Branch: c-format
+	- Commit: c71ca83
+	- Test case: `test_replace_read`, `test_upgrade`, `test_upgrade_file`, `test_upgrade_raced`, `test_info`, `test_rewrites`, and `test_check` in `source/c/tests/api_test.c`, the Makefile's `names` check, and the shared cases through `cicd/c_cases.py`.
+	- Swept: every op in design.md's ops table has a C function in `run.c`. Every C call that hands back an upgrade sets it on a failure too, as Go does. design.md's C notes on layout, sharing the code, and the ops runner.
+	- Closed: 20261017-11325800
+	- Acceptance signoff: Self-closed: matches Go and Rust, and each check failed with its rule taken out.
+
+- C: shcl 1.2 and 2.0
+	- ID: 2026101516111070
+	- Type: Feature
+	- Status: Done
+	- Needs external testing: C hasn't run on Windows. 1.2's save there has only been compiled. That's for 2026101512024174 with the rest.
+	- Priority: High
+	- Opened: 20261015-161111
+	- Opened by: JC
+	- Parent ID: 2026101512024159
+	- Prereq IDs: 2026101516111033
+	- Related IDs: 2026101518385490, 2026101513330048
+	- Requirements:
+		- The same header over 1.2 and 2.0, told apart by what each `shcl.h` declares.
+		- Every shared case passes on all 3 versions.
+	- Progress log:
+		- 20261015: `shclw1.c` and `shclw2.c` are ports of Go's `shclw1` and `shclw2`, each a copy of the other with its differences. Go's `OneTarget`, `EachPaths`, and `FormatIn` are in the shared `shclw.c` and `info.c`. 1.2's save is a write of the wrapper's own, as in Go and Rust.
+		- All 33 shared cases run whole on all 3 versions. The API tests run on each, sanitized, plain, and as C++, with the 3.0-only ones split out. cicd lints, builds, and tests each version.
+		- On 1.2 and 2.0, reads, text, and edits keep their memory until the document is freed. Those versions have no call that gives it back. 200,000 reads kept about 67 MB. design.md says so.
+		- 20261016: JC OK'd `SHCLW_SHCL`. README.md has a C section now that says how to set it, checked by building its commands and example on all 3 versions.
+	- Decisions:
+		- A program on 1.2 or 2.0 sets `SHCLW_SHCL` to 1 or 2, since their `shcl.h` files define the same macros. With none the build stops and says to set it. A wrong one fails to compile, on a call only 2.0 declares. 3.0 needs none. That settles the open question in design.md, which moved to Decisions.
+		- 2.0's save goes through shcl's own atomic write, as Go's does. So `shclw2.c` won't build with `SHCL_NO_FILE_IO`, and says why.
+		- A write into a folder that doesn't exist is `IO` on 1.2 and 2.0 and `NotFound` on 3.0, as in Go and Rust. Logged as 2026101518385490.
+		- On 1.2 and 2.0 a name holding a NUL can't go in a C path, since those versions quote the NUL as it is. An edit through that path is refused.
+	- Note: 1.2's write in `shclw1.c` is the code 2026101513330048 would need for a build without shcl's file calls.
+	- Verified:
+		- The gate passes.
+		- Go and C gave the same output on 4,435 fuzz cases across the 3 versions, run by hand. Wiring C into the fuzzer is 2026101516111107.
+		- Each check failed with its rule taken out: the several-instances check, Format lines in a raw body, the 1.2 block's link, 2.0's lost-lines refusal, wildcard indexes in Each, Names over several instances, the float rule, Rewrites, 2.0's refusal to upgrade format 1, and 1.2's save keeping the mode and refusing what isn't a file.
+		- Each `shcl.h` with each `SHCLW_SHCL`, or none, compiles only with the right one, in C and C++.
+	- Note: no test reaches the temp file cleanup after a failed 1.2 save, since every failure that can be set up comes before the temp file exists.
+	- Branch: c-old
+	- Commit: c003a9f
+	- Test case: `make pick`, `test_save`, and the 1.2 and 2.0 sides of `test_errors`, `test_upgrade`, `test_info`, and `test_rewrites` in `source/c/tests/api_test.c`. The shared cases on all 3 versions through `cicd/c_cases.py`.
+	- Swept: every row of design.md's "evens out" table has a case or an API test that runs on C 1.2 and 2.0, but the 2.x upgrade refusal, which is 3.0's alone. Every call `shclw3.c` defines is in `shclw1.c` and `shclw2.c`, which each link checks. The notes in `shclw.h` and design.md that hold only on 3.0 now say so.
+	- Closed: 20261017-11325800
+	- Acceptance signoff: Self-closed: every shared case passes on all 3 versions. The memory growth goes away with 1.2 and 2.0, in 2026101613005800.
+
 - Put writes a float32 with float64 noise
 	- ID: 2026101513330006
 	- Type: Bug
@@ -1305,6 +1174,94 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Swept: `Open`, `OpenWith`, `Upgrade`, and `UpgradeFile` in Go `shclw1` to `shclw3` and Rust `v1` to `v3` all go through that version's `FormatOf`, and so does the `format` op. 3.0's is shcl's own, which already skips raw bodies.
 	- Acceptance signoff: 20261016, JC left the wider read to judgement. It stays, since every version now gives the same answer for the same file.
 	- Closed: 20261016-112928
+
+- PutSyntax doesn't read its value back
+	- ID: 2026101513330007
+	- Type: Bug
+	- Status: Done
+	- Severity: Avg
+	- Opened: 20261015-133300
+	- Opened by: JC
+	- Steps to reproduce:
+		- PutSyntax `a # b` on a path.
+	- Incorrect behavior: It says ok, and the value reads back as `a`.
+	- Expected behavior: `NoReadBack`, the same as Put.
+	- Note: Cobblevale reads its literal back and falls back to a plain string. Quillroute does the same for its single-quoted paths.
+	- Reproduced: 20261015, on 1.2, 2.0, and 3.0, in Go and Rust. `x#y` loses `#y` the same way.
+	- Actual cause:
+		- shcl reads the text as a value plus a trailing comment and drops the comment. The wrapper never read PutSyntax back.
+		- On 1.2 and 2.0, PutSyntax on a path with several instances also set the first one and said ok, where Put refuses.
+	- Actual fix: PutSyntax now sets the text in a new document and parses `k: text` in another, and the two have to match. The value at the path has to read the same as the parsed one. Otherwise it's `NoReadBack`, with the edit left in place. On 1.2 and 2.0 a path with several instances is `BadPath`, as with Put.
+	- Progress log:
+		- 20261015: the check also catches `[a, b]` on 1.2 and 2.0, which sets `"[a", "b]"` while a file line `k: [a, b]` reads another way. design.md lists both.
+	- Branch: floats
+	- Commit: 9b835f5
+	- Test case: tests/cases/012-syntax. It failed before the fix in Go and Rust on every version, and passes after.
+	- Swept: PutSyntax in Go `shclw1` to `shclw3` and Rust `v1` to `v3`. Comment has the same several-instances gap on 1.2 and 2.0, logged as 2026101514071600.
+	- Closed: 20261017-11325800
+	- Acceptance signoff: Self-closed: reproduced, and its test failed before the fix and passes after. The wider check is the same read-back Put has.
+
+- Float reads take infinity as good
+	- ID: 2026101513330008
+	- Type: Bug
+	- Status: Done
+	- Severity: Avg
+	- Opened: 20261015-133300
+	- Opened by: JC
+	- Steps to reproduce:
+		- Read `x: 1e400` as a float.
+	- Incorrect behavior: `Good`, with infinity as the value.
+	- Expected behavior: `BadType`.
+	- Note: Wovenshell checks every float it reads. Cobblevale found a `NaN` put on 1.2 that reads back as `BadType`.
+	- Reproduced: 20261015, on 1.2 and 2.0, in Go and Rust. 3.0 already says `BadType`, and the fallback reads gave infinity too.
+	- Actual cause:
+		- shcl 1.2 and 2.0 read a number too big for a float as infinity. A put of infinity or NaN wrote it, then read it back as `BadType` and said `NoReadBack`, with the value left in the file.
+		- The ops scripts read `1e400` as infinity in Rust and as a bad value in Go.
+	- Decisions:
+		- A put of infinity or NaN is refused with `BadValue` in every version and changes nothing, as 3.0 does. design.md has it under Decisions.
+		- An array with a bad item reads as `BadType` and keeps its length, with 0 for the bad items, as 3.0 does.
+	- Actual fix: Float reads that find infinity or NaN say `BadType`, and the fallback reads give the fallback. Puts refuse them up front. Ops scripts take `nan`, `inf`, and `-inf`, and read a number too big as infinity in both languages.
+	- Progress log:
+		- 20261015: the fuzzer now makes these values and checks that no `Good` float read gives one.
+	- Branch: floats
+	- Commit: 9b835f5
+	- Test case: tests/cases/011-floats, plus the NaN and infinity half of Go `TestPutFloat32` and Rust `put_f32`. They failed before the fix on 1.2 and 2.0 in both languages, and pass after. On 3.0 only Go's 011 failed, on the ops parser, since 3.0 already refused these.
+	- Swept: GetFloat, GetFloats, Float, and Floats in Go `shclw1` to `shclw3` and Rust `v1` to `v3`. Put for float, float32, and float slices in both. Ints have no such value.
+	- Closed: 20261017-11325800
+	- Acceptance signoff: Self-closed: reproduced, and its test failed before the fix and passes after. Refusing the put matches 3.0.
+
+- Put under a key with several instances writes into the first one on 1.2 and 2.0
+	- ID: 2026101515055152
+	- Type: Bug
+	- Status: Done
+	- Severity: Avg
+	- Opened: 20261015-150551
+	- Opened by: JC
+	- Related IDs: 2026101514071600
+	- Steps to reproduce:
+		- Put `tv.g` in a file with `tv: one` and `tv: two`, on 1.2 or 2.0.
+	- Incorrect behavior: It says ok and adds `g` under the first `tv`.
+	- Expected behavior: `BadPath`, as 3.0 says, and nothing changes.
+	- Reproduced: 20261015, on 1.2 and 2.0 in Go and on 1.2 in Rust. 3.0 says `BadPath`.
+	- Possible cause: The 1.2 and 2.0 adapters count the instances of the whole path, and `tv.g` has none yet. 3.0 refuses a path that matches more than one node at any step.
+	- Actual cause: The several-instances check counted the whole path only. 3.0 checks each step that exists, and refuses at the first one with several, even when only one of them has the rest, as with `tv.g` where only the first `tv` has a `g`. Put, PutSyntax, and Comment each called the check on their own, which is how Comment missed it before (2026101514071600).
+	- Progress log:
+		- 20261015: checked 3.0 for each edit, on inner and last steps, with the rest there and not. Put, PutSyntax, and Comment refuse at any step with several, and a selector that picks one there is fine. Remove takes every instance on every version.
+		- 20261015: this is the 4th item today on this one class, after 2026101513330007 and 2026101514071600.
+	- Decisions:
+		- One check in shared code counts each step of the path, and the 1.2 and 2.0 adapters reach shcl's setters only through one `set` call that runs it. A test reads the method list off the Go `Doc` interface and fails on any method not sorted as a read or an edit, and walks every edit over inner and last steps on every version.
+		- Remove still takes every instance, even under a step that repeats. It says how many went, so nothing is picked for the caller.
+		- `Each` narrows every step that repeats, so its paths take edits. `First` and `Last` give that path for a single instance too, since the path as typed can repeat at an inner step and be refused.
+		- design.md has these under Decisions, and the table row covers inner steps.
+	- Actual fix: Put, PutSyntax, and Comment on 1.2 and 2.0 go through one check that refuses with `BadPath` when any step has several instances, and change nothing. `Each`, `First`, and `Last` give paths with an index at each step that repeats, so they still take edits.
+	- Verified: the gate, and a 20 second fuzz with Go against Rust and no difference. Before the fix, the new case failed on all 3 versions in Go and Rust, the Go and Rust edit tests failed, and the new fuzz check failed. They all pass after.
+	- Branch: several
+	- Commit: 1c33f90
+	- Test case: tests/cases/020-several, Go `TestDocMethodsSorted`, `TestEditsRefuseSeveral`, `TestEditsOnOneInstance`, and `TestRemoveTakesAll` in edits_test.go, Rust `several` in tests/api.rs, and the fuzz check that an edit saying ok found one instance at every step.
+	- Sweep: Put, PutSyntax, and Comment in Go `shclw1` and `shclw2`, and Rust `v1` and `v2`.
+	- Swept: Put, PutSyntax, Comment, and Remove in Go `shclw1` to `shclw3` and Rust `v1` to `v3`, each on the first, an inner, and the last step of a path, with the rest there and not there. 3.0 needs no check of its own, since shcl 3.0 refuses these itself, and the test walks it too. Remove takes every instance on every version, as decided. No other `Doc` or `ShclDoc` method edits the document. `Write` and `UpgradeFile` take a file path, not a document path.
+	- Closed: 20261017-11325800
+	- Acceptance signoff: Self-closed: reproduced, and its test failed before the fix and passes after. The narrowed path is what `Each` already gave.
 
 - C: strings with lengths
 	- ID: 2026101513330047
@@ -1450,6 +1407,69 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Swept: Rust `tests/cases.rs` and `tests/api.rs` are the only Rust tests that make folders. Go's tests use `t.TempDir()`, and its fuzzer writes no files. cicd/fuzz.py left its `--work` folder behind when run by itself. Under cicd.bash all of these sit inside the run's own folder, which its exit trap removes, so a cicd run hid the leak.
 	- Acceptance signoff: Self-closed: does what the item asked, checked before and after.
 	- Closed: 20261015-143031
+
+- Each on a wildcard path gives paths that don't read one instance
+	- ID: 2026101515055253
+	- Type: Bug
+	- Status: Done
+	- Severity: Low
+	- Opened: 20261015-150552
+	- Opened by: JC
+	- Related IDs: 2026101513330004
+	- Steps to reproduce:
+		- `Each("a.*.b")` on an `a:` block with `x:` and `z:` under it, each with a `b`.
+	- Incorrect behavior: Every node's line is 0, and its path reads as `Multiple`. `Lines`, `First`, and `Last` get the same.
+	- Expected behavior: Each node's path reads that one node, and has its line. Or a wildcard path is refused.
+	- Reproduced: 20261015. The lines of 0 on 1.2 and 3.0 in Go and Rust, and the path reads in Go.
+	- Note: The wrapper's docs don't mention wildcards, and the fuzzer makes no wildcard paths.
+	- Actual cause: `Each` put an index on the end of the whole path, and an index on a wildcard path is refused on every version.
+	- Decisions:
+		- Each on a wildcard lists the nodes it reaches, each with a path that reads it alone and its line, rather than refusing wildcards. 3.0 does this itself with its field list, so the 3.0 adapter uses that. 1.2 and 2.0 build the same list from counts and child names.
+		- A wildcard slot that reaches no node, or several, is left out, as 3.0 has it. So `Each` can list fewer than `Count`.
+		- Plain reads and `Count` of a wildcard path still differ by version. The wrapper leaves those alone, and design.md says so.
+	- Actual fix: `Each` builds a path per node, with an index at every step that repeats and the wildcard filled in with the child's name. `Lines`, `First`, and `Last` get real lines and paths from it.
+	- Verified: the gate, and a 20 second fuzz with no difference. Before the fix the new case and the Go and Rust wildcard tests failed on every version, and the fuzz first and last check failed once wildcards were in its paths.
+	- Branch: several
+	- Commit: 1c33f90
+	- Test case: tests/cases/020-several, Go `TestEachWildcard`, Rust `several` in tests/api.rs, and the fuzz first and last check, which now makes wildcard paths.
+	- Swept: `Each` in Go `shclw1` to `shclw3` and Rust `v1` to `v3`, and what uses it: `Names` on 1.2 and 2.0, `Lines`, `First`, `Last`, and the `each` and `eachget` ops.
+	- Closed: 20261017-11325800
+	- Acceptance signoff: Self-closed: reproduced, and its test failed before the fix and passes after. Expanding matches 3.0's own field list.
+
+- Go and Rust print a float that's an exact tie at its shortest digits differently
+	- ID: 2026101517145204
+	- Type: Bug
+	- Status: Done
+	- Severity: Low
+	- Opened: 20261015-171452
+	- Opened by: JC
+	- Related IDs: 2026101516110996
+	- Steps to reproduce:
+		- `or float missing 2.98023223876953125e-08` in an ops script, or `1125899906842624.25`.
+	- Incorrect behavior: Go prints `2.9802322387695312e-8` and `1125899906842624.2`. Rust prints `...313e-8` and `...624.3`. Each reads back as the same float, and so do the negatives.
+	- Expected behavior: The same text in every language, as design.md's ops section says.
+	- Reproduced: 20261015 on 3.0. Over every double power of 2 and the next float up, these 4 were the only differences.
+	- Possible cause: Go's Dragonbox rounds an exact tie to even, except up at most powers of 2. Rust's formatter rounds it up.
+	- Note: Seen in what the ops print. What a put writes comes from shcl, and wasn't checked.
+	- Actual cause:
+		- Rust's `{:e}` rounds an exact tie at the shortest length away from zero. Go rounds it to even, except at a float32 power of 2, where it rounds up.
+		- The same tie made Rust's `f32` put write another float64 than Go's. About 8.4 million float32 values went in differently, counting both signs. 0.00244140625 went in as 0.0024414063 in Rust and 0.0024414062 in Go.
+	- Decisions:
+		- Go's rule, since only Rust had to change: no want file and no C change. It's the rule shcl 3.0's own Rust `format_float` uses.
+		- Rust and C copy Go's round-up at a float32 power of 2 too, so an `f32` put goes in the same everywhere.
+	- Actual fix: Rust takes the even spelling of the same length when it reads back, in the ops prints and in `f32` puts.
+	- Note: Go's float32 round-up looks like a Go slip. Its float32 code checks for that tie at the float64 exponent, -77, where Dragonbox's own code uses -35 for a float32. It hits 2^-12 and its negative only. If Go fixes it, `TestPutFloat32` fails.
+	- Note: shcl friction, a rough edge. On 1.2 and 2.0, a put of 2^-25 writes `0.000000029802322387695313` from Rust and `0.000000029802322387695312` from Go. A put of 1125899906842624.25 writes `...624.3` and `...624.2`. Both read back as the same float. Expected: the same text, as 3.0's bindings already give. The wrapper doesn't even it out. It would have to write floats as text on 1.2 and 2.0 with its own read-back, for a difference no read can see.
+	- Verified:
+		- The gate and a 20 second fuzz, Go against Rust, with no difference.
+		- Go and Rust print the same text for 17 million doubles: every power of 2 and its neighbors, small mantissas times powers of 2, the neighbors of 2^52 and 2^53, and 3 million random ones. Rust before the fix differed on 42,452 of them.
+		- Every finite float32 goes in as the same float64 in Go and Rust. Before the fix it didn't.
+	- Branch: small-bugs
+	- Commit: f1ff7a9
+	- Test case: tests/cases/032-float-ties, Go `TestPutFloat32`, Rust `put_f32`. The case and `put_f32` failed in Rust before the fix, and pass after. C passes the case.
+	- Swept: every place Rust turns a float into text, `format_float` and `From<f32>`. Go's and C's already follow Go's rule. No other float-to-text site in the 3 wrappers.
+	- Closed: 20261017-11325800
+	- Acceptance signoff: Self-closed: reproduced, and its test failed before the fix and passes after. Go's rule needed no change to any want file.
 
 - C: build 3.0 without shcl 2.0
 	- ID: 2026101611292826
