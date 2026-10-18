@@ -90,6 +90,24 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Test case: C API tests and 33 shared cases with 345 operations, over shcl 1-3.
 	- Verified: `cicd/cicd.bash --gate --no-sync -y` passed locally and in the push hook. The pinned slow gate passed CodeQL, CTU, the leak, null, and heap-growth probes, and heaptrack soak on all 3 versions.
 
+- Updates to CICD script flags
+	- ID: 2026101816214270
+	- Type: Enhancement
+	- Status: Queued
+	- Priority: High
+	- Opened: 2026-10-18
+	- Opened by: JC
+	- Requirements:
+		- `--ci`: Rename `--gate`.
+		- `--quick`:
+			- Should run whatever linting, validation, and testing steps are very quick.
+			- Cross-compile whatever is fast; e.g. maybe skip slow arm64.
+			- Skip anything requiring an external host.
+		- No flags, by default, should do everything.
+		- The other existing flags can stay.
+	- Notes:
+		- Pre-next-cut. Do next.
+
 - C wrapper
 	- ID: 2026101512024159
 	- Type: Feature
