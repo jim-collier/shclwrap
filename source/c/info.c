@@ -505,13 +505,23 @@ static char *glue(const char *head, size_t head_n, const char *body, size_t body
 	if (!out) {
 		return NULL;
 	}
-	memcpy(out, head, head_n);
+	if (head_n) {
+		memcpy(out, head, head_n);
+	}
 	if (body_n) {
 		memcpy(out + head_n, body, body_n);
 	}
 	out[head_n + body_n] = '\0';
 	*len = head_n + body_n;
 	return out;
+}
+
+static size_t hits(const char *p, size_t n, const char *z) {
+	size_t zn = zlen(z), count = 0;
+	for (size_t i = 0; i + zn <= n; i++) {
+		count += !memcmp(p + i, z, zn);
+	}
+	return count;
 }
 
 static bool old_title(const lines *f, size_t start, size_t end) {
@@ -524,6 +534,9 @@ bool shclw_i_old_block(const char *text, size_t len, const shclw_i_info_edit *e,
 	*marked = NULL;
 	*marked_len = 0;
 	size_t bom_n = bom_len(text, len);
+	if (!hits(text, len, info_title)) {
+		return true;
+	}
 	lines f = {NULL, 0, 0, "\n", false};
 	split(&f, text + bom_n, len - bom_n);
 	judge j = {e, NULL, 0, f.oom};
@@ -574,14 +587,6 @@ bool shclw_i_old_block(const char *text, size_t len, const shclw_i_info_edit *e,
 	return !j.oom;
 }
 
-static size_t hits(const char *p, size_t n, const char *z) {
-	size_t zn = zlen(z), count = 0;
-	for (size_t i = 0; i + zn <= n; i++) {
-		count += !memcmp(p + i, z, zn);
-	}
-	return count;
-}
-
 shclw_kind shclw_i_place_block(const char *text, size_t len, bool marked, const shclw_i_info_edit *e, const char *path,
                                char **out, size_t *out_len, shclw_error *err) {
 	*out = NULL;
@@ -590,6 +595,7 @@ shclw_kind shclw_i_place_block(const char *text, size_t len, bool marked, const 
 	size_t off_n = 0;
 	shclw_kind k = shclw_i_finish_info(text, len, SHCLW_I_INFO_OFF, false, e, path, &off, &off_n, err);
 	if (k != SHCLW_OK) {
+		free(off);
 		return k;
 	}
 	size_t bom_n = bom_len(off, off_n);
@@ -649,11 +655,12 @@ shclw_kind shclw_i_place_block(const char *text, size_t len, bool marked, const 
 		goto done;
 	}
 	same = same_as(&j, joined, n, v, vn);
-	if (j.oom) {
-		k = shclw_i_fail(err, SHCLW_ERR_NO_MEMORY, path, NULL, 0);
-	} else if (!same) {
+	if (!j.oom && !same) {
 		k = shclw_i_fail(err, SHCLW_ERR_REFUSED, path, "the file ends in a raw block that never closes", 0);
-	} else if (!(*out = glue(off, bom_n, joined, n, out_len))) {
+		goto done;
+	}
+	*out = j.oom ? NULL : glue(off, bom_n, joined, n, out_len);
+	if (!*out) {
 		k = shclw_i_fail(err, SHCLW_ERR_NO_MEMORY, path, NULL, 0);
 	}
 done:
@@ -685,13 +692,14 @@ char *shclw_i_same_ends(const char *orig, size_t orig_len, const char *text, siz
 		return NULL;
 	}
 	size_t at = 0;
+	// The analyzer loses that conv has room for a CR before every LF.
 	for (size_t i = 0; i < len; i++) {
 		if (text[i] == '\n') {
-			conv[at++] = '\r';
+			conv[at++] = '\r'; // NOLINT(clang-analyzer-security.ArrayBound)
 		}
-		conv[at++] = text[i];
+		conv[at++] = text[i]; // NOLINT(clang-analyzer-security.ArrayBound)
 	}
-	conv[at] = '\0';
+	conv[at] = '\0'; // NOLINT(clang-analyzer-security.ArrayBound)
 	size_t vn = 0, cn = 0;
 	char *v = e->values(text, len, &vn);
 	char *c = v ? e->values(conv, at, &cn) : NULL;

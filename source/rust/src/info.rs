@@ -110,10 +110,13 @@ const INFO_MARK: &str = "# shclw: the info block goes here";
 /// a line like the mark, the text comes back as it was.
 pub(crate) fn old_block(text: &str, e: &InfoEdit<'_>) -> (String, bool) {
 	let body = text.strip_prefix('\u{feff}').unwrap_or(text);
+	let title = format!("#{INFO_TITLE}");
+	if !body.contains(&title) {
+		return (text.to_owned(), false);
+	}
 	let mut f = InfoLines::split(body);
 	let base = (e.values)(body);
 	let n = f.lines.len();
-	let title = format!("#{INFO_TITLE}");
 	for (start, end) in info_runs(&f) {
 		if f.trimmed(start) != title && (start + 1 == end || f.trimmed(start + 1) != title) {
 			continue;

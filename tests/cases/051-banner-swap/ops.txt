@@ -10,3 +10,6 @@ get	strs	hosts
 # A file with a line like the one the swap uses gets the block at the end.
 open	mark.shcl
 text
+# A CRLF file with no block keeps CRLF too, and gets the block at the end.
+open	crlf.shcl
+text

@@ -114,6 +114,9 @@ const infoMark = "# shclw: the info block goes here"
 // already has a line like the mark, marked is text as it was.
 func OldBlock(text string, e InfoEdit) (marked string, found bool) {
 	body := strings.TrimPrefix(text, "\ufeff")
+	if !strings.Contains(body, "#"+infoTitle) {
+		return text, false
+	}
 	f := splitInfoLines(body)
 	base := e.Values(body)
 	for _, r := range infoRuns(f) {

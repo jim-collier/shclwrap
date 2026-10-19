@@ -1,0 +1,3 @@
+# no block
+hosts: alpha, beta
+name: x
