@@ -1,0 +1,12 @@
+paths:
+	"C:\\tools": C:\\tools
+	plain: a, b
+
+##
+## This config file format is SHCL.
+## "Simple Hierarchical Config Language"
+##    Format   1
+##    Home     https://github.com/yottacore/shcl
+##    Syntax   https://github.com/yottacore/shcl/blob/v1.2.0/project/spec.md
+##    Legal    SHCL is Copyright © 2026 Jim Collier [ID: 2უNაɘ«҂թȹɤξπ๙¿ձϖ]. License: MIT. No warranty.
+##

@@ -879,6 +879,210 @@ static size_t lines_in(const old_list *l) {
 	return count;
 }
 
+static const char not_as_read[] = "the upgraded file doesn't read this value as shcl 2.0 read it";
+
+// Whether s reads another way with 2.x's escapes.
+static bool v2_changes(const char *s, size_t n) {
+	for (size_t i = 0; i + 1 < n; i++) {
+		if (s[i] == '\\') {
+			char e = s[i + 1];
+			if (e == 't' || e == 'n' || e == '\\' || e == '"' || e == '\'') {
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
+// s as shcl 1.2 and 2.0 read it: \t, \n, \\, \", and \' are escapes, and any
+// other backslash is itself. Caller frees. NULL only when memory ran out.
+static char *v2_escapes(const char *s, size_t n, size_t *len) {
+	char *out = (char *)shclw_i_alloc(n + 1);
+	if (!out) {
+		return NULL;
+	}
+	size_t o = 0;
+	for (size_t i = 0; i < n; i++) {
+		if (s[i] != '\\' || i + 1 == n) {
+			out[o++] = s[i];
+			continue;
+		}
+		char e = s[++i];
+		switch (e) {
+		case 't': out[o++] = '\t'; break;
+		case 'n': out[o++] = '\n'; break;
+		case '\\':
+		case '"':
+		case '\'': out[o++] = e; break;
+		default: out[o++] = '\\'; out[o++] = e;
+		}
+	}
+	out[o] = '\0';
+	*len = o;
+	return out;
+}
+
+// One value carry_reads set, to read back once the text is parsed again.
+typedef struct {
+	shcl_str path;
+	char **want;
+	size_t *lens;
+	size_t n;
+} carried;
+
+static void free_carried(carried *c) {
+	for (size_t i = 0; i < c->n; i++) {
+		free(c->want[i]);
+	}
+	free(c->want);
+	free(c->lens);
+}
+
+static bool reads_as(shcl_read_str_arr a, char *const *want, const size_t *lens, size_t n) {
+	if (a.status != SHCL_GOOD || a.n != n) {
+		return false;
+	}
+	for (size_t i = 0; i < n; i++) {
+		if (a.values[i].n != lens[i] || (lens[i] && memcmp(a.values[i].p, want[i], lens[i]) != 0)) {
+			return false;
+		}
+	}
+	return true;
+}
+
+// What carry_reads checks 2.0's reads against, one element at a time.
+typedef struct {
+	shcl_doc *now;
+	old_list *bad;
+	shcl_read_str_arr is;
+	bool differs;
+} carry_check;
+
+static void check_old(void *ctx, const char *path, size_t plen, size_t line, size_t i, size_t n, const char *v,
+                      size_t vlen) {
+	carry_check *c = (carry_check *)ctx;
+	if (i == 0) {
+		c->is = shcl_read_string_array(c->now, path, plen);
+		c->differs = false;
+	}
+	if (c->differs || c->is.status != SHCL_GOOD) {
+		return;
+	}
+	if (c->is.n != n || c->is.values[i].n != vlen || (vlen && memcmp(c->is.values[i].p, v, vlen) != 0)) {
+		c->differs = true;
+		keep_old(c->bad, line, "W002", not_as_read, sizeof not_as_read - 1);
+	}
+}
+
+// Go's carryReads: makes up, the upgraded text, read each value the way shcl
+// 2.0 read it in old, since shcl's migrate leaves a 2.x backslash escape as
+// typed and 3.0 reads it as text (2026101910455900). What can't be carried
+// goes in bad. *fixed is the new text, malloc'd, or NULL when nothing changed
+// or something went in bad.
+static shclw_kind carry_reads(shclw_i_v2_doc *old, const char *up, size_t up_len, bool names_as_typed, old_list *bad,
+                              char **fixed, size_t *fixed_len) {
+	static const char bad_name[] = "shcl 2.0 read this name with its backslash escapes resolved, and 3.0 reads it "
+								   "as typed; rename it and upgrade again";
+	static const char cant_hold[] = "the upgraded file can't hold this value as shcl 2.0 read it";
+	*fixed = NULL;
+	*fixed_len = 0;
+	shcl_doc *d = shcl_parse_keep_lines(up, up_len, SHCL_STANDARD);
+	if (!d) {
+		return SHCLW_ERR_NO_MEMORY;
+	}
+	bool oom = false;
+	carried *sets = NULL;
+	size_t n_sets = 0, cap = 0;
+	shcl_field *fs = NULL;
+	size_t nf = shcl_fields(d, &fs);
+	for (size_t k = 0; k < nf && !oom; k++) {
+		shcl_str path = fs[k].path;
+		if (!names_as_typed && v2_changes(fs[k].name.p, fs[k].name.n)) {
+			keep_old(bad, shclw_i_v2_line(old, path.p, path.n), "W002", bad_name, sizeof bad_name - 1);
+			continue;
+		}
+		if (shcl_read_raw(d, path.p, path.n).status == SHCL_GOOD) {
+			continue;
+		}
+		shcl_read_str_arr a = shcl_read_string_array(d, path.p, path.n);
+		bool any = false;
+		for (size_t i = 0; a.status == SHCL_GOOD && i < a.n && !any; i++) {
+			any = v2_changes(a.values[i].p, a.values[i].n);
+		}
+		if (!any) {
+			continue;
+		}
+		if (n_sets == cap) {
+			cap = cap ? cap * 2 : 8;
+			carried *grown = cap < SIZE_MAX / sizeof(carried) ? (carried *)realloc(sets, cap * sizeof(carried)) : NULL;
+			if (!grown) {
+				oom = true;
+				break;
+			}
+			sets = grown;
+		}
+		carried c = {path, (char **)calloc(a.n, sizeof(char *)), (size_t *)calloc(a.n, sizeof(size_t)), a.n};
+		if (!c.want || !c.lens) {
+			free(c.want);
+			free(c.lens);
+			oom = true;
+			break;
+		}
+		for (size_t i = 0; i < a.n && !oom; i++) {
+			c.want[i] = v2_escapes(a.values[i].p, a.values[i].n, &c.lens[i]);
+			oom = !c.want[i];
+		}
+		if (oom) {
+			free_carried(&c);
+			break;
+		}
+		shcl_read_str s = shcl_read_string(d, path.p, path.n);
+		bool scalar = a.n == 1 && s.status == SHCL_GOOD && s.value.n == a.values[0].n &&
+		              (s.value.n == 0 || memcmp(s.value.p, a.values[0].p, s.value.n) == 0);
+		shcl_set_status st = scalar
+		                         ? shcl_set_string(d, path.p, path.n, c.want[0], c.lens[0])
+		                         : shcl_set_string_array(d, path.p, path.n, (const char *const *)c.want, c.lens, c.n);
+		if (st != SHCL_SET_OK) {
+			keep_old(bad, shclw_i_v2_line(old, path.p, path.n), "W002", cant_hold, sizeof cant_hold - 1);
+			free_carried(&c);
+			continue;
+		}
+		sets[n_sets++] = c;
+	}
+	shcl_doc *now = NULL;
+	if (!oom && n_sets) {
+		shcl_str t = shcl_to_text_keep_lines(d, NULL);
+		*fixed = shclw_i_dup(t.p, t.n, fixed_len);
+		oom = !*fixed;
+	}
+	if (!oom) {
+		now = *fixed ? shcl_parse(*fixed, *fixed_len) : shcl_parse(up, up_len);
+		oom = !now;
+	}
+	for (size_t k = 0; k < n_sets && !oom; k++) {
+		shcl_read_str_arr got = shcl_read_string_array(now, sets[k].path.p, sets[k].path.n);
+		if (!reads_as(got, sets[k].want, sets[k].lens, sets[k].n)) {
+			keep_old(bad, shclw_i_v2_line(old, sets[k].path.p, sets[k].path.n), "W002", not_as_read,
+			         sizeof not_as_read - 1);
+		}
+	}
+	if (!oom) {
+		carry_check c = {now, bad, {NULL, 0, SHCL_NOT_FOUND, NULL}, false};
+		shclw_i_v2_reads(old, check_old, &c);
+	}
+	for (size_t k = 0; k < n_sets; k++) {
+		free_carried(&sets[k]);
+	}
+	free(sets);
+	shcl_free(now);
+	shcl_free(d);
+	if (oom || bad->oom || bad->n) {
+		free(*fixed);
+		*fixed = NULL;
+	}
+	return oom || bad->oom ? SHCLW_ERR_NO_MEMORY : SHCLW_OK;
+}
+
 // Go's Upgrade, with path for the error when a file is behind it.
 static shclw_kind upgrade(const char *text, size_t len, int64_t from, const char *path, shclw_upgraded **out,
                           shclw_error *err) {
@@ -917,19 +1121,45 @@ static shclw_kind upgrade(const char *text, size_t len, int64_t from, const char
 		// read those lines as it repaired them, or not at all, and an open raw
 		// block took the rest of the file. The upgrade would turn that into a
 		// clean file that means something else (design.md, Format and upgrade).
+		shclw_i_v2_doc *old = shclw_i_v2_parse(text, len);
 		old_list l = {NULL, 0, 0, false};
-		(void)shclw_i_v2_errors(text, len, keep_old, &l);
-		if (l.oom) {
+		(void)shclw_i_v2_errors(old, keep_old, &l);
+		bool checked = false;
+		char *fixed = NULL;
+		size_t fixed_len = 0;
+		if (!l.oom && !l.n) {
+			k = carry_reads(old, u.text, u.len, named == 1, &l, &fixed, &fixed_len);
+			checked = true;
+		}
+		shclw_i_v2_free(old);
+		if (l.oom || k != SHCLW_OK) {
 			k = shclw_i_fail(err, SHCLW_ERR_NO_MEMORY, path, NULL, 0);
 		} else if (l.n) {
 			*out = shclw_i_upgraded(text, len, u.format, false, 0, NULL, l.v, l.n);
 			char why[96];
-			(void)snprintf(why, sizeof why, "shcl 2.0 reports errors on %zu lines; fix them and upgrade again",
-			               lines_in(&l));
+			if (checked) {
+				(void)snprintf(why, sizeof why,
+				               "%zu lines don't read as shcl 2.0 read them; fix them and upgrade again", lines_in(&l));
+			} else {
+				(void)snprintf(why, sizeof why, "shcl 2.0 reports errors on %zu lines; fix them and upgrade again",
+				               lines_in(&l));
+			}
 			k = shclw_i_fail(err, SHCLW_ERR_REFUSED, path, why, 0);
-		} else {
+		} else if (!fixed) {
 			*out = shclw_i_upgraded(u.text, u.len, was, !u.current, u.lost, NULL, NULL, 0);
+		} else if (!u.current) {
+			*out = shclw_i_upgraded(fixed, fixed_len, was, true, u.lost, NULL, NULL, 0);
+		} else {
+			// shcl left this one as it was, so it has no Format line yet, and
+			// the next upgrade would read the escapes a second time.
+			char *t = NULL;
+			size_t t_len = 0;
+			k = shclw_i_finish_info(fixed, fixed_len, SHCLW_I_INFO_ON, false, &info_edit, path, &t, &t_len, err);
+			*out = k == SHCLW_OK ? shclw_i_upgraded(t, t_len, was, true, u.lost, NULL, NULL, 0)
+			                     : shclw_i_upgraded(text, len, u.format, false, 0, NULL, NULL, 0);
+			free(t);
 		}
+		free(fixed);
 		free_old(&l);
 	}
 	shcl_upgraded_free(&u);

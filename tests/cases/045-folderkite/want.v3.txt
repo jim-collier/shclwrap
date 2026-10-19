@@ -7,13 +7,13 @@ true
 > get	strs	search.search-skip-folders
 Good	35	5	node_modules	a, b		x#y	'q'
 > get	strs	windows.associations
-Good	32	3	txt=notepad.exe %1	log=C:\\\\Tools\\\\view.exe "%1"	md=typora, with comma
+Good	32	3	txt=notepad.exe %1	log=C:\\Tools\\view.exe "%1"	md=typora, with comma
 > get	str	terminal.exec
-Good	8	\\\\\\\\server\\\\share\\\\term.exe
+Good	8	\\\\server\\share\\term.exe
 > get	str	archive.create-with-rar
-Good	26	rar\\ta
+Good	26	rar\ta
 > get	str	preferences.bulk-rename-tool
-Good	16	C:\\\\Program Files\\\\Renamer\\\\r.exe --flag
+Good	16	C:\\Program Files\\Renamer\\r.exe --flag
 > get	float	file-cache.memory-gib
 Good	45	0.125
 > write	doc.shcl
@@ -25,7 +25,7 @@ ok
 | \tmode: dark
 | 
 | terminal:
-| \texec: \\\\\\\\server\\\\share\\\\term.exe
+| \texec: \\\\server\\share\\term.exe
 | \t# Argument that terminal takes before a command
 | \texec-arg: '--title="a # b"'
 | 
@@ -33,7 +33,7 @@ ok
 | \trow-shading-color: "rgba(0, 0, 0, 0.1)"
 | 
 | preferences:
-| \tbulk-rename-tool: "C:\\\\Program Files\\\\Renamer\\\\r.exe --flag"
+| \tbulk-rename-tool: "C:\\Program Files\\Renamer\\r.exe --flag"
 | \tclick-policy: single
 | \tshow-hidden-files: true
 | \tmenu-config:
@@ -42,14 +42,14 @@ ok
 | \tthumbnail-limit: 1000000
 | 
 | archive:
-| \tcreate-with-7z: tools\\\\7z.exe
-| \tcreate-with-rar: rar\\ta
+| \tcreate-with-7z: tools\\7z.exe
+| \tcreate-with-rar: "rar◉TAB◉a"
 | \textract-with-7z: ""
 | \textract-with-rar: " lead and trail "
 | 
 | windows:
 | \tpath-separator: slash
-| \tassociations: ["txt=notepad.exe %1", 'log=C:\\\\Tools\\\\view.exe "%1"', "md=typora, with comma"]
+| \tassociations: ["txt=notepad.exe %1", 'log=C:\\Tools\\view.exe "%1"', "md=typora, with comma"]
 | 
 | search:
 | \tsearch-skip-folders: [node_modules, "a, b", "", "x#y", "'q'"]

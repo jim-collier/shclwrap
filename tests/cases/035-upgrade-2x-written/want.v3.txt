@@ -26,7 +26,7 @@ from 2 changed true unsure 0
 | 
 | title: "two words"
 | 
-| path: "C:\\\\temp"
+| path: "C:\\temp"
 | 
 | note: "a # b"
 | 
@@ -65,7 +65,7 @@ from 2 changed true unsure 0
 | 
 | title: "two words"
 | 
-| path: "C:\\\\temp"
+| path: "C:\\temp"
 | 
 | note: "a # b"
 | 
