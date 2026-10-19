@@ -105,6 +105,104 @@ func FinishInfo(text string, info Info, stamp bool, e InfoEdit) (string, error) 
 	return bom + out, nil
 }
 
+// infoMark stands in for 2.x's block while shcl upgrades the text, so the
+// new block can go where the old one was.
+const infoMark = "# shclw: the info block goes here"
+
+// OldBlock says whether text has 2.x's `#` info block as comments, and gives
+// text with the first one swapped for a mark PlaceBlock finds. Where text
+// already has a line like the mark, marked is text as it was.
+func OldBlock(text string, e InfoEdit) (marked string, found bool) {
+	body := strings.TrimPrefix(text, "\ufeff")
+	if !strings.Contains(body, "#"+infoTitle) {
+		return text, false
+	}
+	f := splitInfoLines(body)
+	base := e.Values(body)
+	for _, r := range infoRuns(f) {
+		if f.trimmed(r[0]) != "#"+infoTitle && (r[0]+1 == r[1] || f.trimmed(r[0]+1) != "#"+infoTitle) {
+			continue
+		}
+		run := span(len(f.lines), r[0], r[1])
+		last := -1
+		for i := r[0]; i < r[1]; i++ {
+			run[i] = !strings.HasPrefix(f.trimmed(i), schemaHead)
+			if run[i] {
+				last = i
+			}
+		}
+		if e.Values(f.joinWithout(run)) != base {
+			continue
+		}
+		for i := range f.lines {
+			if f.trimmed(i) == infoMark {
+				return text, true
+			}
+		}
+		f.lines[last] = infoMark
+		run[last] = false
+		return text[:len(text)-len(body)] + f.joinWithout(run), true
+	}
+	return text, false
+}
+
+// PlaceBlock is text, an upgrade of OldBlock's marked text, with every old
+// block off and the info block where the mark is. With no mark it goes at
+// the end, as InfoBlock puts it.
+func PlaceBlock(text string, marked bool, e InfoEdit) (string, error) {
+	off, err := FinishInfo(text, InfoOff, false, e)
+	if err != nil {
+		return "", err
+	}
+	body := strings.TrimPrefix(off, "\ufeff")
+	f := splitInfoLines(body)
+	at, marks := -1, span(len(f.lines), 0, 0)
+	for i := range f.lines {
+		if f.trimmed(i) == infoMark {
+			at, marks[i] = i, true
+		}
+	}
+	if !marked || at < 0 || strings.Count(body, infoMark) != 1 {
+		if marked {
+			off = off[:len(off)-len(body)] + f.joinWithout(marks)
+		}
+		return FinishInfo(off, InfoOn, false, e)
+	}
+	g := &infoLines{eol: f.eol}
+	for i := range f.lines {
+		if i != at {
+			g.lines, g.ends = append(g.lines, f.lines[i]), append(g.ends, f.ends[i])
+			continue
+		}
+		block := strings.Split(strings.TrimSuffix(e.Block, "\n"), "\n")
+		for k, l := range block {
+			end := f.eol
+			if k == len(block)-1 {
+				end = f.ends[i]
+			}
+			g.lines, g.ends = append(g.lines, l), append(g.ends, end)
+		}
+	}
+	out := g.join()
+	if e.Values(out) != e.Values(body) {
+		return "", &Error{Kind: ErrRefused, Msg: "the file ends in a raw block that never closes"}
+	}
+	return off[:len(off)-len(body)] + out, nil
+}
+
+// SameEnds is text, an upgrade of orig, with orig's line ends, where shcl
+// wrote it out again with LF only.
+func SameEnds(orig, text string, e InfoEdit) string {
+	if splitInfoLines(orig).eol != "\r\n" || strings.Contains(text, "\r") {
+		return text
+	}
+	crlf := strings.ReplaceAll(text, "\n", "\r\n")
+	if e.Values(crlf) != e.Values(text) {
+		return text
+	}
+	return crlf
+}
+
 // formatsNamed is the number on each Format line that counts, in order. A
 // line counts when taking it out leaves the values at base, so one in a raw
 // body doesn't.

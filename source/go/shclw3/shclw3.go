@@ -168,27 +168,34 @@ func FormatOf(text string) int {
 
 // Upgrade converts a file written for an older format. With from 0 the
 // file's Format line decides, and a file with none is taken as current. Pass
-// from 2 for a file known to be from shcl 2.x or older; it can't tell those
-// apart by itself. A file that reads two ways is ErrAmbiguous, and one shcl
-// 2.0 reports errors on is ErrRefused, with those errors in Diags. A 2.x file
-// comes out reading what 2.0 read, backslash escapes included, and one that
-// can't is ErrRefused too.
+// from 2 for a file known to be from shcl 2.x or older. A file that reads two ways is ErrAmbiguous,
+// and one shcl 2.0 reports errors on is ErrRefused, with those errors in
+// Diags. A 2.x file comes out reading what 2.0 read, backslash escapes
+// included, and one that can't is ErrRefused too. 2.x's block is swapped for
+// the current one where it sits, and the lines end as the file's did.
 func Upgrade(text string, from int) (Upgraded, error) {
 	if f := max(FormatOf(text), from); f > FormatMajor {
 		return Upgraded{Text: text, From: f}, tooNew("", f)
 	}
+	// The new block goes where 2.x's sat, so a mark shcl leaves be stands in.
+	in, banner := text, false
+	if FormatOf(text) == 0 {
+		in, banner = shclw.OldBlock(text, infoEdit)
+	}
 	fromV2 := from > 0 && from < FormatMajor
-	u := shcl.Upgrade(text, fromV2)
+	u := shcl.Upgrade(in, fromV2)
 	out := upgraded(u)
 	// shcl says 2 for a file with no Format line, even one it leaves alone.
 	if u.Current && !fromV2 && FormatOf(text) == 0 {
 		out.From = FormatMajor
 	}
 	if u.Ambiguous > 0 {
+		out.Text = text
 		return out, &shclw.Error{Kind: shclw.ErrAmbiguous, Msg: fmt.Sprintf("%d lines read two ways", u.Ambiguous)}
 	}
 	// Only a file taken as 2.x is read the 2.x way.
 	if u.Current && !(fromV2 && u.Format < FormatMajor) {
+		out.Text = text
 		return out, nil
 	}
 	old := shcl2.Parse(text)
@@ -199,17 +206,22 @@ func Upgrade(text string, from int) (Upgraded, error) {
 	if err != nil {
 		return Upgraded{Text: text, From: u.Format}, err
 	}
-	if fixed == out.Text {
+	switch {
+	case banner:
+		fixed, err = shclw.PlaceBlock(shclw.SameEnds(text, fixed, infoEdit), in != text, infoEdit)
+	case fixed == out.Text && !out.Changed:
 		return out, nil
+	case !out.Changed:
+		// shcl left this one as it was, so it has no Format line yet, and the
+		// next upgrade would read the escapes a second time.
+		fixed, err = shclw.FinishInfo(fixed, shclw.InfoOn, false, infoEdit)
+	default:
+		fixed = shclw.SameEnds(text, fixed, infoEdit)
 	}
-	// shcl left this one as it was, so it has no Format line yet, and the
-	// next upgrade would read the escapes a second time.
-	if !out.Changed {
-		if fixed, err = shclw.FinishInfo(fixed, shclw.InfoOn, false, infoEdit); err != nil {
-			return Upgraded{Text: text, From: u.Format}, err
-		}
+	if err != nil {
+		return Upgraded{Text: text, From: u.Format}, err
 	}
-	out.Text, out.Changed = fixed, true
+	out.Text, out.Changed = fixed, fixed != text
 	return out, nil
 }
 

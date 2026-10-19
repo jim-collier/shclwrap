@@ -1,0 +1,15 @@
+# The upgrade swaps 2.x's info block for the current one where it sits,
+# here above the first field of a CRLF file that keeps its lines.
+upgrade	2
+# In the middle of a CRLF file that shcl writes out again, since its arrays
+# don't load clean on 3.0. The lines still end in CRLF.
+open	middle.shcl
+upgraded
+text
+get	strs	hosts
+# A file with a line like the one the swap uses gets the block at the end.
+open	mark.shcl
+text
+# A CRLF file with no block keeps CRLF too, and gets the block at the end.
+open	crlf.shcl
+text

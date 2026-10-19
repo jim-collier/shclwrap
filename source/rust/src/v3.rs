@@ -173,19 +173,26 @@ pub fn format_of(text: &str) -> u32 {
 }
 
 /// Converts a file written for an older format. With `from` 0 the file's
-/// Format line decides, and a file with none is taken as current. Pass 2
-/// for a file known to be from shcl 2.x or older; it can't tell those apart
-/// by itself. A file that reads two ways is `Ambiguous`, and one shcl 2.0
-/// reports errors on is `Refused`, with those errors in `diags`. A 2.x file
-/// comes out reading what 2.0 read, backslash escapes included, and one that
-/// can't is `Refused` too.
+/// Format line decides, and a file with none is taken as current. Pass 2 for
+/// a file known to be from shcl 2.x or older. A file that reads two ways is `Ambiguous`, and one
+/// shcl 2.0 reports errors on is `Refused`, with those errors in `diags`. A
+/// 2.x file comes out reading what 2.0 read, backslash escapes included, and
+/// one that can't is `Refused` too. 2.x's block is swapped for the current
+/// one where it sits, and the lines end as the file's did.
 pub fn upgrade(text: &str, from: u32) -> Result<Upgraded, Error> {
 	let f = format_of(text).max(from);
 	if f > FORMAT_MAJOR {
 		return Err(too_new(f));
 	}
+	let e = info_edit();
+	// The new block goes where 2.x's sat, so a mark shcl leaves be stands in.
+	let (input, banner) = if format_of(text) == 0 {
+		crate::info::old_block(text, &e)
+	} else {
+		(text.to_owned(), false)
+	};
 	let from_v2 = from > 0 && from < FORMAT_MAJOR;
-	let u = shcl::upgrade(text, from_v2);
+	let u = shcl::upgrade(&input, from_v2);
 	if u.ambiguous > 0 {
 		return Err(Error::new(ErrKind::Ambiguous).msg(format!("{} lines read two ways", u.ambiguous)));
 	}
@@ -198,6 +205,7 @@ pub fn upgrade(text: &str, from: u32) -> Result<Upgraded, Error> {
 		out.from = FORMAT_MAJOR;
 	}
 	if !old {
+		text.clone_into(&mut out.text);
 		return Ok(out);
 	}
 	let old = shcl2::Document::parse(text);
@@ -205,17 +213,18 @@ pub fn upgrade(text: &str, from: u32) -> Result<Upgraded, Error> {
 		return Err(e);
 	}
 	let fixed = carry_reads(&old, &out.text, format_of(text) == 1)?;
-	if fixed == out.text {
+	out.text = if banner {
+		crate::info::place_block(&crate::info::same_ends(text, &fixed, &e), input != text, &e)?
+	} else if !out.changed && fixed == out.text {
 		return Ok(out);
-	}
-	// shcl left this one as it was, so it has no Format line yet, and the
-	// next upgrade would read the escapes a second time.
-	out.text = if out.changed {
-		fixed
+	} else if !out.changed {
+		// shcl left this one as it was, so it has no Format line yet, and the
+		// next upgrade would read the escapes a second time.
+		crate::finish_info(&fixed, crate::Info::On, false, &e)?
 	} else {
-		crate::finish_info(&fixed, crate::Info::On, false, &info_edit())?
+		crate::info::same_ends(text, &fixed, &e)
 	};
-	out.changed = true;
+	out.changed = out.text != text;
 	Ok(out)
 }
 

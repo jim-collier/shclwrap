@@ -227,6 +227,8 @@ Go names are listed. Rust uses the same words in snake case, and `ShclDoc` has t
 	- A value that still reads differently, or such a name, is `ErrRefused`, with the lines in `Diags`. Nothing is written.
 	- That check needs shcl 2.0, so the 3.0 adapter builds it in too. In Rust the `shcl3` feature turns on the `shcl2` dependency.
 	- In C, 2.0's `shcl.h` and 3.0's declare the same names, so 2.0's goes in 2 files of its own with each call renamed. The C upgrade gives 2.0's errors in its result, `shclw_upgraded`, since C's error has no list.
+	- 2.x's `#` info block is swapped for the current one where it sits, in a file with no Format line. shcl leaves a clean file's block alone, and puts the new block at the end of a file it writes out again.
+	- When shcl writes a CRLF file out again with LF only, the upgrade puts the CRLF back, unless that would change a value.
 	- The files 1.2 and 2.0 wrote come forward this way. One with no Format line that loads clean on 3.0 is taken as current, so a program taht knows its files are older passes `from` 2. A file the wrapper's own 1.2 or 2.0 adapter wrote has an info block naming format 1 or 2, and the upgrade puts 3.0's in its place.
 
 - `d.InfoBlock(on)` puts the info block at the end of what the save writes, or with `on` false leaves it out.
@@ -277,6 +279,8 @@ Each row has a test, either a shared case or an API test.
 | Upgrading a 2.x file 2.0 had errors on   | 3.0 writes a clean file, with nothing lost and no error.    | Refuses with `ErrRefused` and leaves the file alone.
 | A 2.x backslash escape in a value        | 3.0 keeps it as typed, and reads it as text.                | The upgrade writes it so 3.0 reads what 2.x read.
 | An old info block above the first field  | 3.0's `SetBanner` leaves it and adds a second block.        | `InfoBlock` takes it off.
+| Upgrading a file with 2.x's info block   | 3.0 moves it to the end, or leaves it when nothing changed. | Swaps in the current block where the old one was.
+| Upgrading a CRLF file 3.0 writes again   | 3.0 writes LF.                                              | Keeps CRLF.
 | A Format line without the block          | 3.0 has it only as part of `Migrate`.                       | `StampFormat`.
 | A file that isn't UTF-8                  | Varies by language.                                         | `ErrIO`, everywhere.
 | Walking repeated entries                 | A program writes selectors itself, and 3.0 changed them.    | `Each` gives paths, and `Child` extends them.
@@ -425,6 +429,8 @@ An ops script is one op per line, with fields split by tabs. `\t`, `\n`, `\r`, a
 - `InfoBlock` and `StampFormat` take effect when the save's text is built, rather than editing the document. 3.0 has no call for a lone Format line. Parsing the edited text again would renumber the lines and lose the load's diagnostics and its count of lost lines, which `Write` refuses on.
 
 - One line-based routine does the block in every version, rather than 3.0's `SetBanner` plus a fix for what it misses. Every version then gives the same text, and Go and Rust share the cases.
+
+- The upgrade puts the new block where 2.x's was by swapping the old block for a comment line before shcl's upgrade, and the block for that line after it. shcl gives no line map, and a comment stays where it was through shcl's rewrite. Where the file already has that line, the block goes at the end (2026101513330011).
 
 - 2.x's `#` block comes off on every version. shcl 3.0 takes it off only in `Upgrade`, and reads it otherwise as a comment of the file's own. Nobody writes that title line by hand, and leaving it gives the file 2 blocks.
 

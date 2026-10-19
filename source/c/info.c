@@ -17,6 +17,10 @@ static const char migrated_line[] = "##    Migrated from SHCL 2.x.";
 static const char schema_head[] = "##    Schema   ";
 static const char info_title[] = " This config file format is SHCL.";
 static const char info_name[] = " \"Simple Hierarchical Config Language\"";
+// Stands in for 2.x's block while shcl upgrades the text, so the new block
+// can go where the old one was.
+static const char info_mark[] = "# shclw: the info block goes here";
+static const char bom[] = "\xEF\xBB\xBF";
 
 typedef struct {
 	const char *p;
@@ -420,7 +424,6 @@ shclw_kind shclw_i_finish_info(const char *text, size_t len, shclw_i_info info, 
 		*out = shclw_i_dup(text, len, out_len);
 		return *out ? shclw_i_ok(err) : shclw_i_fail(err, SHCLW_ERR_NO_MEMORY, path, NULL, 0);
 	}
-	static const char bom[] = "\xEF\xBB\xBF";
 	size_t bom_n = len >= 3 && !memcmp(text, bom, 3) ? 3 : 0;
 	text += bom_n;
 	len -= bom_n;
@@ -492,4 +495,226 @@ shclw_kind shclw_i_finish_info(const char *text, size_t len, shclw_i_info info, 
 	free(j.base);
 	free(f.v);
 	return kind == SHCLW_OK ? shclw_i_ok(err) : kind;
+}
+
+static size_t bom_len(const char *text, size_t len) { return len >= 3 && !memcmp(text, bom, 3) ? 3 : 0; }
+
+// head, then body, as one malloc'd string.
+static char *glue(const char *head, size_t head_n, const char *body, size_t body_n, size_t *len) {
+	char *out = (char *)malloc(head_n + body_n + 1);
+	if (!out) {
+		return NULL;
+	}
+	if (head_n) {
+		memcpy(out, head, head_n);
+	}
+	if (body_n) {
+		memcpy(out + head_n, body, body_n);
+	}
+	out[head_n + body_n] = '\0';
+	*len = head_n + body_n;
+	return out;
+}
+
+static size_t hits(const char *p, size_t n, const char *z) {
+	size_t zn = zlen(z), count = 0;
+	for (size_t i = 0; i + zn <= n; i++) {
+		count += !memcmp(p + i, z, zn);
+	}
+	return count;
+}
+
+static bool old_title(const lines *f, size_t start, size_t end) {
+	return is(trimmed(f, start), "#", info_title) || (start + 1 < end && is(trimmed(f, start + 1), "#", info_title));
+}
+
+bool shclw_i_old_block(const char *text, size_t len, const shclw_i_info_edit *e, bool *found, char **marked,
+                       size_t *marked_len) {
+	*found = false;
+	*marked = NULL;
+	*marked_len = 0;
+	size_t bom_n = bom_len(text, len);
+	if (!hits(text, len, info_title)) {
+		return true;
+	}
+	lines f = {NULL, 0, 0, "\n", false};
+	split(&f, text + bom_n, len - bom_n);
+	judge j = {e, NULL, 0, f.oom};
+	if (!j.oom) {
+		j.base = e->values(text + bom_n, len - bom_n, &j.base_n);
+		j.oom = !j.base;
+	}
+	size_t *runs = NULL;
+	size_t count = j.oom ? 0 : info_runs(&f, &runs);
+	bool *run = flags(f.n);
+	j.oom = j.oom || !run || (count && !runs) || count == SIZE_MAX;
+	for (size_t r = 0; !j.oom && !*found && r < count; r++) {
+		size_t start = runs[2 * r], end = runs[2 * r + 1];
+		if (!old_title(&f, start, end)) {
+			continue;
+		}
+		size_t last = start;
+		for (size_t i = start; i < end; i++) {
+			// The analyzer loses that a run ends within the lines.
+			run[i] = !starts(trimmed(&f, i), schema_head, ""); // NOLINT(clang-analyzer-security.ArrayBound)
+			last = run[i] ? i : last;
+		}
+		if (!comments(&j, &f, run)) {
+			memset(run, 0, f.n * sizeof *run);
+			continue;
+		}
+		*found = true;
+		bool taken = false;
+		for (size_t i = 0; i < f.n; i++) {
+			taken = taken || is(trimmed(&f, i), info_mark, "");
+		}
+		if (taken) {
+			break;
+		}
+		view m = {info_mark, sizeof info_mark - 1};
+		f.v[last].text = m;
+		run[last] = false;
+		size_t n = 0;
+		char *joined = join(&f, run, &n);
+		*marked = joined ? glue(text, bom_n, joined, n, marked_len) : NULL;
+		j.oom = !*marked;
+		free(joined);
+	}
+	free(runs);
+	free(run);
+	free(j.base);
+	free(f.v);
+	return !j.oom;
+}
+
+shclw_kind shclw_i_place_block(const char *text, size_t len, bool marked, const shclw_i_info_edit *e, const char *path,
+                               char **out, size_t *out_len, shclw_error *err) {
+	*out = NULL;
+	*out_len = 0;
+	char *off = NULL;
+	size_t off_n = 0;
+	shclw_kind k = shclw_i_finish_info(text, len, SHCLW_I_INFO_OFF, false, e, path, &off, &off_n, err);
+	if (k != SHCLW_OK) {
+		free(off);
+		return k;
+	}
+	size_t bom_n = bom_len(off, off_n);
+	const char *body = off + bom_n;
+	size_t body_n = off_n - bom_n;
+	lines f = {NULL, 0, 0, "\n", false};
+	split(&f, body, body_n);
+	bool *marks = flags(f.n);
+	lines g = {NULL, 0, 0, f.eol, false};
+	char *joined = NULL, *v = NULL;
+	size_t n = 0, vn = 0, at = SIZE_MAX, count = 0;
+	judge j = {e, NULL, 0, false};
+	bool same = false;
+	if (f.oom || !marks) {
+		k = shclw_i_fail(err, SHCLW_ERR_NO_MEMORY, path, NULL, 0);
+		goto done;
+	}
+	for (size_t i = 0; i < f.n; i++) {
+		if (is(trimmed(&f, i), info_mark, "")) {
+			marks[i] = true;
+			at = i;
+			count++;
+		}
+	}
+	if (!marked || count != 1 || hits(body, body_n, info_mark) != 1) {
+		joined = marked && count ? join(&f, marks, &n) : NULL;
+		char *bare = joined ? glue(off, bom_n, joined, n, &n) : NULL;
+		if (marked && count && !bare) {
+			k = shclw_i_fail(err, SHCLW_ERR_NO_MEMORY, path, NULL, 0);
+		} else {
+			k = shclw_i_finish_info(bare ? bare : off, bare ? n : off_n, SHCLW_I_INFO_ON, false, e, path, out, out_len,
+			                        err);
+		}
+		free(bare);
+		goto done;
+	}
+	for (size_t i = 0; i < f.n; i++) {
+		if (i != at) {
+			push(&g, f.v[i].text, f.v[i].end);
+			continue;
+		}
+		size_t blen = zlen(e->block);
+		if (blen && e->block[blen - 1] == '\n') {
+			blen--;
+		}
+		for (size_t b = 0; b <= blen;) {
+			const char *nl = (const char *)memchr(e->block + b, '\n', blen - b);
+			view l = {e->block + b, nl ? (size_t)(nl - (e->block + b)) : blen - b};
+			push(&g, l, nl ? f.eol : f.v[i].end);
+			b += l.n + 1;
+		}
+	}
+	joined = g.oom ? NULL : join(&g, NULL, &n);
+	v = joined ? e->values(body, body_n, &vn) : NULL;
+	if (!v) {
+		k = shclw_i_fail(err, SHCLW_ERR_NO_MEMORY, path, NULL, 0);
+		goto done;
+	}
+	same = same_as(&j, joined, n, v, vn);
+	if (!j.oom && !same) {
+		k = shclw_i_fail(err, SHCLW_ERR_REFUSED, path, "the file ends in a raw block that never closes", 0);
+		goto done;
+	}
+	*out = j.oom ? NULL : glue(off, bom_n, joined, n, out_len);
+	if (!*out) {
+		k = shclw_i_fail(err, SHCLW_ERR_NO_MEMORY, path, NULL, 0);
+	}
+done:
+	free(v);
+	free(joined);
+	free(g.v);
+	free(marks);
+	free(f.v);
+	free(off);
+	return k == SHCLW_OK ? shclw_i_ok(err) : k;
+}
+
+char *shclw_i_same_ends(const char *orig, size_t orig_len, const char *text, size_t len, const shclw_i_info_edit *e,
+                        size_t *out_len) {
+	lines f = {NULL, 0, 0, "\n", false};
+	split(&f, orig, orig_len);
+	bool crlf = !strcmp(f.eol, "\r\n");
+	bool oom = f.oom;
+	free(f.v);
+	if (oom) {
+		return NULL;
+	}
+	if (!crlf || memchr(text, '\r', len)) {
+		return shclw_i_dup(text, len, out_len);
+	}
+	size_t lf = hits(text, len, "\n");
+	char *conv = len + lf < len ? NULL : (char *)malloc(len + lf + 1);
+	if (!conv) {
+		return NULL;
+	}
+	size_t at = 0;
+	// The analyzer loses that conv has room for a CR before every LF.
+	for (size_t i = 0; i < len; i++) {
+		if (text[i] == '\n') {
+			conv[at++] = '\r'; // NOLINT(clang-analyzer-security.ArrayBound)
+		}
+		conv[at++] = text[i]; // NOLINT(clang-analyzer-security.ArrayBound)
+	}
+	conv[at] = '\0'; // NOLINT(clang-analyzer-security.ArrayBound)
+	size_t vn = 0, cn = 0;
+	char *v = e->values(text, len, &vn);
+	char *c = v ? e->values(conv, at, &cn) : NULL;
+	if (!c) {
+		free(v);
+		free(conv);
+		return NULL;
+	}
+	bool same = vn == cn && (!vn || !memcmp(v, c, vn));
+	free(v);
+	free(c);
+	if (!same) {
+		free(conv);
+		return shclw_i_dup(text, len, out_len);
+	}
+	*out_len = at;
+	return conv;
 }
