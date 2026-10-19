@@ -1,0 +1,4 @@
+# settings
+port: 8080
+hosts: alpha, beta
+name: "two words"

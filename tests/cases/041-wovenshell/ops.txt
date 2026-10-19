@@ -1,0 +1,9 @@
+# The file Wovenshell's beta3 wrote on first run, under shcl 1.2. It loads
+# clean on 3.0, so Open takes it as current.
+open	doc.shcl
+upgraded
+rewrites
+errors
+get	str	font.family
+get	int	window.columns
+get	float	transparency.opacity

@@ -1,0 +1,13 @@
+> open	doc.shcl
+ok
+> upgraded
+from 0 backup none
+> rewrites
+false
+> errors
+0
+> names	
+base
+> files
+doc.shcl
+ops.txt

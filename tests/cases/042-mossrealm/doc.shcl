@@ -1,0 +1,7 @@
+name: Old
+planet: moon
+seed: 7
+pos: 1, 2, 3
+yaw: 0.5
+pitch: 0
+fly: false

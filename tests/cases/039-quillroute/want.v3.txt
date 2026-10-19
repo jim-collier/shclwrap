@@ -1,0 +1,22 @@
+> open	doc.shcl
+ok
+> upgraded
+from 0 backup none
+> rewrites
+false
+> get	str	account.email
+Good	4	C:\\\\new
+> upgrade	2
+from 2 changed false unsure 0
+| # mine
+| account: w
+| \tname: Ada
+| \temail: C:\\\\new
+| 
+| #
+| # This config file format is SHCL.
+| # "Simple Hierarchical Config Language"
+| #    Home     https://github.com/jim-collier/shcl
+| #    Syntax   https://github.com/jim-collier/shcl/blob/main/project/spec.md
+| #    Legal    SHCL is Copyright © 2026 Jim Collier. License: MIT. No warranty.
+| #

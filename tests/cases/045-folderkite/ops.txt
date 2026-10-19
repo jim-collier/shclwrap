@@ -1,0 +1,16 @@
+# What Folderkite's own setters wrote under shcl 2.0, from its old-format
+# writer. Open upgrades it. A backslash 2.0 wrote doubled in bare text now
+# reads as typed, so terminal.exec has 4 where 2.0 read 2, and the tab in
+# archive.create-with-rar is a backslash and a t (2026101914000000).
+open	doc.shcl
+upgraded
+rewrites
+get	strs	search.search-skip-folders
+get	strs	windows.associations
+get	str	terminal.exec
+get	str	archive.create-with-rar
+get	str	preferences.bulk-rename-tool
+get	float	file-cache.memory-gib
+write	doc.shcl
+upgraded
+files

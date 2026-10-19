@@ -1,0 +1,14 @@
+> open	doc.shcl
+ok
+> upgraded
+from 0 backup none
+> rewrites
+false
+> errors
+0
+> get	str	font.family
+Good	47	Monaspace Argon, Fira Code, JetBrains Mono, Cascadia Mono, Consolas, Ubuntu Mono, SF Mono, Menlo, Courier New
+> get	int	window.columns
+Good	71	160
+> get	float	transparency.opacity
+Good	110	0.95

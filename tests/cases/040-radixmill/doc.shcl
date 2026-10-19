@@ -1,0 +1,134 @@
+# radixmill configuration.
+#
+#
+# This config file is written in:
+#
+# SHCL: Simple Hierarchical Config Language.
+#
+#	"Forgiving and predictable. The parser does the work instead of you."
+#
+#	Links and license are in the block at the end of this file. Its Format line
+#	says which SHCL rules the file follows, so keep it.
+#
+#
+# radixmill creates this file on the first run and never rewrites it afterwards,
+# so anything you put here is safe. Delete it and it comes back with these defaults.
+# The one exception is a later version that reads SHCL differently. It converts
+# the file once, keeping your settings, and leaves the original beside it.
+#
+# You can create a system-wide file at '/etc/radixmill/radixmill.shcl'.
+# It is read first, so anything here wins over it. Both override the built-in bases:
+# reuse a built-in name and your definition replaces it.
+#
+# Field names are case insensitive, indentation is tabs or spaces, and a value
+# only needs quotes when it contains a space, a comma, a colon, a "#", or a
+# quote character.
+#
+# A backslash is plain text, except inside double quotes, where it starts an
+# escape and has to be written twice.
+#
+#
+# Defining a base
+#
+# Each "base:" line starts one base. The value after the colon is its canonical
+# name, and the indented lines under it are its fields.
+#
+#	aliases    Extra names for the base, comma separated. Optional.
+#
+#	symbols    The digit symbols, in order. Required. Either one string, split
+#	           on whitespace or on commas ("0123456789abcdef", "0 1 2 3"), or a
+#	           list with one entry per digit. Use the list form for symbols that
+#	           carry a space or a comma of their own. In the one string form, a
+#	           backslash keeps a space inside a digit ("\ "), and "\t", "\n"
+#	           and "\\" are a tab, a newline and a backslash. Write those
+#	           without double quotes, or double each backslash.
+#
+#	negative   Marker for a negative number. Defaults to "-".
+#	decimal    Marker for the fractional point. Defaults to ".".
+#
+#	pad        RFC style padding character. Applies in binary mode only, and
+#	           only to a power-of-2 base of at most 256 symbols, which is the
+#	           only place padding is ever written. Anywhere else it is an error
+#	           rather than a silent no-op. Decoding strips a trailing run of it.
+#	pademit    Set false for padding that is accepted on input but never
+#	           written.
+#
+#	tail       Secondary symbols for the final digit of a byte stream. Only for
+#	           a base of more than 256 symbols. See below.
+#
+# Leaving a marker field empty turns that feature off on purpose:
+#
+#	negative:
+#
+# The defaults "-" and "." are an error when they are also digits of the base,
+# so such a base has to either name different markers or switch them off. That
+# is on purpose, so a sign is never turned off without notice.
+#
+#
+# About tail
+#
+# A base with more than 256 symbols packs more than eight bits into a digit, so
+# the last digit of a byte stream is usually only partly filled. The tail is a
+# second, smaller set of symbols used for that final digit alone, which is how
+# the decoder knows how many real bits it carries. Without one the encoder has
+# to write a length count up front, which it cannot know until it has read all
+# the input, so nothing streams and nothing large can be encoded at all.
+#
+# A tail must hold a power of 2 symbols, at least two, at least 2^(bits-8) of
+# them (four for a 1024 symbol base, eight for 2048), no more than 256, and none
+# of them may also be a digit. Every digit and every tail symbol must be a single
+# character, since a byte stream is decoded one character per digit. Anything
+# else is an error where it is written.
+
+
+# Base 10 in emoji, hand picked to cover a wide range of expressions. It lives
+# here rather than in the built-in set, so there is always a working example to
+# copy from.
+base: 10emoji
+	aliases: emoji10
+	symbols: "😀 😑 😔 😘 😜 😠 😬 😮 🙄 🤔"
+	negative: "🥕"
+	decimal: "⚽"
+
+
+# Everything below is commented out. Uncomment a block to try it.
+
+# A toy base 4.
+#base: abcd
+#	aliases: 4abc
+#	symbols: ABCD
+
+# A base whose digits include "-", so the default negative marker would collide.
+#base: u12
+#	symbols: "0123456789-_"
+#	negative: N
+
+# List form: one entry per digit.
+#base: emoji4
+#	symbols: 🍎, 🍊, 🍋, 🍌
+
+# The same list stacked one per line, which reads better when there are many.
+#base: fruit4
+#	symbols:
+#		* 🍎
+#		* 🍊
+#		* 🍋
+#		* 🍌
+
+# A 512 symbol base with a tail, so binary mode streams both ways. Nine bits per
+# digit, so the tail needs 2^(9-8) = 2 symbols, and neither may be a digit. The
+# alphabet is left as a placeholder because 512 symbols is a long line. Every
+# value stays on one line, and a raw block over several is refused.
+#base: cjk512
+#	symbols: "<512 symbols, whitespace delimited>"
+#	tail: ⸐, ⸑
+
+
+##
+## This config file format is SHCL.
+## "Simple Hierarchical Config Language"
+##    Format   3
+##    Home     https://github.com/yottacore/shcl
+##    Syntax   https://github.com/yottacore/shcl/blob/v3.0.0-beta1/project/spec.md
+##    Legal    SHCL is Copyright © 2026 Jim Collier [ID: 2უNაɘ«҂թȹɤξπ๙¿ձϖ]. License: MIT. No warranty.
+##

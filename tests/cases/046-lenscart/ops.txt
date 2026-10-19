@@ -1,0 +1,6 @@
+# Lenscart's schema, which it generates from its preferences, as shcl 1.2
+# wrote it. Open upgrades its lists.
+open	doc.shcl
+upgraded
+errors
+eachget	strs	field	allowed

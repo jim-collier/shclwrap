@@ -1,0 +1,12 @@
+> open	doc.shcl
+ok
+> upgraded
+from 0 backup none
+> rewrites
+false
+> get	str	risk.max_order_quote
+Good	34	250.50
+> get	str	indicators.rsi14
+Good	29	rsi(close, 14)
+> get	bool	tax.prefer_ltcg
+Good	40	true

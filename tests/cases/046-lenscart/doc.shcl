@@ -1,0 +1,168 @@
+# Generated from the declared preferences - see prefs/schema.py.
+# Edit the preferences, not this file.
+
+field: program.program_version
+	type: string
+field: rename.photo_download_folder
+	type: string
+field: rename.video_download_folder
+	type: string
+field: rename.photo_subfolder
+	type: string-array
+field: rename.video_subfolder
+	type: string-array
+field: rename.photo_rename
+	type: string-array
+field: rename.video_rename
+	type: string-array
+field: rename.photo_extension
+	type: string
+	allowed: lowercase, UPPERCASE
+field: rename.video_extension
+	type: string
+	allowed: lowercase, UPPERCASE
+field: rename.day_start
+	type: string
+field: rename.strip_characters
+	type: bool
+field: rename.synchronize_raw_jpg
+	type: bool
+field: rename.job_codes
+	type: string-array
+field: rename.remember_job_code
+	type: bool
+field: rename.ignore_mdatatime_for_mtp_dng
+	type: bool
+field: timeline.proximity_seconds
+	type: int
+field: timeline.timeline_window_fraction
+	type: float
+field: timeline.timeline_date_format
+	type: string
+field: display.detailed_time_remaining
+	type: bool
+field: display.warn_downloading_all
+	type: bool
+field: display.warn_backup_problem
+	type: bool
+field: display.warn_broken_or_missing_libraries
+	type: bool
+field: display.warn_fs_metadata_error
+	type: bool
+field: display.warn_unhandled_files
+	type: bool
+field: display.ignore_unhandled_file_exts
+	type: string-array
+field: display.job_code_sort_key
+	type: int
+field: display.job_code_sort_order
+	type: int
+field: display.completed_downloads
+	type: int
+field: display.consolidate_identical
+	type: bool
+field: display.treat_raw_jpeg
+	type: int
+field: display.mark_raw_jpeg
+	type: int
+field: display.language
+	type: string
+field: display.show_system_folders
+	type: bool
+field: display.theme
+	type: string
+	allowed: system, light, dark
+field: display.thumbnail_size
+	type: int
+field: device.this_computer_source
+	type: bool
+field: device.this_computer_path
+	type: string
+field: device.ignored_paths
+	type: string-array
+field: device.use_re_ignored_paths
+	type: bool
+field: device.scan_subfolders
+	type: bool
+field: device.follow_symlinks
+	type: bool
+field: device.unmount_after_download
+	type: bool
+field: device.source_folder_history
+	type: string-array
+field: device.source_folder_favorites
+	type: string-array
+field: backup.backup_files
+	type: bool
+field: backup.backup_photo_location
+	type: string
+field: backup.backup_video_location
+	type: string
+field: automation.auto_download_at_startup
+	type: bool
+field: automation.auto_exit
+	type: bool
+field: automation.auto_exit_force
+	type: bool
+field: automation.move
+	type: bool
+field: automation.verify_file
+	type: bool
+field: performance.generate_thumbnails
+	type: bool
+field: performance.use_thumbnail_cache
+	type: bool
+field: performance.save_fdo_thumbnails
+	type: bool
+field: performance.max_cpu_cores
+	type: int
+field: performance.keep_thumbnails_days
+	type: int
+field: error_handling.conflict_resolution
+	type: int
+field: error_handling.backup_duplicate_overwrite
+	type: bool
+field: destinations.photo_backup_destinations
+	type: string-array
+field: destinations.video_backup_destinations
+	type: string-array
+field: destinations.photo_destination_history
+	type: string-array
+field: destinations.photo_destination_favorites
+	type: string-array
+field: destinations.video_destination_history
+	type: string-array
+field: destinations.video_destination_favorites
+	type: string-array
+field: restart_directives.purge_thumbnails
+	type: bool
+field: restart_directives.optimize_thumbnail_db
+	type: bool
+field: metadata.force_exiftool
+	type: bool
+field: metadata.force_exiftool_video
+	type: bool
+field: metadata.ignore_time_zone_changes
+	type: bool
+field: metadata.time_zone_offset_resolution
+	type: int
+field: metadata.derive_datetime_from_filename
+	type: bool
+field: metadata.derive_datetime_from_mtime
+	type: bool
+
+# Renaming presets, one numbered row per preset.
+field: presets.*.*.name
+	type: string
+field: presets.*.*.pref
+	type: string-array
+
+# Camera name mappings, one numbered row each.
+field: camera_name_mappings.*.make
+	type: string
+field: camera_name_mappings.*.model
+	type: string
+field: camera_name_mappings.*.serial
+	type: string
+field: camera_name_mappings.*.name
+	type: string

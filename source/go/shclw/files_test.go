@@ -309,7 +309,9 @@ func TestSaveRefusedOverFile(t *testing.T) {
 		text string
 		open func(string) (shclw.Doc, error)
 	}{
-		{3, "a: 1\na(5): 2\n", func(p string) (shclw.Doc, error) { return shclw3.Open(p) }},
+		// Open now takes an unstamped file with an error as 2.x, and 2.0 refuses this one.
+		// {3, "a: 1\na(5): 2\n", func(p string) (shclw.Doc, error) { return shclw3.Open(p) }},
+		{3, "a: 1\na(5): 2\n##    Format   3\n", func(p string) (shclw.Doc, error) { return shclw3.Open(p) }},
 	} {
 		dir := t.TempDir()
 		path := filepath.Join(dir, "c.shcl")
@@ -326,4 +328,98 @@ func TestSaveRefusedOverFile(t *testing.T) {
 			t.Errorf("v%d: file %q, %v", c.n, got, names(t, dir))
 		}
 	}
+}
+
+// Open upgrades a 2.x file in memory and writes nothing. The first Write
+// over it, by any name for the same file, backs up the original, and later
+// ones don't.
+func TestOpenUpgradesInMemory(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "c.shcl")
+	writeFile(t, path, clean2x, 0o600)
+	d, err := shclw3.Open(path)
+	if err != nil || d.UpgradedFrom() != 2 || d.BackupName() != "" || !d.Rewrites() {
+		t.Fatalf("open: %v, from %d, backup %q", err, d.UpgradedFrom(), d.BackupName())
+	}
+	if got := d.Strs("tags", nil); len(got) != 2 || got[1] != "b" {
+		t.Errorf("tags read %q", got)
+	}
+	if readFile(t, path) != clean2x || len(names(t, dir)) != 1 {
+		t.Fatalf("open wrote something: %v", names(t, dir))
+	}
+	if err := d.Write(filepath.Join(dir, ".", "c.shcl")); err != nil {
+		t.Fatal(err)
+	}
+	b := d.BackupName()
+	if filepath.Dir(b) != dir || readFile(t, b) != clean2x || !hasMode(t, b, 0o600) {
+		t.Errorf("backup %q", b)
+	}
+	if got := readFile(t, path); !strings.HasPrefix(got, clean2to) || shclw3.FormatOf(got) != 3 {
+		t.Errorf("file holds %q", got)
+	}
+	if d.Rewrites() {
+		t.Error("still rewrites after the first save")
+	}
+	d.Put("n", 1)
+	if err := d.Write(path); err != nil || len(names(t, dir)) != 2 || d.BackupName() != b {
+		t.Errorf("second write: %v, %v", err, names(t, dir))
+	}
+	again, err := shclw3.Open(path)
+	if err != nil || again.UpgradedFrom() != 0 || again.Int("n", 0) != 1 {
+		t.Errorf("reopen: %v, from %d", err, again.UpgradedFrom())
+	}
+}
+
+// A file that changed since Open read it is left alone, with no backup.
+func TestOpenUpgradeEditedMeanwhile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "c.shcl")
+	writeFile(t, path, clean2x, 0o644)
+	d, err := shclw3.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, path, "tags: x, y\n", 0o644)
+	if err := d.Write(path); shclw.KindOf(err) != shclw.ErrIO {
+		t.Errorf("got %v, want io", err)
+	}
+	if readFile(t, path) != "tags: x, y\n" || len(names(t, dir)) != 1 || d.BackupName() != "" {
+		t.Errorf("folder now holds %v", names(t, dir))
+	}
+}
+
+// Something already at the backup's name is never written over. The save
+// is ErrBackupTaken and the file stays as it was.
+func TestOpenUpgradeBackupTaken(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "c.shcl")
+	writeFile(t, path, clean2x, 0o644)
+	d, err := shclw3.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The name has the time in it to the second. Go again on a tick.
+	for try := 0; try < 3; try++ {
+		name := shcl3.BackupFileName(path, 2)
+		writeFile(t, name, "mine\n", 0o644)
+		err := d.Write(path)
+		if shcl3.BackupFileName(path, 2) != name {
+			for _, n := range names(t, dir) {
+				os.Remove(filepath.Join(dir, n))
+			}
+			writeFile(t, path, clean2x, 0o644)
+			if d, err = shclw3.Open(path); err != nil {
+				t.Fatal(err)
+			}
+			continue
+		}
+		if shclw.KindOf(err) != shclw.ErrBackupTaken || d.BackupName() != "" {
+			t.Errorf("got %v, want backuptaken", err)
+		}
+		if readFile(t, path) != clean2x || readFile(t, name) != "mine\n" || len(names(t, dir)) != 2 {
+			t.Errorf("file %q, backup %q, %v", readFile(t, path), readFile(t, name), names(t, dir))
+		}
+		return
+	}
+	t.Fatal("the clock ticked on every try")
 }

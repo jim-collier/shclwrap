@@ -1,0 +1,17 @@
+# shcl 2.0 reports errors on this file too, so Open refuses it with 2.0's
+# errors, gives an empty document, and writes nothing.
+open	doc.shcl
+get	int	a
+files
+# Lines that read two ways.
+open	ambiguous.shcl
+# A file naming format 3 is current, errors and all.
+open	stamped.shcl
+upgraded
+diags
+open	newer.shcl
+open	missing.shcl
+# Strictness applies to the upgraded text.
+open	old.shcl	strict
+upgraded
+get	strs	tags

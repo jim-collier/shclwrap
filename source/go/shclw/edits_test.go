@@ -30,6 +30,8 @@ var docMethods = map[string]string{
 	"Remove": "remove",
 	// No path; they change what the save writes (design.md, Format and upgrade).
 	"InfoBlock": "info", "StampFormat": "info",
+	// What Open upgraded, and where the first Write backed it up.
+	"UpgradedFrom": "read", "BackupName": "read",
 }
 
 var edits = map[string]func(d shclw.Doc, path string) error{
