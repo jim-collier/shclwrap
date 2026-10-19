@@ -88,6 +88,38 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Swept: Go, Rust, and C for the helpers only 1.2 and 2.0 used (the step-count edit check, the path splitter for `Each`, the 1.2 save, the 1.2 and 2.0 info block text, and the Format line reader), all removed. Comments, cicd, `c_cases.py`, `fuzz.py`, design.md, and README for 1.2 and 2.0 mentions.
 		- Part 2: Open, OpenWith, Write, and Rewrites in all 3 languages, the 3 ops runners, the `Doc` interface, the `ShclDoc` and `Lib` traits, Go's docMethods list, `fuzz.py`, and every test that opens an unstamped file with an error.
 
+- The upgrade keeps a 2.x backslash escape as typed, and 3.0 reads it as text
+	- ID: 2026101910455900
+	- Type: Bug
+	- Status: Waiting for testing
+	- Needs local test suite run?: Yes, the full run with the C leak checks.
+	- Severity: High
+	- Opened: 20261019-104559
+	- Opened by: JC
+	- Related IDs: 2026101613005800, 2026101513330010
+	- Steps to reproduce:
+		- Open or upgrade a 2.x file holding `email: C:\\new`, as Quillroute wrote it, or Folderkite's `exec: \\\\server\\share\\term.exe`.
+	- Incorrect behavior: Each backslash pair 2.x read as one reads as 2, and a `\t` 2.x read as a tab reads as a backslash and a t. The upgrade says nothing is unsure.
+	- Expected behavior: The upgraded file reads the values 2.x read.
+	- Reproduced: 20261019, in shared cases 039-quillroute and 045-folderkite, in Go, Rust, and C. The `path` line in 034-upgrade-1x-written does it too.
+	- Possible cause: 3.0 reads a backslash as text everywhere, and shcl's migrate leaves a pair 2.x resolved as it was written, by its own comment. Quillroute's own tests expect `C:\new` after its conversion.
+	- Note: A fix rewrites those values in the upgrade. A backslash a person typed in a 2.x file by hand, like `C:\temp`, read as a tab then too.
+	- Actual cause:
+		- shcl's `migrate` keeps every 2.x backslash pair as typed, on purpose, per its spec.md ("One change is quiet"). 3.0 reads a backslash as text, so `\\` read as 2 and `\t` as a backslash and a t, with nothing counted as lost or ambiguous. shcl's dev hasn't changed it since the pin. It's written up for shcl's backlog as a silent wrong answer.
+		- 1.2 read value escapes as 2.0 did: `\t`, `\n`, `\\`, `\"`, and `\'`, and any other backslash as typed. It read names as typed, where 2.0 resolved escapes in them too.
+	- Progress log:
+		- 20261019: Fixed for every file the upgrade takes as 2.x, in Go, Rust, and C.
+		- 20261019: Question: Open takes 039's file as current, since it has no Format line and loads clean on 3.0, so it still reads `C:\\new` with 2 backslashes. Only `from` 2 fixes it. The file ends in 2.x's `#` info block, which no 3.0 writer makes. Should Open take an unstamped file with that block as 2.x? A 3.0 program that saved over a 2.x file without the wrapper keeps the block too, and a backslash it wrote would then be read the 2.x way.
+		- 20261019: That's 2026101513330010, already queued, so it's left to that item. This one waits only on the full run.
+	- Decisions:
+		- A line the upgrade can't carry is refused, with its line in the diags, rather than counted in `Unsure`, as with 2.0's errors (design.md, Decisions).
+	- Actual fix: After shcl's upgrade, each value with an escape in it is set again, so 3.0 reads what 2.0 read, and every path 2.0 reads one value at is read back against 2.0. A value that still reads differently, or a name 2.0 read with an escape resolved, is `Refused` with its line. A file naming format 1 keeps its names as typed, as 1.2 read them. A file shcl leaves alone but which has escapes gets the info block, so a second upgrade doesn't read them twice.
+	- Branch: upesc
+	- Commit: 2ca2f67, 11d80f4
+	- Test case: tests/cases/047-upgrade-escapes (a tab escape, a doubled pair, a lone backslash before a letter, quoted and bare values, an array, a repeated key, a raw body), 048-upgrade-escaped-name, 049-upgrade-1x-name, and the corrected want files of 034, 035, 039, and 045. All 7 fail in Go, Rust, and C without the fix and pass with it. With the sets turned off, the read-back against 2.0 refuses 045 and 047 in all 3.
+	- Swept: Upgrade, UpgradeFile, and Open in Go, Rust, and C, which all go through Upgrade. Values, array elements, repeated keys, names, and raw bodies. InfoBlock and StampFormat change no values. The ops runners, `fuzz.py`, and `c_cases.py` only compare outputs.
+	- Verified: `cicd/cicd.bash --quick` and `cicd/cicd.bash --ci --no-sync` pass, with the C clang-tidy, analyzers, and sanitized cases. The full run with the leak checks hasn't run.
+
 - shcl 4 adapters
 	- ID: 2026101512024163
 	- Type: Feature
@@ -116,37 +148,6 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- The tag is spelled with no dot, per shcl's own backlog.
 		- shcl's Go module path is still `.../v2`, and Go won't take a v3 tag on it. Go stays on a commit until that changes.
 		- Quillroute plans to have its release refuse a commit pin. The same check would fit here.
-
-- The upgrade keeps a 2.x backslash escape as typed, and 3.0 reads it as text
-	- ID: 2026101910455900
-	- Type: Bug
-	- Status: Waiting for answers
-	- Needs local test suite run?: Yes, the full run with the C leak checks.
-	- Severity: High
-	- Opened: 20261019-104559
-	- Opened by: JC
-	- Related IDs: 2026101613005800, 2026101513330010
-	- Steps to reproduce:
-		- Open or upgrade a 2.x file holding `email: C:\\new`, as Quillroute wrote it, or Folderkite's `exec: \\\\server\\share\\term.exe`.
-	- Incorrect behavior: Each backslash pair 2.x read as one reads as 2, and a `\t` 2.x read as a tab reads as a backslash and a t. The upgrade says nothing is unsure.
-	- Expected behavior: The upgraded file reads the values 2.x read.
-	- Reproduced: 20261019, in shared cases 039-quillroute and 045-folderkite, in Go, Rust, and C. The `path` line in 034-upgrade-1x-written does it too.
-	- Possible cause: 3.0 reads a backslash as text everywhere, and shcl's migrate leaves a pair 2.x resolved as it was written, by its own comment. Quillroute's own tests expect `C:\new` after its conversion.
-	- Note: A fix rewrites those values in the upgrade. A backslash a person typed in a 2.x file by hand, like `C:\temp`, read as a tab then too.
-	- Actual cause:
-		- shcl's `migrate` keeps every 2.x backslash pair as typed, on purpose, per its spec.md ("One change is quiet"). 3.0 reads a backslash as text, so `\\` read as 2 and `\t` as a backslash and a t, with nothing counted as lost or ambiguous. shcl's dev hasn't changed it since the pin. It's written up for shcl's backlog as a silent wrong answer.
-		- 1.2 read value escapes as 2.0 did: `\t`, `\n`, `\\`, `\"`, and `\'`, and any other backslash as typed. It read names as typed, where 2.0 resolved escapes in them too.
-	- Progress log:
-		- 20261019: Fixed for every file the upgrade takes as 2.x, in Go, Rust, and C.
-		- 20261019: Question: Open takes 039's file as current, since it has no Format line and loads clean on 3.0, so it still reads `C:\\new` with 2 backslashes. Only `from` 2 fixes it. The file ends in 2.x's `#` info block, which no 3.0 writer makes. Should Open take an unstamped file with that block as 2.x? A 3.0 program that saved over a 2.x file without the wrapper keeps the block too, and a backslash it wrote would then be read the 2.x way.
-	- Decisions:
-		- A line the upgrade can't carry is refused, with its line in the diags, rather than counted in `Unsure`, as with 2.0's errors (design.md, Decisions).
-	- Actual fix: After shcl's upgrade, each value with an escape in it is set again, so 3.0 reads what 2.0 read, and every path 2.0 reads one value at is read back against 2.0. A value that still reads differently, or a name 2.0 read with an escape resolved, is `Refused` with its line. A file naming format 1 keeps its names as typed, as 1.2 read them. A file shcl leaves alone but which has escapes gets the info block, so a second upgrade doesn't read them twice.
-	- Branch: upesc
-	- Commit: 2ca2f67, 11d80f4
-	- Test case: tests/cases/047-upgrade-escapes (a tab escape, a doubled pair, a lone backslash before a letter, quoted and bare values, an array, a repeated key, a raw body), 048-upgrade-escaped-name, 049-upgrade-1x-name, and the corrected want files of 034, 035, 039, and 045. All 7 fail in Go, Rust, and C without the fix and pass with it. With the sets turned off, the read-back against 2.0 refuses 045 and 047 in all 3.
-	- Swept: Upgrade, UpgradeFile, and Open in Go, Rust, and C, which all go through Upgrade. Values, array elements, repeated keys, names, and raw bodies. InfoBlock and StampFormat change no values. The ops runners, `fuzz.py`, and `c_cases.py` only compare outputs.
-	- Verified: `cicd/cicd.bash --quick` and `cicd/cicd.bash --ci --no-sync` pass, with the C clang-tidy, analyzers, and sanitized cases. The full run with the leak checks hasn't run.
 
 - Layered loading
 	- ID: 2026101512024156
@@ -212,6 +213,8 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Opened by: JC
 	- Requirements:
 		- With `from` 0, a file with no Format line but with the 2.x banner is taken as 2.x.
+	- Related IDs: 2026101910455900
+	- Note: Since 2026101910455900, Open reads such a file's 2.x escapes wrong until this is done. 039-quillroute shows it. The risk is a 3.0 program that saved over a 2.x file without the wrapper, which keeps the block, and a backslash it wrote would then be read the 2.x way.
 	- Note: Quillroute looks for the banner. Cobblevale, Folderkite, Mossrealm, and Wovenshell take any file with no Format line as old, which is wrong for a new file with no banner.
 
 - Upgrade swaps the 2.x banner for the current one
