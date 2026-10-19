@@ -1,5 +1,3 @@
-github.com/jim-collier/shcl/source/go v1.2.0 h1:R7CveeKAboXF+NThTiPvD3sCUYLdkCIjCt12GfTx1vI=
-github.com/jim-collier/shcl/source/go v1.2.0/go.mod h1:2zVeo5TM3kWsncP7h58KwE/7hecaIksM7C3RB4bTvBo=
 github.com/jim-collier/shcl/source/go/v2 v2.0.0 h1:jfHFipn/h5seFCYj3EBLdBsV7NJxJKonNdiFdA4kYuQ=
 github.com/jim-collier/shcl/source/go/v2 v2.0.0/go.mod h1:A4/dewqlAvr+OcaRSFOe4u8lIWz2p0Ejm6p62ydk1lk=
 github.com/yottacore/shcl/source/go/v2 v2.0.0-20261015182735-ea0998fa41f7 h1:fB7PFEcIUQeu8j3QSWbTT77hBH+BTbbQ7c8LOHECVCc=

@@ -181,10 +181,16 @@ fn old_errors(text: &str, from_v2: bool, u: &shcl::Upgrade) -> Option<Error> {
 	if u.ambiguous > 0 || (u.current && !(from_v2 && u.format < FORMAT_MAJOR)) {
 		return None;
 	}
-	let errs: Vec<Diag> = crate::v2::parse(text)
-		.diags()
-		.into_iter()
-		.filter(|d| d.severity == Severity::Error)
+	let errs: Vec<Diag> = shcl2::Document::parse(text)
+		.diagnostics()
+		.iter()
+		.filter(|d| matches!(d.severity, shcl2::Severity::Error))
+		.map(|d| Diag {
+			line: d.line,
+			severity: Severity::Error,
+			code: d.code,
+			message: d.message.clone(),
+		})
 		.collect();
 	if errs.is_empty() {
 		return None;

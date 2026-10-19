@@ -12,15 +12,13 @@ import (
 	"testing"
 
 	"github.com/jim-collier/shclwrap/source/go/shclw"
-	"github.com/jim-collier/shclwrap/source/go/shclw1"
-	"github.com/jim-collier/shclwrap/source/go/shclw2"
 	"github.com/jim-collier/shclwrap/source/go/shclw3"
 )
 
 var libs = []struct {
 	n   int
 	lib shclw.Lib
-}{{1, shclw1.Lib}, {2, shclw2.Lib}, {3, shclw3.Lib}}
+}{{3, shclw3.Lib}}
 
 const casesDir = "../../../tests/cases"
 
@@ -75,7 +73,7 @@ var verFile = regexp.MustCompile(`^(.+)\.v(\d+)(\.[^.]+)$`)
 
 // materialize copies a case into dir as version n sees it. A file named
 // x.vK.ext stands in for x.ext from version K up, until a higher K takes
-// over, so 2.0 shares 1.2's files unless it has its own.
+// over.
 func materialize(t *testing.T, from, dir string, n int) bool {
 	t.Helper()
 	ents, err := os.ReadDir(from)

@@ -8,7 +8,7 @@
 ##	   0. remote sync (fast-forward from upstream before anything is built)
 ##	   1. format (in place; check-only under --ci)
 ##	   2. lint (go vet, staticcheck, clippy, clang-tidy, gcc-15, shellcheck, ruff)
-##	   3. tests (shared cases against every shcl version, in every language)
+##	   3. tests (shared cases in every language)
 ##	   4. leak checks (CodeQL, CTU analysis, and the heaptrack soak, for C)
 ##	   5. fuzz (Rust and C against Go from generated cases, plus Go's own fuzzer)
 ##	- Syntax:
@@ -31,9 +31,9 @@
 ##	  for Rust and C against Go, and SHCLW_GOFUZZ_SECONDS (default 30, 0 with --quick)
 ##	  for Go's fuzzer. Failing fuzz cases go to cicd/artifacts/fuzz/.
 ##	- Test scratch goes under $TMPDIR, in a folder the run makes and removes.
-##	- C builds against each shcl.h pinned in source/c/shcl-pins.env, fetched by
-##	  commit into cicd/cache/ and checked by sha256, once per version. The 3.0
-##	  build takes 2.0's too, for the upgrade check.
+##	- C builds against the shcl.h pinned in source/c/shcl-pins.env, fetched by
+##	  commit into cicd/cache/ and checked by sha256. It takes 2.0's too, for
+##	  the upgrade check.
 
 ##	History: At bottom of script.
 
@@ -208,18 +208,11 @@ fEcho "OK: go vet, staticcheck"
 (cd "${root}/source/rust" && cargo clippy --quiet -j "${cpuCap}" --all-features --all-targets -- -D warnings -W clippy::pedantic)
 fEcho "OK: clippy"
 doC=1
-fShclHeader "${SHCL1_REV}" "${SHCL1_SHA256}" || doC=0
 fShclHeader "${SHCL2_REV}" "${SHCL2_SHA256}" || doC=0
 fShclHeader "${SHCL3_REV}" "${SHCL3_SHA256}" || doC=0
-if ((doC)); then
-	bash "${here}/c-checks.bash" pick 1 "${work}"
-	fEcho "OK: C builds only with the right SHCLW_SHCL for each shcl.h"
-fi
 if ((doC && ! doQuick)); then
-	for v in 1 2 3; do
-		bash "${here}/c-checks.bash" lint "${v}" "${work}"
-		fEcho "OK: clang-tidy, gcc-15 at C17, and static analyzers (C over shcl ${v})"
-	done
+	bash "${here}/c-checks.bash" lint 3 "${work}"
+	fEcho "OK: clang-tidy, gcc-15 at C17, and static analyzers (C over shcl 3)"
 fi
 mapfile -t shellFiles < <(find "${root}/cicd" -type f \( -name '*.bash' -o -path '*/hooks/*' \) | sort)
 ((${#shellFiles[@]})) || fDie "shellcheck found no files"
@@ -236,15 +229,11 @@ fEcho "OK: Go tests"
 (cd "${root}/source/rust" && TMPDIR="${work}" cargo test --quiet -j "${cpuCap}" --all-features)
 fEcho "OK: Rust tests"
 if ((doC && doQuick)); then
-	for v in 1 2 3; do
-		bash "${here}/c-checks.bash" quick "${v}" "${work}"
-		fEcho "OK: gcc-15 at C17, C API tests, and shared cases over shcl ${v}, plain build"
-	done
+	bash "${here}/c-checks.bash" quick 3 "${work}"
+	fEcho "OK: gcc-15 at C17, C API tests, and shared cases over shcl 3, plain build"
 elif ((doC)); then
-	for v in 1 2 3; do
-		bash "${here}/c-checks.bash" test "${v}" "${work}"
-		fEcho "OK: C API tests and shared cases over shcl ${v}, sanitized, plain, and as C++"
-	done
+	bash "${here}/c-checks.bash" test 3 "${work}"
+	fEcho "OK: C API tests and shared cases over shcl 3, sanitized, plain, and as C++"
 fi
 
 #•••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••
@@ -265,7 +254,7 @@ if ((doFuzz)); then
 	if ((fuzzSecs > 0 && doC)); then
 		## In the container, where the C drivers were built. Go's and Rust's run there too.
 		cDrive=shclw-drive; if ((doQuick)); then cDrive=shclw-drive-plain; fi
-		bash "${here}/c-checks.bash" fuzz all "${work}" "${cDrive}" --seconds "${fuzzSecs}" || {
+		bash "${here}/c-checks.bash" fuzz 3 "${work}" "${cDrive}" --seconds "${fuzzSecs}" || {
 			if [[ -d "${work}/fuzz-fail" ]]; then mkdir -p "${failDir%/*}"; cp -r "${work}/fuzz-fail" "${failDir}"; fi
 			fDie "fuzz found failures; cases are in ${failDir}"
 		}
@@ -292,3 +281,4 @@ fEcho_Clean
 ##		- 2026-10-15 JC: C over shcl 1.2 and 2.0 too, each linted, tested, and run on the shared cases, plus the SHCLW_SHCL pick check.
 ##		- 2026-10-19 JC: --gate is now --ci. --quick runs only the fast checks, and no options runs everything, leak checks included.
 ##		- 2026-10-19 JC: The fuzz runs C too, on all 3 shcl versions.
+##		- 2026-10-19 JC: shcl 3.0 is the floor. C builds and tests over 3.0 only, and the SHCLW_SHCL pick check is gone.

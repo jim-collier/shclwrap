@@ -10,19 +10,6 @@ import (
 	"strings"
 )
 
-// InfoText is the info block for a file of the given format, worded as shcl
-// 3.0's GenBanner, with its Syntax line linking the spec at tag.
-func InfoText(format int, tag string) string {
-	return "##\n" +
-		"## This config file format is SHCL.\n" +
-		"## \"Simple Hierarchical Config Language\"\n" +
-		formatWord + "   " + strconv.Itoa(format) + "\n" +
-		"##    Home     https://github.com/yottacore/shcl\n" +
-		"##    Syntax   https://github.com/yottacore/shcl/blob/" + tag + "/project/spec.md\n" +
-		"##    Legal    SHCL is Copyright © 2026 Jim Collier [ID: 2უNაɘ«҂թȹɤξπ๙¿ձϖ]. License: MIT. No warranty.\n" +
-		"##\n"
-}
-
 // Info is what a save does with the info block.
 type Info int
 
@@ -116,26 +103,6 @@ func FinishInfo(text string, info Info, stamp bool, e InfoEdit) (string, error) 
 		return "", &Error{Kind: ErrRefused, Msg: "the file ends in a raw block that never closes"}
 	}
 	return bom + out, nil
-}
-
-// FormatIn is the format text's Format line names, or 0, for an adapter
-// whose shcl doesn't read the line. It reads it as shcl 3.0 does, and a line
-// in a raw body is the body's. Of several, the first naming major or newer
-// wins, or else the highest.
-func FormatIn(text string, e InfoEdit) int {
-	text = strings.TrimPrefix(text, "\ufeff")
-	// Most files have none, and every Open asks.
-	if !strings.Contains(text, formatWord) {
-		return 0
-	}
-	highest := 0
-	for _, n := range formatsNamed(splitInfoLines(text), e, e.Values(text)) {
-		if n >= e.Major {
-			return n
-		}
-		highest = max(highest, n)
-	}
-	return highest
 }
 
 // formatsNamed is the number on each Format line that counts, in order. A

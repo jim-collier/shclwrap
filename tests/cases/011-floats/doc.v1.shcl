@@ -1,8 +1,0 @@
-## floats
-big: 1e400
-small: -1e400
-tiny: 1e-400
-ok: 2.5
-list: 1e400, 2
-twice: 1
-twice: 2

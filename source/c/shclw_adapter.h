@@ -30,7 +30,7 @@ double *shclw_i_copy_floats(const double *items, size_t n, size_t *count);
 size_t shclw_i_utf8_next(const char *s, size_t n, uint32_t *r);
 bool shclw_i_utf8_valid(const char *s, size_t n);
 
-// Infinity and NaN read as SHCLW_BAD_TYPE on every version. An array keeps its
+// Infinity and NaN read as SHCLW_BAD_TYPE, as in 3.0. An array keeps its
 // length, with 0 for each item that wasn't a number.
 void shclw_i_finite(shclw_got_float *g);
 void shclw_i_finite_all(shclw_got_floats *g);
@@ -74,25 +74,6 @@ shclw_string *shclw_i_dedupe_names(const shclw_string *names, size_t n, size_t *
 // Copies of the nodes in one block, each string with a NUL after it.
 shclw_node *shclw_i_copy_nodes(const shclw_node *nodes, size_t n, size_t *count);
 
-// Go's OneTarget: an edit whose path reaches several instances at any step is
-// SHCLW_ERR_BAD_PATH, unless a selector picks one there. 3.0 refuses those
-// itself, and 1.2 and 2.0 edit the first one and say ok, so their setters
-// all go through this. Paths in the 1.2 and 2.0 spelling.
-shclw_kind shclw_i_one_target(shclw_doc *d, const char *path, shclw_error *err);
-
-// shcl's child names under a path that names one node, repeats included, in
-// one block the caller frees. NULL only when memory ran out.
-typedef shclw_string *(*shclw_i_children)(shclw_doc *d, const char *path, size_t *n);
-
-// Go's EachPaths, for 1.2 and 2.0, which have no instance paths of their own:
-// a path for each instance path names, in the order shcl reads them. Every
-// step that repeats gets an index, so a path reads and edits that instance
-// alone. A wildcard lists each node it reaches, and a slot that reaches no
-// node or several is left out, as 3.0 has it. Free with shclw_i_free_paths.
-// NULL only when memory ran out.
-char **shclw_i_each_paths(shclw_doc *d, shclw_i_children children, const char *path, size_t *n);
-void shclw_i_free_paths(char **paths, size_t n);
-
 // Copies of the diagnostics in one block, each string with a NUL after it.
 shclw_diag *shclw_i_copy_diags(const shclw_diag *diags, size_t n, size_t *count);
 
@@ -106,21 +87,6 @@ bool shclw_i_irregular(const char *path);
 
 // What a save does with the info block, Go's shclw.Info.
 typedef enum { SHCLW_I_INFO_AS_IS, SHCLW_I_INFO_ON, SHCLW_I_INFO_OFF } shclw_i_info;
-
-// Go's InfoText: the info block for a file of format, worded as shcl 3.0's
-// SHCL_GEN_BANNER, with its Syntax line linking the spec at tag. Both are
-// string literals.
-// clang-format off
-#define SHCLW_I_INFO_TEXT(format, tag) \
-	"##\n" \
-	"## This config file format is SHCL.\n" \
-	"## \"Simple Hierarchical Config Language\"\n" \
-	"##    Format   " format "\n" \
-	"##    Home     https://github.com/yottacore/shcl\n" \
-	"##    Syntax   https://github.com/yottacore/shcl/blob/" tag "/project/spec.md\n" \
-	"##    Legal    SHCL is Copyright © 2026 Jim Collier [ID: 2უNაɘ«҂թȹɤξπ๙¿ձϖ]. License: MIT. No warranty.\n" \
-	"##\n"
-// clang-format on
 
 // What an adapter hands shclw_i_finish_info. values sums up the values and
 // errors text loads to with the bound shcl, malloc'd, or NULL when memory ran
@@ -136,12 +102,6 @@ typedef struct {
 // in *out, which the caller frees. path, which may be NULL, goes in the error.
 shclw_kind shclw_i_finish_info(const char *text, size_t len, shclw_i_info info, bool stamp, const shclw_i_info_edit *e,
                                const char *path, char **out, size_t *out_len, shclw_error *err);
-
-// Go's FormatIn, for an adapter whose shcl doesn't read the Format line: the
-// format text's line names in *format, or 0. It reads the line as 3.0 does,
-// and one in a raw body is the body's. Of several, the first naming e->major
-// or newer wins, or else the highest. Fails only when memory ran out.
-shclw_kind shclw_i_format_in(const char *text, size_t len, const shclw_i_info_edit *e, int64_t *format);
 
 // Go's ReplaceRead: writes data over path, where was is the text last read
 // from it. A file that has changed since is left alone, checked before the

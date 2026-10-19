@@ -14,8 +14,6 @@ use shclw::{replace_read, ErrKind, Error, ShclDoc};
 mod common;
 use common::Scratch;
 
-type UpgradeFn = fn(&str, u32) -> Result<shclw::Upgraded, Error>;
-
 const CLEAN_2X: &str = "tags: a, b\n";
 const CLEAN_2TO: &str = "tags: [a, b]\n";
 
@@ -285,22 +283,6 @@ fn upgrade_real_file() {
 	let e = shclw::v3::upgrade_file(&s(&newer), 0).expect_err("format 9 file");
 	assert_eq!(e.kind, ErrKind::TooNew, "{e}");
 	assert_eq!(read(&newer), "a: 1\n##    Format   9\n");
-
-	// 1.2 and 2.0 have nothing to convert, and never write.
-	let v3_text = format!("{CLEAN_2TO}##    Format   3\n");
-	let older: [(u32, UpgradeFn); 2] = [(1, shclw::v1::upgrade_file), (2, shclw::v2::upgrade_file)];
-	for (n, upgrade) in older {
-		let scratch = Scratch::new(&format!("upgrade-real-v{n}"));
-		let path = scratch.path().join("c.shcl");
-		fs::write(&path, CLEAN_2X).unwrap();
-		let u = upgrade(&s(&path), 0).expect("upgrade");
-		assert!(!u.changed && u.text == CLEAN_2X, "v{n}: {u:?}");
-		fs::write(&path, &v3_text).unwrap();
-		let e = upgrade(&s(&path), 0).expect_err("format 3 file");
-		assert_eq!(e.kind, ErrKind::TooNew, "v{n}");
-		assert_eq!(read(&path), v3_text, "v{n}");
-		assert_eq!(names(scratch.path()), ["c.shcl"], "v{n}");
-	}
 }
 
 /// Something already at the backup's name is never written over, and the
@@ -347,8 +329,6 @@ fn save_refused_by_folder() {
 	for name in ["c.shcl", "new.shcl"] {
 		let p = s(&dir.join(name));
 		let kind = |r: Result<(), Error>| r.err().map(|e| e.kind);
-		assert_eq!(kind(shclw::v1::parse(NOW).write(&p)), Some(ErrKind::Io), "v1 {name}");
-		assert_eq!(kind(shclw::v2::parse(NOW).write(&p)), Some(ErrKind::Io), "v2 {name}");
 		assert_eq!(kind(shclw::v3::parse(NOW).write(&p)), Some(ErrKind::Io), "v3 {name}");
 	}
 	let e = shclw::v3::upgrade_file(&s(&dir.join("u.shcl")), 2).expect_err("upgrade");
@@ -359,19 +339,13 @@ fn save_refused_by_folder() {
 }
 
 /// A save that would drop lines the load couldn't use is refused, and the
-/// file it was read from stays as it was. 1.2 has no such check.
+/// file it was read from stays as it was.
 #[test]
 fn save_refused_over_file() {
 	let scratch = Scratch::new("save-refused");
 	let dir = scratch.path();
 	let path = dir.join("c.shcl");
 	let p = s(&path);
-
-	fs::write(&path, "* x\na: 1\n").unwrap();
-	let mut d = shclw::v2::open(&p).expect("open");
-	d.remove("a");
-	assert_eq!(d.write(&p).err().map(|e| e.kind), Some(ErrKind::Refused), "v2");
-	assert_eq!(read(&path), "* x\na: 1\n", "v2");
 
 	fs::write(&path, "a: 1\na(5): 2\n").unwrap();
 	let mut d = shclw::v3::open(&p).expect("open");

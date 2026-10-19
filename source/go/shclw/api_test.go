@@ -13,8 +13,6 @@ import (
 	"testing"
 
 	"github.com/jim-collier/shclwrap/source/go/shclw"
-	"github.com/jim-collier/shclwrap/source/go/shclw1"
-	"github.com/jim-collier/shclwrap/source/go/shclw2"
 	"github.com/jim-collier/shclwrap/source/go/shclw3"
 )
 
@@ -92,8 +90,6 @@ func TestOpen(t *testing.T) {
 		n    int
 		open func(string) error
 	}{
-		{1, func(p string) error { _, err := shclw1.Open(p); return err }},
-		{2, func(p string) error { _, err := shclw2.Open(p); return err }},
 		{3, func(p string) error { _, err := shclw3.Open(p); return err }},
 	}
 	for _, o := range opens {
@@ -102,9 +98,6 @@ func TestOpen(t *testing.T) {
 				t.Errorf("v%d %s: got %v, want %v", o.n, filepath.Base(path), got, want)
 			}
 		}
-	}
-	if _, err := shclw1.Open(write("v3.shcl", "a: [x]\n##    Format   3\n")); shclw.KindOf(err) != shclw.ErrTooNew {
-		t.Errorf("v1 on a format 3 file: got %v, want toonew", err)
 	}
 	// A Format line in a raw body is the body's. A real one after it still
 	// counts.

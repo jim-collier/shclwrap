@@ -22,8 +22,6 @@ fn check_verify<L: Lib>(n: u32) {
 
 #[test]
 fn verify() {
-	check_verify::<shclw::v1::Version>(1);
-	check_verify::<shclw::v2::Version>(2);
 	check_verify::<shclw::v3::Version>(3);
 }
 
@@ -74,8 +72,6 @@ fn check_f32<L: Lib>(n: u32) {
 
 #[test]
 fn put_f32() {
-	check_f32::<shclw::v1::Version>(1);
-	check_f32::<shclw::v2::Version>(2);
 	check_f32::<shclw::v3::Version>(3);
 }
 
@@ -88,8 +84,6 @@ fn open() {
 	let binary = dir.join("binary.shcl");
 	fs::write(&binary, b"a: \xff\xfe\n").unwrap();
 	let missing = dir.join("missing.shcl");
-	let v3file = dir.join("v3.shcl");
-	fs::write(&v3file, "a: [x]\n##    Format   3\n").unwrap();
 	let s = |p: &PathBuf| p.to_string_lossy().into_owned();
 	let kind = |r: Result<(), shclw::Error>| r.err().map(|e| e.kind);
 	for (path, want) in [
@@ -98,29 +92,12 @@ fn open() {
 		(&missing, ErrKind::NotFound),
 	] {
 		assert_eq!(
-			kind(shclw::v1::open(&s(path)).map(drop)),
-			Some(want),
-			"v1 {}",
-			path.display()
-		);
-		assert_eq!(
-			kind(shclw::v2::open(&s(path)).map(drop)),
-			Some(want),
-			"v2 {}",
-			path.display()
-		);
-		assert_eq!(
 			kind(shclw::v3::open(&s(path)).map(drop)),
 			Some(want),
 			"v3 {}",
 			path.display()
 		);
 	}
-	assert_eq!(
-		kind(shclw::v1::open(&s(&v3file)).map(drop)),
-		Some(ErrKind::TooNew),
-		"v1 on a format 3 file"
-	);
 
 	// A Format line in a raw body is the body's. A real one after it still
 	// counts.
@@ -129,18 +106,9 @@ fn open() {
 	fs::write(&in_raw, raw).unwrap();
 	let raw_then_real = dir.join("rawreal.shcl");
 	fs::write(&raw_then_real, format!("{raw}##    Format   9\n")).unwrap();
-	let open = |n: u32, p: &PathBuf| {
-		let p = s(p);
-		kind(match n {
-			1 => shclw::v1::open(&p).map(drop),
-			2 => shclw::v2::open(&p).map(drop),
-			_ => shclw::v3::open(&p).map(drop),
-		})
-	};
-	for n in 1..=3 {
-		assert_eq!(open(n, &in_raw), None, "v{n} raw.shcl");
-		assert_eq!(open(n, &raw_then_real), Some(ErrKind::TooNew), "v{n} rawreal.shcl");
-	}
+	let open = |p: &PathBuf| kind(shclw::v3::open(&s(p)).map(drop));
+	assert_eq!(open(&in_raw), None, "v3 raw.shcl");
+	assert_eq!(open(&raw_then_real), Some(ErrKind::TooNew), "v3 rawreal.shcl");
 }
 
 /// An edit made through `inner_mut`, with calls the wrapper doesn't have,
@@ -154,16 +122,6 @@ fn check_inner<D: ShclDoc>(n: u32, d: &D, paths: &[String]) {
 
 #[test]
 fn inner() {
-	let mut d1 = shclw::v1::parse("a: 1\n");
-	assert!(d1.inner_mut().set_empty("a"), "v1 set_empty");
-	assert!(d1.inner_mut().set_string("b", "set inside"), "v1 set_string");
-	check_inner(1, &d1, &d1.inner().paths());
-
-	let mut d2 = shclw::v2::parse("a: 1\n");
-	assert!(d2.inner_mut().set_empty("a"), "v2 set_empty");
-	assert!(d2.inner_mut().set_string("b", "set inside"), "v2 set_string");
-	check_inner(2, &d2, &d2.inner().paths());
-
 	let mut d3 = shclw::v3::parse("a: 1\n");
 	assert_eq!(
 		d3.inner_mut().set_empty("a"),
@@ -224,8 +182,6 @@ fn check_rewrites_new<L: Lib>(n: u32, mut fresh: L::Doc) {
 
 #[test]
 fn rewrites_new() {
-	check_rewrites_new::<shclw::v1::Version>(1, shclw::v1::new());
-	check_rewrites_new::<shclw::v2::Version>(2, shclw::v2::new());
 	check_rewrites_new::<shclw::v3::Version>(3, shclw::v3::new());
 }
 
@@ -253,8 +209,6 @@ fn check_first_last<L: Lib>(n: u32) {
 
 #[test]
 fn first_last() {
-	check_first_last::<shclw::v1::Version>(1);
-	check_first_last::<shclw::v2::Version>(2);
 	check_first_last::<shclw::v3::Version>(3);
 }
 
@@ -329,8 +283,6 @@ fn check_several<L: Lib>(n: u32) {
 
 #[test]
 fn several() {
-	check_several::<shclw::v1::Version>(1);
-	check_several::<shclw::v2::Version>(2);
 	check_several::<shclw::v3::Version>(3);
 }
 
@@ -345,28 +297,21 @@ const OLD_BLOCKS: [&str; 6] = [
 	"##\n## This config file format is SHCL.\n## \"Simple Hierarchical Config Language\"\n##    Format   {n}\n##    Home     https://github.com/yottacore/shcl\n##    Syntax   https://github.com/yottacore/shcl/blob/v3.0.0/project/spec.md\n##    Legal    SHCL is Copyright © 2026 Jim Collier [ID: 2უNაɘ«҂թȹɤξπ๙¿ձϖ]. License: MIT. No warranty.\n##\n",
 ];
 
-#[test]
-fn info_text_is_gen_banner() {
-	assert_eq!(
-		shclw::info_text(shclw::v3::FORMAT_MAJOR, "v3.0.0-beta1"),
-		shclw::v3::shcl::GEN_BANNER
-	);
-}
-
-fn block_of(n: u32) -> String {
-	match n {
-		1 => shclw::info_text(1, "v1.2.0"),
-		2 => shclw::info_text(2, "v2.0.0"),
-		_ => shclw::v3::shcl::GEN_BANNER.to_owned(),
-	}
-}
+// Off since 3.0 is the floor: info_text was the 1.2 and 2.0 block, and is gone.
+// #[test]
+// fn info_text_is_gen_banner() {
+// 	assert_eq!(
+// 		shclw::info_text(shclw::v3::FORMAT_MAJOR, "v3.0.0-beta1"),
+// 		shclw::v3::shcl::GEN_BANNER
+// 	);
+// }
 
 /// Each old spelling, and the current one, above the first field, between
 /// two, and at the end, becomes one block at the end, and every version
 /// leaves the same text.
 fn check_old_spellings<L: Lib>(n: u32) {
 	let mut blocks: Vec<String> = OLD_BLOCKS.iter().map(|b| b.replace("{n}", &n.to_string())).collect();
-	blocks.push(block_of(n));
+	blocks.push(shclw::v3::shcl::GEN_BANNER.to_owned());
 	for (i, old) in blocks.iter().enumerate() {
 		for text in [
 			format!("{old}a: 1\nb: 2\n"),
@@ -378,7 +323,7 @@ fn check_old_spellings<L: Lib>(n: u32) {
 				.unwrap_or_else(|e| panic!("v{n} spelling {i} in {text:?}: {e}"));
 			assert_eq!(
 				d.text(),
-				format!("a: 1\nb: 2\n\n{}", block_of(n)),
+				format!("a: 1\nb: 2\n\n{}", shclw::v3::shcl::GEN_BANNER),
 				"v{n} spelling {i} in {text:?}"
 			);
 		}
@@ -387,8 +332,6 @@ fn check_old_spellings<L: Lib>(n: u32) {
 
 #[test]
 fn info_old_spellings() {
-	check_old_spellings::<shclw::v1::Version>(1);
-	check_old_spellings::<shclw::v2::Version>(2);
 	check_old_spellings::<shclw::v3::Version>(3);
 }
 
@@ -408,7 +351,5 @@ fn check_info_write_refused<L: Lib>(n: u32, dir: &std::path::Path) {
 #[test]
 fn info_write_refused() {
 	let scratch = Scratch::new("info");
-	check_info_write_refused::<shclw::v1::Version>(1, scratch.path());
-	check_info_write_refused::<shclw::v2::Version>(2, scratch.path());
 	check_info_write_refused::<shclw::v3::Version>(3, scratch.path());
 }

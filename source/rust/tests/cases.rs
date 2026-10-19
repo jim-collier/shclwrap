@@ -93,8 +93,6 @@ fn cases() {
 	let root = Scratch::new("cases");
 	let mut failures = Vec::new();
 	let mut ran = 0;
-	run_all::<shclw::v1::Version>(root.path(), 1, &mut failures, &mut ran);
-	run_all::<shclw::v2::Version>(root.path(), 2, &mut failures, &mut ran);
 	run_all::<shclw::v3::Version>(root.path(), 3, &mut failures, &mut ran);
 	assert!(ran > 0, "no cases ran");
 	assert!(

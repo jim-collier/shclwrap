@@ -1,0 +1,28 @@
+# app settings
+server:
+	host: example.org
+	# the port
+	port: 8080
+	tls: true
+	timeout: 2.5
+	workers: -7
+tags: red, green
+table:
+	name: one
+	cols: 3
+	name: two
+	cols: 5
+
+title: "two words"
+
+path: "C:\\temp"
+
+note: "a # b"
+
+hosts: alpha, "two words", "x#y"
+
+ports: 80, 443
+
+ratios: 0.5, -2.25
+
+empty:

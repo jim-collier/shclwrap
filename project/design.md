@@ -6,7 +6,7 @@
 <!-- TOC ignore:true -->
 # Design
 
-Status: draft, 2026-10-15. Go, Rust, and C are built over shcl 1.2, 2.0, and 3.0. Python and shcl 4 are in the backlog.
+Status: draft, 2026-10-15. Go, Rust, and C are built over shcl 3.0, with 2.0 built in for the upgrade's check. 3.0 is the floor. Python and shcl 4 are in the backlog.
 
 <!-- TOC ignore:true -->
 ## Table of contents
@@ -47,6 +47,8 @@ Status: draft, 2026-10-15. Go, Rust, and C are built over shcl 1.2, 2.0, and 3.0
 
 - The quirks each version has, and that each program used to work around on its own, are handled in one place.
 
+- shcl 3.0 is the floor. The files programs wrote on 1.2 and 2.0 come forward through `Upgrade`, which is in every build.
+
 - The rest of shcl is still there, through `Inner()`.
 
 ## Background
@@ -69,7 +71,9 @@ Status: draft, 2026-10-15. Go, Rust, and C are built over shcl 1.2, 2.0, and 3.0
 
 - Covering all of shcl. Raw blocks, datetimes, durations, sizes, merging, and schema generation stay with shcl, through `Inner()`.
 
-- Hiding the file format change. A program built on 1.2 can't read a format 3 file. The wrapper says so with `ErrTooNew`, and `Upgrade` moves files forward where the bound shcl can.
+- Building on shcl 1.2 or 2.0. A program on either moves to 3.0 when it moves onto the wrapper.
+
+- Hiding the file format change. A file written for a newer format than the bound shcl's is `ErrTooNew`, and `Upgrade` moves older files forward.
 
 - Publishing to a package registry.
 
@@ -85,21 +89,20 @@ Status: draft, 2026-10-15. Go, Rust, and C are built over shcl 1.2, 2.0, and 3.0
 
 ## Layout
 
-| Language | Where                                                | Pick the shcl version by
-| :---     | :---                                                 | :---
-| Go       | `source/go/shclw`, plus `shclw1` to `shclw3`         | import path: `.../source/go/shclw3`
-| Rust     | `source/rust`, crate `shclw`                         | feature `shcl1` to `shcl3`, then module `shclw::v1` to `shclw::v3`
-| C        | `source/c`, `shclw.h`, plus `shclw1.c` to `shclw3.c` | the `shcl.h` the build includes, and `SHCLW_SHCL` 1 or 2 for 1.2 and 2.0
+| Language | Where                                  | Pick the shcl version by
+| :---     | :---                                   | :---
+| Go       | `source/go/shclw`, plus `shclw3`       | import path: `.../source/go/shclw3`
+| Rust     | `source/rust`, crate `shclw`           | feature `shcl3`, then module `shclw::v3`
+| C        | `source/c`, `shclw.h`, plus `shclw3.c` | the `shcl.h` the build includes, which has to be 3.0
 
 - Go can't import one package or another by condition inside one file, so each shcl version gets its own small package. They have the same calls, checked by the compiler against the `shclw.Doc` interface. The shared types and the ops runner are in `shclw`.
 
-- Rust has one crate. Each shcl version is a module behind a feature, and the `ShclDoc` trait makes the compiler check that every module has every call. Several features can be on at once, for a tool that reads one version and writes another.
+- Rust has one crate. Each shcl version is a module behind a feature, and the `ShclDoc` trait makes the compiler check that every module has every call. A later version's feature can be on beside `shcl3`, for a tool that reads one version and writes another.
 
-- Each version's code is a copy of the one before with its differences made, so a reader sees the whole adapter in one file.
+- A later version's code starts as a copy of the one before with its differences made, so a reader sees the whole adapter in one file.
 
-- C has one header, `shclw.h`, which includes the program's own `shcl.h` and works out its version from what it declares. `shclw.c` has what every version shares, and each version has its own adapter file, `shclw1.c` to `shclw3.c`, as Go has a package. A program builds `shclw.c`, `info.c`, and the one adapter that matches its `shcl.h`. Built against another version, the adapter stops the build with an error. `run.c` has `shclw_run` and is only needed for ops scripts.
-	- 1.2's and 2.0's `shcl.h` declare different calls but define the same macros, so a program on either sets `SHCLW_SHCL` to 1 or 2 for every file that includes `shclw.h`. Without it the build stops and says so, and a wrong one fails to compile. 3.0 needs none.
-	- On 3.0 the program also builds `shclw3_v2.c` and `shclw3_v2_impl.c`, with shcl 2.0's `shcl.h` on their include path, for the upgrade check.
+- C has one header, `shclw.h`, which includes the program's own `shcl.h` and checks from what it declares that it's 3.0. `shclw.c` has what every version shares, and `shclw3.c` is the adapter, as Go has a package. A program builds `shclw.c`, `info.c`, and `shclw3.c`. Built against another version, the header stops the build with an error. `run.c` has `shclw_run` and is only needed for ops scripts.
+	- The program also builds `shclw3_v2.c` and `shclw3_v2_impl.c`, with shcl 2.0's `shcl.h` on their include path, for the upgrade check.
 	- The header is usable from C++, and the build compiles every C file as C++ too.
 
 ## API
@@ -125,7 +128,6 @@ Go names are listed. Rust uses the same words in snake case, and `ShclDoc` has t
 
 - `Rewrites` is for a program that tells the user what a save will do. When it's true, lines no edit touched can change, and comments can move.
 	- 3.0 keeps a file's own lines, and falls back to the canonical form when it can't keep them with the edits in. A child added under a flat dotted line like `b.c: 2` is one such edit.
-	- 1.2 and 2.0 only save canonical form, so it's true for any loaded text that wasn't canonical already.
 	- A `New` document has no lines to keep, and says false.
 	- On 3.0 it builds the save's text to find out, so it costs about what `Text` does.
 	- `InfoBlock` and `StampFormat` don't change it. They touch only the block and the Format line, and the rest of the save is what it was.
@@ -140,7 +142,7 @@ Go names are listed. Rust uses the same words in snake case, and `ShclDoc` has t
 
 - Types: `Int`, `Float`, `Bool`, `Str`, `Strs`, `Ints`, `Floats`, and `Raw`, the value as typed with no coercion.
 
-- Statuses: `Good`, `Empty`, `NotFound`, `BadType`, `Multiple`, and `BadPath`. 1.2 and 2.0 have no `BadPath` and say `NotFound`.
+- Statuses: `Good`, `Empty`, `NotFound`, `BadType`, `Multiple`, and `BadPath`.
 
 - A float read never gives infinity or NaN. A value like `1e400` is `BadType`, and the fallback read gives the fallback.
 
@@ -199,7 +201,6 @@ Go names are listed. Rust uses the same words in snake case, and `ShclDoc` has t
 ### Format and upgrade
 
 - `FormatOf(text)` is the format a file's `##    Format   N` line names, or 0.
-	- 1.2 and 2.0 don't read the line, so the wrapper reads it as 3.0 does: indented or not, digits only. One in a raw body is the body's, and doesn't count. With several, the first naming the bound format or newer wins, else the highest.
 
 - `Upgrade(text, from)` and `UpgradeFile(path, from)` move a file to the bound shcl's format.
 	- With `from` 0 the Format line decides, and a file with none is taken as current. When it's left as it is, `From` is the bound format.
@@ -210,14 +211,14 @@ Go names are listed. Rust uses the same words in snake case, and `ShclDoc` has t
 	- The new text goes to a temp file that's renamed into place, so a failed write leaves the original. If a failed replace left nothing at the path, the backup is moved back. The backup is removed whenever the original is still there, and only kept, and named in the error, when it can't be put back.
 	- A file whose Format line names a newer format is `ErrTooNew`, as `Upgrade` says, and anything that isn't a regular file is `ErrIO`.
 	- A file taken as 2.x that shcl 2.0 reports errors on is `ErrRefused`, with those errors in the error's `Diags`. Nothing is written and no backup is made. 2.0 read such a line the way it repaired it, or not at all, and a raw block that never closes took the rest of the file. The upgrade would make a clean file out of it that means something else.
-	- That check needs shcl 2.0, so the 3.0 adapter builds it in too. In Rust the `shcl3` feature turns on `shcl2`.
+	- That check needs shcl 2.0, so the 3.0 adapter builds it in too. In Rust the `shcl3` feature turns on the `shcl2` dependency.
 	- In C, 2.0's `shcl.h` and 3.0's declare the same names, so 2.0's goes in 2 files of its own with each call renamed. The C upgrade gives 2.0's errors in its result, `shclw_upgraded`, since C's error has no list.
-	- 1.2 and 2.0 have nothing to upgrade. They hand the text back, or refuse a newer file with `ErrTooNew`.
+	- The files 1.2 and 2.0 wrote come forward this way. One with no Format line that loads clean on 3.0 is taken as current, so a program taht knows its files are older passes `from` 2. A file the wrapper's own 1.2 or 2.0 adapter wrote has an info block naming format 1 or 2, and the upgrade puts 3.0's in its place.
 
 - `d.InfoBlock(on)` puts the info block at the end of what the save writes, or with `on` false leaves it out.
 	- Every old block comes off first, wherever it is. That's each spelling shcl has written, 2.x's `#` one, and a lone Format line with the note `migrate` writes under it. A Schema line in a block stays where it is.
 	- shcl 3.0's own `SetBanner` leaves a block above the first field and adds a second one. The wrapper takes that one off too.
-	- On 3.0 the block is shcl's `GenBanner`. 1.2 and 2.0 have no block with a Format line, so the wrapper writes the same one naming format 1 or 2, with the Syntax line linking that release's spec, `v1.2.0` or `v2.0.0`. Both load it as comments with no diagnostics.
+	- The block is shcl's `GenBanner`.
 	- It goes last, after one blank line, so fields put after the call go above it.
 
 - `d.StampFormat()` adds the Format line at the end of what the save writes, without the block, unless a comment already names the bound format. It goes right under the last line, same place as shcl's `Migrate` puts it.
@@ -225,7 +226,7 @@ Go names are listed. Rust uses the same words in snake case, and `ShclDoc` has t
 - Both change what `Text`, `Canonical`, and `Write` give, and leave the document alone. Reads, `Lines`, and `Diags` are what they were.
 
 - Both refuse a file whose Format line names another format. A newer one is `ErrTooNew`. An older one is `ErrRefused`, since stamping it would make `Upgrade` take it as current and skip the conversion. It has to be upgraded first.
-	- A file that ends in a raw block that never closes is `ErrRefused` too, since anything added would be the block's content. 1.2 and 2.0 close the block in their canonical form, so only 3.0 refuses it.
+	- A file that ends in a raw block that never closes is `ErrRefused` too, since anything added would be the block's content.
 	- An edit after the call can lead to the same refusal. Then `Text` leaves the block and the line out, and `Write` refuses adn writes nothing.
 
 - A run of lines counts as a block, or as a Format line, only when taking it out leaves every value and every error the same. That's how a block's text inside a raw body is told from a real one, in every version.
@@ -236,7 +237,7 @@ Go names are listed. Rust uses the same words in snake case, and `ShclDoc` has t
 
 - One error type, `*shclw.Error` in Go and `shclw::Error` in Rust, with a kind a program can act on: `NotFound`, `IO`, `Strict`, `Refused`, `BadPath`, `BadValue`, `TooNew`, `Unsupported`, `Ambiguous`, `BackupTaken`, and `NoReadBack`.
 
-- `Refused` is a save that would drop lines the load couldn't use. 2.0 and 3.0 refuse those. It's also an upgrade of a 2.x file that shcl 2.0 reports errors on.
+- `Refused` is a save that would drop lines the load couldn't use, which 3.0 refuses. It's also an upgrade of a 2.x file that shcl 2.0 reports errors on.
 
 ### Everything else
 
@@ -252,30 +253,22 @@ Go names are listed. Rust uses the same words in snake case, and `ShclDoc` has t
 
 Each row has a test, either a shared case or an API test.
 
-| Behavior                                 | shcl did                                                           | The wrapper does
-| :---                                     | :---                                                               | :---
-| `Names` on a path with several instances | 1.2 and 2.0 give nothing. 3.0 lists every instance's children.     | Lists every instance's children, everywhere.
-| `Names` with a name given twice          | Lists it once per line.                                            | Lists it once. Names match without ASCII case only, as in shcl, so `É` and `é` are 2.
-| An edit on a path with several instances | 1.2 and 2.0 edit the first one and say ok. 3.0 refuses.            | `Put`, `PutSyntax`, and `Comment` refuse with `BadPath`, everywhere, and change nothing. That's several at any step, like `tv.g` with `tv` twice, unless a selector picks one there.
-| A put that doesn't read back the same    | Says ok.                                                           | Reads every put back. A mismatch is `NoReadBack`, with the edit left in place.
-| `PutSyntax` text with a trailing comment | Drops the comment and says ok.                                     | `NoReadBack`, with the edit left in place.
-| `PutSyntax` of `[a, b]` on 1.2 and 2.0   | Sets `"[a", "b]"`, which a file line `k: [a, b]` doesn't mean.     | `NoReadBack`, with the edit left in place.
-| A float like `1e400` in the file         | 1.2 and 2.0 read infinity as `Good`. 3.0 says `BadType`.           | `BadType`, everywhere. An array keeps its length, with 0 for the bad items, as in 3.0.
-| A put of infinity or NaN                 | 1.2 and 2.0 write it, and it reads back as `BadType`. 3.0 refuses. | Refuses with `BadValue`, everywhere, and changes nothing.
-| Opening a newer format's file            | 1.2 and 2.0 read it, wrongly.                                      | `ErrTooNew`. A Format line in a raw body doesn't count, as in 3.0.
-| Upgrading a 2.x file 2.0 had errors on   | 3.0 writes a clean file, with nothing lost and no error.           | Refuses with `ErrRefused` and leaves the file alone.
-| The info block on 1.2 and 2.0            | No call. Their `init` wrote a `#` block with no Format line.       | `InfoBlock` writes the `##` block naming the bound format.
-| An old info block above the first field  | 3.0's `SetBanner` leaves it and adds a second block.               | `InfoBlock` takes it off, everywhere.
-| A Format line without the block          | 3.0 has it only as part of `Migrate`.                              | `StampFormat`, everywhere.
-| A file that isn't UTF-8                  | Varies by language.                                                | `ErrIO`, everywhere.
-| Walking repeated entries                 | Selector syntax differs by version.                                | `Each` gives paths, and `Child` extends them.
-| Saving in 1.2                            | No save call.                                                      | `Write` saves atomically.
-| A save that can't keep the file's lines  | 1.2 and 2.0 save canonical only. 3.0's save returns a flag.        | `Rewrites` asks before the save, everywhere.
-| Rust 1.2 fallback reads                  | No `get_*_or`.                                                     | `int(path, fallback)` and the rest, as in every other version.
+| Behavior                                 | shcl did                                                    | The wrapper does
+| :---                                     | :---                                                        | :---
+| `Names` with a name given twice          | Lists it once per line.                                     | Lists it once. Names match without ASCII case only, as in shcl, so `É` and `é` are 2.
+| A put that doesn't read back the same    | Says ok.                                                    | Reads every put back. A mismatch is `NoReadBack`, with the edit left in place.
+| `PutSyntax` text with a trailing comment | Drops the comment and says ok.                              | `NoReadBack`, with the edit left in place.
+| Opening a newer format's file            | 3.0 reads it, with a hint.                                  | `ErrTooNew`. A Format line in a raw body doesn't count, as in 3.0.
+| Upgrading a 2.x file 2.0 had errors on   | 3.0 writes a clean file, with nothing lost and no error.    | Refuses with `ErrRefused` and leaves the file alone.
+| An old info block above the first field  | 3.0's `SetBanner` leaves it and adds a second block.        | `InfoBlock` takes it off.
+| A Format line without the block          | 3.0 has it only as part of `Migrate`.                       | `StampFormat`.
+| A file that isn't UTF-8                  | Varies by language.                                         | `ErrIO`, everywhere.
+| Walking repeated entries                 | A program writes selectors itself, and 3.0 changed them.    | `Each` gives paths, and `Child` extends them.
+| A save that can't keep the file's lines  | 3.0's save returns a flag, once it's done.                  | `Rewrites` asks before the save.
 
 - `PutSyntax` checks its text by setting it in a new document and parsing `k: text` in another. The two have to come out the same, and the value at the path has to read the same as the parsed one.
 
-- An empty array reads back as `Empty` on 1.2 and 2.0, and as an empty `Good` on 3.0. The older formats can't write one any other way, so the wrapper accepts both.
+- An empty array reads back as an empty `Good` on 3.0. The read-back check also takes `Empty`, which is how 1.2 and 2.0 read one.
 
 ## Ops scripts
 
@@ -318,7 +311,9 @@ An ops script is one op per line, with fields split by tabs. `\t`, `\n`, `\r`, a
 
 - Each folder in `tests/cases` is a document, an ops script, and one `want.vN.txt` per shcl version. Go and Rust both run every case on every version and compare with the same want files, so Go and Rust can't drift apart.
 
-- A file named `x.vK.ext` stands in for `x.ext` from version K up. So `doc.v1.shcl` is the document for 1.2 and 2.0, and `doc.v3.shcl` for 3.0, where the syntax differs.
+- A file named `x.vK.ext` stands in for `x.ext` from version K up, for a later version whose syntax differs. Every case has one set of files today, for 3.0.
+
+- `034-upgrade-1x-written` and `035-upgrade-2x-written` hold files the wrapper's 1.2 and 2.0 adapters wrote, kept from before those were dropped, so the upgrade is still tested on them.
 
 - `SHCLW_UPDATE=1 go test ./shclw/` writes the want files. A changed want file is reviewed in the diff like code.
 
@@ -328,9 +323,9 @@ An ops script is one op per line, with fields split by tabs. `\t`, `\n`, `\r`, a
 
 ### Fuzzing
 
-- `cicd/fuzz.py` makes a document and an ops script from each seed, with a generator that knows each format's syntax. A quarter of the documents are mutated copies of the case documents instead.
+- `cicd/fuzz.py` makes a document and an ops script from each seed, with a generator that knows each format's syntax. Half of the generated documents are in the 1.2 and 2.0 syntax, as old programs wrote them, so the upgrade sees them. A quarter of the documents are mutated copies of the case documents instead.
 
-- Each case runs through the Go, Rust, and C drivers on the same shcl version. Rust's and C's outputs must match Go's byte for byte, none may crash, and a put that says ok must read back the same. A float read that says `Good` must not give infinity or NaN. A `first` or `last` read must not say `Multiple`, and has to be on the first or last line `lines` gave for that path. An edit that says ok must have found one instance at every step of its path that exists, counted just before it. The text right after an `info on` that says ok ends with the block naming the version's format, holds one block where the document had no block text in a raw body, and a second `info on` doesn't change it.
+- Each case runs through the Go, Rust, and C drivers on the same shcl version. Rust's and C's outputs must match Go's byte for byte, apart from the time 3.0 stamps on a line it comments out. None may crash, and a put that says ok must read back the same. A float read that says `Good` must not give infinity or NaN. A `first` or `last` read must not say `Multiple`, and has to be on the first or last line `lines` gave for that path. An edit that says ok must have found one instance at every step of its path that exists, counted just before it. The text right after an `info on` that says ok ends with the block naming the version's format, holds one block where the document had no block text in a raw body, and a second `info on` doesn't change it.
 
 - It runs for a wall-clock budget, and a failing seed is saved with its document, script, and each driver's output. If too few reads find a value, the run fails, since a generator that stopped making readable documents would pass forever.
 
@@ -346,7 +341,7 @@ An ops script is one op per line, with fields split by tabs. `\t`, `\n`, `\r`, a
 
 - Rust: a git dependency on this repo with one feature on, or a copy of `source/rust/src`.
 
-- C: a copy of `shclw.h`, `shclw_adapter.h`, `shclw.c`, `info.c`, and the adapter for the program's shcl, plus `run.c` for ops scripts. The program builds `shcl.h`'s own implementation once, as shcl asks. On 3.0 it also takes the `shclw3_v2` files and shcl 2.0's `shcl.h`. On 1.2 and 2.0 it sets `SHCLW_SHCL`, such as `-DSHCLW_SHCL=2`.
+- C: a copy of `shclw.h`, `shclw_adapter.h`, `shclw.c`, `info.c`, and `shclw3.c`, plus `run.c` for ops scripts. The program builds `shcl.h`'s own implementation once, as shcl asks. It also takes the `shclw3_v2` files and shcl 2.0's `shcl.h`.
 
 - A fix made in a copy goes back here, with a case, so every program gets it.
 
@@ -354,7 +349,8 @@ An ops script is one op per line, with fields split by tabs. `\t`, `\n`, `\r`, a
 
 - The wrapper has its own small set of names. Some of its ideas come from shcl 4's design, but its names don't, since 4 is a draft that may still change.
 
-- All 4 shcl versions are covered: 1.2, 2.0, 3.0, and 4 once it exists. 2.0 has no program running on it today, but some tests still write 2.0 files and also read them.
+- shcl 3.0 is the floor, and 4 comes after it once it exists. Programs on 1.2 and 2.0 move to 3.0 as they move onto the wrapper, and their files come forward through the upgrade, which is in every build. That replaced covering 1.2 and 2.0 too, which kept 2 more adapters per language for programs that were leaving them anyway (2026101613005800).
+	- shcl 2.0 stays built in beside 3.0 in every language, for the upgrade's check.
 
 - Go has one package per shcl version. Build tags were the other choice, but a build that leaves out the tag compiles against another shcl with no error.
 
@@ -374,29 +370,27 @@ An ops script is one op per line, with fields split by tabs. `\t`, `\n`, `\r`, a
 
 - `Rewrites` is a call made before `Write`, rather than a second result from `Write`. It sits beside `Text` and `Canonical`, a program can put it in a plan before anything is written, and `Write` keeps one result in every language.
 
-- On 1.2 and 2.0 `Rewrites` is true only when the loaded text wasn't canonical, rather than always. A canonical file saved in canonical form keeps its lines, which is how 3.0 counts it too.
-
 - The first or last of a repeated key is picked by path, with `First(path)` and `Last(path)`, rather than by a mode on each read or a setting on the document. One pair covers all 8 types in both tiers, and the edits too, the same way `Each` paths do. A setting would change what every read means from somewhere else in the program. A plain read still says `Multiple`, so taking one is always asked for at the call.
 
 - `First` and `Last` go by line, the order the file was written in, since that's what "the last one wins" means to whoever wrote it. `Each` order differs from it for a block written in parts.
 
-- An edit is refused when any step of its path has several instances, not only the last, since that's where 3.0 refuses. In 1.2 and 2.0 every setter goes through one check that counts each step, and a test walks every edit on the `Doc` interface, so a new setter can't skip it.
+- An edit is refused when any step of its path has several instances, not only the last, since that's where 3.0 refuses. A test walks every edit on the `Doc` interface, so a new setter can't skip it.
 
 - `Remove` takes every instance, even where the path repeats at an inner step, on every version. It says how many went, so nothing is picked for the caller. The setters can't do that, since there's one value to set.
 
 - `Each` narrows every step that repeats, so its paths take edits too. `First` and `Last` give that path even for one instance, since a path as typed can repeat at an inner step and be refused.
 
-- `Each` on a wildcard lists the nodes it reaches, as 3.0's own field list does, rather than refusing wildcards. 1.2 and 2.0 build the same list from counts and child names.
+- `Each` on a wildcard lists the nodes it reaches, as 3.0's own field list does, rather than refusing wildcards.
 
-- The info block names the bound shcl's format, so a 1.2 program writes format 1. A block naming 3 on every version would make 3.0's `Upgrade` take an unconverted 2.x file as current. The rest of the block is the same on every version, but for the Syntax link.
+- The info block names the bound shcl's format, so the 1.2 and 2.0 adapters wrote format 1 and 2. A block naming 3 there would have made 3.0's `Upgrade` take an unconverted 2.x file as current.
 
-- `InfoBlock` and `StampFormat` take effect when the save's text is built, rather than editing the document. 1.2 and 2.0 have no call that changes the comments at the end of a document, and 3.0 has none for a lone Format line. Parsing the edited text again would renumber the lines and lose the load's diagnostics and its count of lost lines, which `Write` refuses on.
+- `InfoBlock` and `StampFormat` take effect when the save's text is built, rather than editing the document. 3.0 has no call for a lone Format line. Parsing the edited text again would renumber the lines and lose the load's diagnostics and its count of lost lines, which `Write` refuses on.
 
 - One line-based routine does the block in every version, rather than 3.0's `SetBanner` plus a fix for what it misses. Every version then gives the same text, and Go and Rust share the cases.
 
 - 2.x's `#` block comes off on every version. shcl 3.0 takes it off only in `Upgrade`, and reads it otherwise as a comment of the file's own. Nobody writes that title line by hand, and leaving it gives the file 2 blocks.
 
-- A file whose Format line names another format is refused, rather than written over. On 3.0 an older one means the file still needs `Upgrade`, and a newer one is a file this shcl can't read right. On 2.0 that includes a format 1 file, which 2.0 has no upgrade for.
+- A file whose Format line names another format is refused, rather than written over. An older one means the file still needs `Upgrade`, and a newer one is a file this shcl can't read right.
 
 - `Lines` is its own call, rather than a field on `Got`, so a program that keeps the `Multiple` default can still name the lines in its warning, and a read costs nothing extra.
 
@@ -404,7 +398,7 @@ An ops script is one op per line, with fields split by tabs. `\t`, `\n`, `\r`, a
 
 - C hands everything back in memory the caller owns, and frees with `free()`: strings, arrays, the text, and diagnostics, each as one block. shcl keeps what each read gives out until the document is freed, and a program reading in a loop grew without end, so every C read copies its answer out and gives shcl's read memory back before it returns. "Valid until the next call" was the other choice. It costs no copy, but a second read quietly breaks the first one's pointer.
 	- So a result from shcl's own read calls on `shclw_inner(d)` is good only until the next shclw call. That's the price of mixing the two.
-	- Edits grow shcl's write memory the same way, until `shcl_compact`. `shclw_write` compacts after a good save, so a program that edits and saves in a loop stays level. A save is where a round of edits ends, and it already costs a pass over the document. Compacting on every edit would cost that pass each time. A program that edits in a loop and never saves can call `shclw_compact`, which does nothing on 1.2 and 2.0. It's C's own, as `shcl_compact` is shcl's, since Go and Rust free that memory themselves.
+	- Edits grow shcl's write memory the same way, until `shcl_compact`. `shclw_write` compacts after a good save, so a program that edits and saves in a loop stays level. A save is where a round of edits ends, and it already costs a pass over the document. Compacting on every edit would cost that pass each time. A program that edits in a loop and never saves can call `shclw_compact`. It's C's own, as `shcl_compact` is shcl's, since Go and Rust free that memory themselves.
 
 - Every C string handed back has its length and a NUL after it. A value can hold a NUL, so the length is the one to go by, and the NUL is there so a string can go straight to a C call that wants one. Values and document text going in take a pointer and a length. Paths and file names are plain C strings, since a path with a NUL in it means nothing to shcl or the OS.
 
@@ -412,21 +406,14 @@ An ops script is one op per line, with fields split by tabs. `\t`, `\n`, `\r`, a
 
 - A C call that can fail returns a `shclw_kind`, `SHCLW_OK` on success, with details in a `shclw_error` out-parameter that may be NULL. The kinds are Go's in the same order, plus `SHCLW_ERR_NO_MEMORY`, which only C can see. A call that makes a document still gives one back on failure, empty for a file it couldn't read, as Go does.
 
-- C picks the shcl version at compile time, from what `shcl.h` declares, since that's the only place C can pick it. 3.0 is the first `shcl.h` with a version macro, `SHCL_FORMAT_MAJOR`.
-	- 1.2 and 2.0 are told apart by `SHCLW_SHCL`, a macro the program sets to 1 or 2. The preprocessor can only see macros, and theirs are the same. A probe in the build that tries a 2.0 call was the other choice, but then every program's build would need one.
-	- With no `SHCLW_SHCL` on 1.2 or 2.0 the build stops with a message saying to set it. A wrong one fails to compile on `shcl_lost_count`, which is new in 2.0: built as 2.0, `shclw.h` takes its size, and 1.2 has none, and built as 1.2 it's declared another way, which clashes with 2.0's own. A `make pick` check builds each `shcl.h` with each pick in C and C++.
+- C checks the shcl version at compile time, from what `shcl.h` declares, since that's the only place C can see it. 3.0 is the first `shcl.h` with a version macro, `SHCL_FORMAT_MAJOR`, so a 1.2 or 2.0 `shcl.h` stops the build with a message.
+	- Before 3.0 was the floor, a program on 1.2 or 2.0 set `SHCLW_SHCL` to say which, since their headers define the same macros. That macro is gone.
 
 - C builds shcl 2.0 in beside 3.0 for the upgrade check, as Go and Rust do, rather than leave the check out of C. 2.0's calls are renamed by macros ahead of its `shcl.h`, in 2 files that never see 3.0's, so shcl isn't edited, and a build check fails on any 2.0 name left as it was.
 	- A 3.0 program then needs 2.0's `shcl.h` to build, and its code grows by 2.0's parser.
 	- 2.0 ends the program when memory runs out, where 3.0 has a hook for that.
 
 - The C upgrade gives one block, `shclw_upgraded`, and shcl 2.0's errors on a refused file are in it, rather than on the error. `shclw_error` is a fixed struct the caller never frees, and a list on it would need freeing after any call that can fail.
-
-- On 1.2 and 2.0, C reads, text, and edits keep their memory in the document until `shclw_free`, since those versions have no call that gives it back. 200,000 reads grew it by about 67 MB, where 3.0 stays under 64 KB. A program on them that reads in a loop for a long time loads its document again now and then.
-
-- C's 1.2 save is the wrapper's own atomic write, ported from Go's, since 1.2 has none. 2.0's goes through shcl's `shcl_write_file_atomic`, as Go's 2.0 save goes through shcl's, so `shclw2.c` won't build with `SHCL_NO_FILE_IO`.
-
-- On 1.2 and 2.0 a name that holds a NUL can't go in a C path. Those versions have no escape for it and quote it as it is. `shclw_child` gives that path with its whole length, and read as a C string it's a quote that never closes, which reads nothing and which edits refuse.
 
 - C's `shclw_drop_declared` takes the document and drops hints from its own diagnostics, rather than taking a list as Go and Rust do. shcl's C binding has only that form, and the match is on hint text that shcl builds inside itself.
 

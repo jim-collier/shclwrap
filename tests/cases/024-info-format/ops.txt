@@ -1,4 +1,4 @@
-# A lone stamp naming format 2. Only 2.0 can call that its own.
+# A lone stamp naming format 2. 3.0 refuses it until the file is upgraded.
 info	on
 text
 stamp

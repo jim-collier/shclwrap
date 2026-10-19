@@ -3,4 +3,4 @@ field: port
 	min: 1
 field: name
 	type: string
-	repeat: 0, 10
+	repeat: [0, 10]

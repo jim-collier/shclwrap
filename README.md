@@ -46,7 +46,7 @@ If your program uses one shcl version and doesn't plan to move, you don't need t
 
 ## Features
 
-- The same calls in Go, Rust, and C, over shcl 1.2, 2.0, and 3.0.
+- The same calls in Go, Rust, and C, over shcl 3.0. That's the floor, and files written on 1.2 and 2.0 come forward through the upgrade.
 
 - Reads with a fallback, `doc.Int("server.port", 8080)`, or with a status when the reason matters.
 
@@ -56,7 +56,7 @@ If your program uses one shcl version and doesn't plan to move, you don't need t
 
 - A file written for a newer format is refused with a clear error.
 
-- Format upgrades with a backup of the original, where the shcl underneath can do one.
+- Format upgrades with a backup of the original.
 
 - A text script of edits and reads, which is also what the tests run in every language, so the languages can't drift apart.
 
@@ -85,7 +85,7 @@ if err := doc.Put("server.port", 9090); err != nil {
 return doc.Write("app.shcl")
 ~~~
 
-`shclw1`, `shclw2`, and `shclw3` match shcl 1.2, 2.0, and 3.0. Moving to another version is the import line.
+`shclw3` matches shcl 3.0. A program still on 1.2 or 2.0 moves to 3.0 along with the wrapper, and `Upgrade` brings its old files forward.
 
 ### Rust
 
@@ -106,25 +106,15 @@ doc.put("server.port", 9090)?;
 doc.write("app.shcl")?;
 ~~~
 
-The features `shcl1`, `shcl2`, and `shcl3` turn on the modules `v1`, `v2`, and `v3`.
+The feature `shcl3` turns on the module `v3`, and brings shcl 2.0 along for the upgrade's check.
 
 ### C
 
-Copy the files for the program's shcl version from `source/c`, and build `shcl.h`'s own implementation in one file of the program's, as shcl asks. Below that's `shcl_impl.c`, which has `#define SHCL_IMPLEMENTATION` above `#include "shcl.h"`.
+Copy `shclw.h`, `shclw_adapter.h`, `shclw.c`, `info.c`, `shclw3.c`, and the 4 `shclw3_v2*` files from `source/c`, and build `shcl.h`'s own implementation in one file of the program's, as shcl asks. Below that's `shcl_impl.c`, which has `#define SHCL_IMPLEMENTATION` above `#include "shcl.h"`.
 
-| shcl | Files
-|:---  |:---
-| 3.0  | `shclw.h`, `shclw_adapter.h`, `shclw.c`, `info.c`, `shclw3.c`, and the 4 `shclw3_v2*` files
-| 2.0  | `shclw.h`, `shclw_adapter.h`, `shclw.c`, `info.c`, and `shclw2.c`
-| 1.2  | `shclw.h`, `shclw_adapter.h`, `shclw.c`, `info.c`, and `shclw1.c`
+The `shcl.h` has to be 3.0's. With 1.2's or 2.0's the build stops with a message saying so. There's no version macro to set.
 
-**On 1.2 and 2.0, set `SHCLW_SHCL` to 1 or 2** for every file that includes `shclw.h`. Their `shcl.h` files define the same macros, so nothing else can tell them apart. Without it the build stops with a message saying to set it. A wrong one fails to compile, with an error about `shcl_lost_count`. 3.0 needs none.
-
-~~~bash
-cc -DSHCLW_SHCL=2 -I shcl-2.0 shclw.c info.c shclw2.c shcl_impl.c app.c -lm -o app
-~~~
-
-On 3.0 the wrapper also builds shcl 2.0 in, under other names, to check a 2.x file before upgrading it. The 2 `shclw3_v2` files are built with 2.0's `shcl.h` on the include path in place of 3.0's:
+The wrapper also builds shcl 2.0 in, under other names, to check a 2.x file before upgrading it. The 2 `shclw3_v2` .c files are built with 2.0's `shcl.h` on the include path in place of 3.0's:
 
 ~~~bash
 cc -I shcl-3.0 -c shclw.c info.c shclw3.c shcl_impl.c app.c

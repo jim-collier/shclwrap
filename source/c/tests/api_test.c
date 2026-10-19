@@ -3,9 +3,9 @@
 
 // The C API's own tests: what the shared cases can't see, such as who frees
 // what, strings holding a NUL, and memory over many reads. The Makefile
-// builds this for each shcl version, and also as C++.
+// builds it plain, sanitized, and as C++.
 
-// Only 2.0's and 3.0's shcl.h ask for POSIX.
+// 3.0's shcl.h asks for POSIX too.
 #if !defined(_POSIX_C_SOURCE)
 #define _POSIX_C_SOURCE 200809L // NOLINT(bugprone-reserved-identifier,cert-dcl37-c,cert-dcl51-cpp)
 #endif
@@ -40,12 +40,8 @@
 
 static int failures;
 
-// 3.0 writes an array in brackets, and 1.2 and 2.0 with bare commas.
-#if SHCLW_SHCL == 3
+// 3.0 writes an array in brackets.
 #define LIST(items) "[" items "]"
-#else
-#define LIST(items) items
-#endif
 
 #define STR_(x) #x
 #define STR(x) STR_(x)
@@ -163,12 +159,7 @@ static void test_fallbacks(void) {
 // 2026101513330047: a value can hold a NUL, and the text and the save keep
 // every byte after one.
 static void test_nul(void) {
-#if SHCLW_SHCL == 3
 	static const char nuls[] = "k: \"a\xE2\x97\x89NUL\xE2\x97\x89z\"\nl: [x, \"y\xE2\x97\x89NUL\xE2\x97\x89\"]\n";
-#else
-	// 1.2 and 2.0 have no escape for a NUL, and take one as it is.
-	static const char nuls[] = "k: \"a\0z\"\nl: x, \"y\0\"\n";
-#endif
 	shclw_doc *d = shclw_parse(nuls, sizeof nuls - 1);
 	shclw_got_str k = shclw_get_str(d, "k");
 	CHECK(k.status == SHCLW_GOOD && k.len == 3 && k.value[1] == '\0' && k.value[2] == 'z' && k.value[3] == '\0');
@@ -195,9 +186,7 @@ static void test_nul(void) {
 // 2026101513330046: shcl keeps what each read hands out until the document is
 // freed. The wrapper copies it out and gives it back, so reads don't grow.
 static void test_reads_give_back(void) {
-#if SHCLW_SHCL < 3
-	(void)puts("api: 1.2 and 2.0 keep each read's memory until the document is freed");
-#elif defined(__GLIBC__) && !defined(UNDER_ASAN)
+#if defined(__GLIBC__) && !defined(UNDER_ASAN)
 	shclw_doc *d = parse_z("tags: [alpha, beta, gamma, delta, epsilon]\nname: \"some text here\"\n");
 	// The first pass sets up the block shcl keeps for its biggest read.
 	struct mallinfo2 before = mallinfo2();
@@ -245,12 +234,7 @@ static void test_errors(void) {
 	put_file("good.shcl", good, sizeof good - 1);
 	CHECK(shclw_open(in_scratch("good.shcl"), &d, &err) == SHCLW_OK && err.kind == SHCLW_OK);
 	CHECK(shclw_int(d, "k", 0) == 1);
-#if SHCLW_SHCL == 3
 	CHECK(shclw_write(d, in_scratch("no/such/dir/x.shcl"), &err) == SHCLW_ERR_NOT_FOUND);
-#else
-	// As in Go and Rust on 1.2 and 2.0 (2026101518385490).
-	CHECK(shclw_write(d, in_scratch("no/such/dir/x.shcl"), &err) == SHCLW_ERR_IO);
-#endif
 	shclw_free(d);
 
 	const char bad[] = "a: 1\n1x y: 2\n";
@@ -269,23 +253,13 @@ static void test_errors(void) {
 	CHECK(strstr(err.msg, "strict.shcl") != NULL);
 	shclw_free(d);
 
-	// A save that would drop a line the load couldn't use. On 3.0 that's once
-	// an edit made the kept lines impossible. 1.2 has no such check, and saves
-	// without the line, as Go's and Rust's 1.2 do.
-#if SHCLW_SHCL == 3
+	// A save that would drop a line the load couldn't use, once an edit made
+	// the kept lines impossible.
 	const char lossy[] = "a: 1\na(5): 2\n";
-#else
-	const char lossy[] = "* x\na: 1\n";
-#endif
 	d = shclw_parse(lossy, sizeof lossy - 1);
 	CHECK(shcl_remove(shclw_inner(d), "a", 1) == 1);
-#if SHCLW_SHCL == 1
-	CHECK(shclw_write(d, in_scratch("lossy.shcl"), &err) == SHCLW_OK);
-	CHECK(unlink(in_scratch("lossy.shcl")) == 0);
-#else
 	CHECK(shclw_write(d, in_scratch("lossy.shcl"), &err) == SHCLW_ERR_REFUSED);
 	CHECK(access(in_scratch("lossy.shcl"), F_OK) != 0);
-#endif
 	shclw_free(d);
 
 	d = shclw_new();
@@ -366,16 +340,8 @@ static void test_walk(void) {
 	CHECK(child && len == strlen(child) && shclw_int(d, child, 0) == 1);
 	free(child);
 	child = shclw_child(d, "top", "a\0b", 3, &len);
-#if SHCLW_SHCL == 3
 	CHECK(child && len == strlen(child) && !strncmp(child, "top.", 4));
 	CHECK(child && shclw_put_int(d, child, 7, NULL) == SHCLW_OK && shclw_int(d, child, 0) == 7);
-#else
-	// 1.2 and 2.0 quote the NUL as it is, so the path can't be a C string.
-	// Cut short at the NUL, it's a quote that never closes, which an edit
-	// refuses rather than put somewhere else.
-	CHECK(child && len > strlen(child) && !strncmp(child, "top.", 4));
-	CHECK(child && shclw_put_int(d, child, 7, NULL) == SHCLW_ERR_BAD_PATH && !shclw_has(d, "top"));
-#endif
 	free(child);
 	shclw_free(d);
 }
@@ -487,10 +453,7 @@ static void test_puts(void) {
 	static const double bad[] = {1, NAN};
 	CHECK(shclw_put_floats(d, "fs", bad, 2, NULL) == SHCLW_ERR_BAD_VALUE);
 	CHECK(shclw_put_int(d, "a.*.b", 1, &err) == SHCLW_ERR_BAD_PATH && strstr(err.msg, "a.*.b"));
-#if SHCLW_SHCL == 3
-	// 1.2 and 2.0 take a line break in a comment.
 	CHECK(shclw_comment(d, "i", "two\nlines", 9, NULL) == SHCLW_ERR_BAD_VALUE);
-#endif
 	CHECK(shclw_put_syntax(d, "lit", "\"1,", 3, NULL) == SHCLW_ERR_BAD_VALUE);
 	CHECK(!shclw_has(d, "g"));
 	size_t after_len = 0;
@@ -714,9 +677,7 @@ static void test_several(void) {
 // Edits leave what they replaced in shcl's write memory, and a save gives it
 // back, so a program that edits and saves in a loop stays level.
 static void test_saves_give_back(void) {
-#if SHCLW_SHCL < 3
-	(void)puts("api: 1.2 and 2.0 keep each edit's memory until the document is freed");
-#elif defined(__GLIBC__) && !defined(UNDER_ASAN)
+#if defined(__GLIBC__) && !defined(UNDER_ASAN)
 	enum { BIG = 16 * 1024 };
 	char *value = (char *)malloc(BIG);
 	CHECK(value != NULL);
@@ -763,9 +724,7 @@ static void test_compact(void) {
 	free(k);
 	CHECK(shclw_line(d, "n") == 3 && shclw_int(d, "n", 0) == 2);
 	shclw_compact(NULL);
-#if SHCLW_SHCL < 3
-	(void)puts("api: 1.2 and 2.0 have nothing for shclw_compact to give back");
-#elif defined(__GLIBC__) && !defined(UNDER_ASAN)
+#if defined(__GLIBC__) && !defined(UNDER_ASAN)
 	enum { BIG = 16 * 1024 };
 	char *value = (char *)malloc(BIG);
 	CHECK(value != NULL);
@@ -905,7 +864,7 @@ static shclw_kind test_write(void *ctx, const char *path, const char *data, size
 }
 
 // A save goes to a temp file that's renamed into place, and keeps the mode a
-// file had. 1.2 has no save, so that's the wrapper's own write there.
+// file had.
 static void test_save(void) {
 	char dir[4200], path[8192];
 	make_dir(dir, sizeof dir, "write");
@@ -924,16 +883,6 @@ static void test_save(void) {
 	CHECK(mkdir(sub, 0755) == 0);
 	shclw_error err;
 	CHECK(shclw_write(d, sub, &err) == SHCLW_ERR_IO && count_dir(dir) == 2 && count_dir(sub) == 0);
-#if SHCLW_SHCL == 1
-	CHECK(strstr(err.msg, "not a regular file") != NULL);
-	// shcl 2.0's and 3.0's own write puts a file in place of a FIFO.
-	char fifo[8300];
-	path_in(fifo, sizeof fifo, dir, "fifo");
-	CHECK(mkfifo(fifo, 0644) == 0);
-	CHECK(shclw_write(d, fifo, &err) == SHCLW_ERR_IO && strstr(err.msg, "not a regular file"));
-	struct stat st;
-	CHECK(lstat(fifo, &st) == 0 && S_ISFIFO(st.st_mode) && count_dir(dir) == 3);
-#endif
 	shclw_free(d);
 	drop_dir(sub);
 	drop_dir(dir);
@@ -999,7 +948,6 @@ static void test_replace_read(void) {
 	}
 }
 
-#if SHCLW_SHCL == 3
 static const char clean2x[] = "tags: a, b\n";
 static const char clean2to[] = "tags: [a, b]\n";
 
@@ -1155,66 +1103,10 @@ static void test_upgrade_raced(void) {
 	drop_dir(root);
 }
 
-#else
-// 1.2 and 2.0 have nothing to convert: the text comes back, a newer file is
-// refused, and 2.0 can't take a 1.x file forward. A file upgrade never writes.
-static void test_upgrade(void) {
-	static const char text[] = "a: 1\n";
-	shclw_upgraded *u = NULL;
-	CHECK(shclw_upgrade(text, 5, 0, &u, NULL) == SHCLW_OK && u && !u->changed && u->from == SHCLW_FORMAT_MAJOR);
-	CHECK(u && u->text.n == 5 && !strcmp(u->text.p, text) && u->unsure == 0 && !u->n_diags && u->backup.n == 0);
-	free(u);
-	static const char newer[] = "a: 1\n##    Format   9\n";
-	shclw_error err;
-	CHECK(shclw_upgrade(newer, sizeof newer - 1, 0, &u, &err) == SHCLW_ERR_TOO_NEW && u && u->from == 9);
-	CHECK(strstr(err.msg, "format 9") != NULL);
-	free(u);
-	CHECK(shclw_upgrade(text, 5, 9, &u, NULL) == SHCLW_ERR_TOO_NEW && u && u->from == 9);
-	free(u);
-	// A Format line in a raw body is the body's.
-	static const char raw[] = "r: ```\n##    Format   9\n```\n";
-	CHECK(shclw_format_of(raw, sizeof raw - 1) == 0);
-	CHECK(shclw_upgrade(raw, sizeof raw - 1, 0, &u, NULL) == SHCLW_OK && u && u->from == SHCLW_FORMAT_MAJOR);
-	free(u);
-#if SHCLW_SHCL == 2
-	CHECK(shclw_upgrade(text, 5, 1, &u, &err) == SHCLW_ERR_UNSUPPORTED && u && u->from == 1);
-	CHECK(strstr(err.msg, "format 1") != NULL);
-#else
-	CHECK(shclw_upgrade(text, 5, 1, &u, NULL) == SHCLW_OK && u && u->from == 1);
-#endif
-	free(u);
-
-	char dir[4200], path[8192];
-	make_dir(dir, sizeof dir, "old");
-	path_in(path, sizeof path, dir, "c.shcl");
-	write_mode(path, text, 0644);
-	CHECK(shclw_upgrade_file(path, 0, &u, NULL) == SHCLW_OK && u && !u->changed && u->backup.n == 0);
-	CHECK(file_is(path, text) && count_dir(dir) == 1);
-	free(u);
-	write_mode(path, newer, 0644);
-	CHECK(shclw_upgrade_file(path, 0, &u, &err) == SHCLW_ERR_TOO_NEW && u && u->from == 9 && strstr(err.msg, path));
-	CHECK(file_is(path, newer) && count_dir(dir) == 1);
-	free(u);
-	CHECK(shclw_upgrade_file(in_scratch("missing.shcl"), 0, &u, NULL) == SHCLW_ERR_NOT_FOUND && u && !u->from);
-	free(u);
-	CHECK(shclw_upgrade_file(dir, 0, &u, &err) == SHCLW_ERR_IO && u && strstr(err.msg, "not a regular file"));
-	free(u);
-	drop_dir(dir);
-}
-#endif
-
 // An edit after InfoBlock that names a newer format leaves Text without the
 // block, and Write refuses, writing nothing. One naming an older format is
 // refused at the call.
-#if SHCLW_SHCL == 3
 #define BLOCK SHCL_GEN_BANNER
-#define OLDER "2"
-#else
-#define BLOCK SHCLW_I_INFO_TEXT(STR(SHCLW_FORMAT_MAJOR), "v" SHCLW_SHCL_VERSION)
-#if SHCLW_SHCL == 2
-#define OLDER "1"
-#endif
-#endif
 
 static void test_info(void) {
 	shclw_doc *d = parse_z("a: 1\n");
@@ -1231,13 +1123,11 @@ static void test_info(void) {
 	CHECK(access(in_scratch("info.shcl"), F_OK) != 0);
 	shclw_free(d);
 
-#ifdef OLDER
-	d = parse_z("a: 1\n##    Format   " OLDER "\n");
+	d = parse_z("a: 1\n##    Format   2\n");
 	CHECK(shclw_info_block(d, false, &err) == SHCLW_ERR_REFUSED && strstr(err.msg, "upgrade it first"));
 	CHECK(shclw_stamp_format(d, NULL) == SHCLW_ERR_REFUSED);
-	CHECK(text_is(d, "a: 1\n##    Format   " OLDER "\n"));
+	CHECK(text_is(d, "a: 1\n##    Format   2\n"));
 	shclw_free(d);
-#endif
 
 	d = parse_z("a: 1\n");
 	CHECK(shclw_stamp_format(d, NULL) == SHCLW_OK && text_is(d, "a: 1\n##    Format   " STR(SHCLW_FORMAT_MAJOR) "\n"));
@@ -1246,15 +1136,14 @@ static void test_info(void) {
 }
 
 // A new document has no lines of its own to keep, so it never rewrites. 3.0
-// keeps the lines of a load at any strictness, and 1.2 and 2.0 save
-// canonical form, which rewrites any text that wasn't.
+// keeps the lines of a load at any strictness.
 static void test_rewrites(void) {
 	shclw_doc *d = shclw_new();
 	CHECK(shclw_put_int(d, "a.b", 1, NULL) == SHCLW_OK && !shclw_rewrites(d));
 	shclw_free(d);
 	static const char loose[] = "a:   1\n";
 	CHECK(shclw_parse_with(loose, sizeof loose - 1, SHCLW_LOOSE, &d, NULL) == SHCLW_OK);
-	CHECK(shclw_rewrites(d) == (SHCLW_SHCL < 3));
+	CHECK(!shclw_rewrites(d));
 	shclw_free(d);
 	d = parse_z("a: 1\n");
 	CHECK(!shclw_rewrites(d));
@@ -1317,10 +1206,8 @@ int main(void) {
 	test_save();
 	test_replace_read();
 	test_upgrade();
-#if SHCLW_SHCL == 3
 	test_upgrade_file();
 	test_upgrade_raced();
-#endif
 	test_info();
 	test_rewrites();
 	test_check();
