@@ -14,7 +14,7 @@
 #include "shclw3_v2.h"
 #include "shclw_adapter.h"
 
-#if SHCLW_SHCL != 3
+#if SHCLW_FORMAT_MAJOR != 3
 #error "shclw3.c is the adapter for shcl 3.0, and this shcl.h is another version"
 #endif
 

@@ -5,32 +5,24 @@
 // against. The calls are the same as the Go and Rust wrappers', in snake case.
 // See project/design.md.
 //
-// Build: shclw.c, info.c, the adapter that matches the shcl.h on the include
-// path (shclw1.c for 1.2, shclw2.c for 2.0, shclw3.c for 3.0), and run.c for
-// shclw_run. shcl.h's own SHCL_IMPLEMENTATION goes in one .c of the
-// program's, as shcl asks.
+// Build: shclw.c, info.c, and shclw3.c, the adapter for shcl 3.0, with 3.0's
+// shcl.h on the include path, and run.c for shclw_run. shcl.h's own
+// SHCL_IMPLEMENTATION goes in one .c of the program's, as shcl asks.
 //
-// On 1.2 and 2.0, define SHCLW_SHCL as 1 or 2 for every file that includes
-// this, such as with -DSHCLW_SHCL=2. Their shcl.h files define the same
-// macros, so nothing else can tell them apart. A wrong one fails to compile.
-// 3.0 needs none.
-//
-// 3.0 also needs shclw3_v2.c and shclw3_v2_impl.c, built with shcl 2.0's
-// shcl.h on the include path in place of 3.0's. They're shcl 2.0 under other
-// names, which the upgrade checks a 2.x file with. 2.0 ends the program when
-// it runs out of memory.
+// The build also needs shclw3_v2.c and shclw3_v2_impl.c, built with shcl
+// 2.0's shcl.h on the include path in place of 3.0's. They're shcl 2.0 under
+// other names, which the upgrade checks a 2.x file with. 2.0 ends the program
+// when it runs out of memory.
 //
 // Include this before any system header, since shcl.h has to be first.
 //
 // Memory: the strings, arrays, text, diagnostics, and upgrades a shclw call
 // hands back are malloc'd, each in one block, and the caller frees them with
 // free().
-// Documents are freed with shclw_free. On 3.0, reads copy their value out and
-// give shcl's read memory back before they return, and edits keep what they
+// Documents are freed with shclw_free. Reads copy their value out and give
+// shcl's read memory back before they return, and edits keep what they
 // replaced until shclw_write, which compacts the document after a good save.
-// A program that edits in a loop and never saves can call shclw_compact. 1.2
-// and 2.0 have no call that gives memory back, so there reads, text, and edits
-// keep theirs until shclw_free.
+// A program that edits in a loop and never saves can call shclw_compact.
 //
 // Strings: anything shclw hands back has its length and a NUL after it. Go by
 // the length, since a value can hold a NUL. Paths and file names are plain
@@ -53,42 +45,16 @@
 // shcl.h has no version macro before 3.0. SHCL_FORMAT_MAJOR is new in 3.0.
 // SHCLW_SHCL_VERSION is the shcl the wrapper is tested against, since a
 // shcl.h can't say its own.
-#if defined(SHCL_FORMAT_MAJOR) && SHCL_FORMAT_MAJOR == 3
-#if defined(SHCLW_SHCL) && SHCLW_SHCL != 3
-#error "shclw: SHCLW_SHCL names 1.2 or 2.0, and this shcl.h is 3.0. Leave SHCLW_SHCL out for 3.0."
-#endif
-#ifndef SHCLW_SHCL
-#define SHCLW_SHCL 3
+#if !defined(SHCL_FORMAT_MAJOR)
+#error "shclw: this shcl.h is 1.2 or 2.0, and shclw needs 3.0. shclw_upgrade moves their files forward."
+#elif SHCL_FORMAT_MAJOR != 3
+#error "shclw: this shcl.h is newer than 3.0, which shclw doesn't wrap yet"
 #endif
 #define SHCLW_FORMAT_MAJOR 3
 #define SHCLW_SHCL_VERSION "3.0.0-dev+ea0998fa"
-#elif defined(SHCL_FORMAT_MAJOR)
-#error "shclw: this shcl.h is newer than 3.0, which shclw doesn't wrap yet"
-#elif !defined(SHCLW_SHCL)
-#error                                                                                                                 \
-	"shclw: this shcl.h is 1.2 or 2.0, and no macro in it says which. Define SHCLW_SHCL as 1 or 2, such as -DSHCLW_SHCL=2."
-#elif SHCLW_SHCL == 1
-#define SHCLW_FORMAT_MAJOR 1
-#define SHCLW_SHCL_VERSION "1.2.0"
-#elif SHCLW_SHCL == 2
-#define SHCLW_FORMAT_MAJOR 2
-#define SHCLW_SHCL_VERSION "2.0.0"
-#else
-#error "shclw: SHCLW_SHCL is 1 or 2 with this shcl.h, which is 1.2 or 2.0"
-#endif
 
 #ifdef __cplusplus
 extern "C" {
-#endif
-
-// shcl_lost_count is new in 2.0, so it's how a wrong SHCLW_SHCL is caught at
-// compile time. Declared another way, it clashes with 2.0's own, and on 1.2
-// there's none to take the size of.
-#if SHCLW_SHCL == 1
-struct shclw_shcl_h_is_2_0_not_1_2;
-void shcl_lost_count(struct shclw_shcl_h_is_2_0_not_1_2 *wrong_shclw_shcl);
-#elif SHCLW_SHCL == 2
-typedef char shclw_shcl_h_is_1_2_not_2_0[sizeof(&shcl_lost_count)];
 #endif
 
 typedef struct shclw_doc shclw_doc;
@@ -224,14 +190,14 @@ char *shclw_text(shclw_doc *d, size_t *len);
 // The document in canonical form. Caller frees.
 char *shclw_canonical(shclw_doc *d, size_t *len);
 // Saves shclw_text atomically. SHCLW_ERR_REFUSED when the save would lose
-// lines the load couldn't use, which 1.2 doesn't check. It writes nothing when
-// the info block or the Format line can't go in, since an edit made after
-// shclw_info_block or shclw_stamp_format. On 3.0, after a good save it gives
-// back the memory earlier edits left behind.
+// lines the load couldn't use. It writes nothing when the info block or the
+// Format line can't go in, since an edit made after shclw_info_block or
+// shclw_stamp_format. After a good save it gives back the memory earlier
+// edits left behind.
 shclw_kind shclw_write(shclw_doc *d, const char *path, shclw_error *err);
 // Gives back what earlier edits left behind, as a good shclw_write does, for a
 // program that edits a lot between saves. C only, since Go and Rust free it
-// themselves. Does nothing on 1.2 and 2.0.
+// themselves.
 void shclw_compact(shclw_doc *d);
 
 // Whether shclw_write puts the canonical form in place of the lines the
@@ -334,8 +300,7 @@ size_t *shclw_lines(shclw_doc *d, const char *path, size_t *n);
 char *shclw_first(shclw_doc *d, const char *path, size_t *len);
 char *shclw_last(shclw_doc *d, const char *path, size_t *len);
 // base with one more name on the end, quoted if it needs it. base "" gives the
-// name alone. Caller frees. On 1.2 and 2.0 a name holding a NUL keeps it in
-// the path, since they have no escape for one, and *len is past the first NUL.
+// name alone. Caller frees.
 char *shclw_child(shclw_doc *d, const char *base, const char *name, size_t name_len, size_t *len);
 
 // Puts read their value back: one that reads back different is

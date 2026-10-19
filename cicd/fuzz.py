@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import contextlib
 import random
+import re
 import shutil
 import subprocess
 import sys
@@ -20,7 +21,10 @@ from decimal import Decimal
 from itertools import pairwise
 from pathlib import Path
 
-VERSIONS = (1, 2, 3)
+VERSIONS = (3,)
+# A document is written in one of these formats. The old ones are what 1.2
+# and 2.0 programs wrote, for the upgrade.
+FORMATS = (1, 2, 3, 3)
 NAMES = ("a", "b", "port", "name", "Server", "host", "tags", "x-y", "n_1", "list", "on")
 WORDS = ("alpha", "beta", "two words", "café", "x#y", "a # b", "a, b", "'q'", '"dq"', "C:\\temp", "", " pad ")
 TYPES = ("int", "float", "bool", "str", "strs", "ints", "floats", "raw")
@@ -35,6 +39,15 @@ INFO_BLOCKS = (
 	("##", "{n}", "yottacore", "v3.0.0", " [ID: x]"),
 	("##", "{n}", "yottacore", "v3.0.0-beta1", " [ID: x]"),
 )
+
+
+# shcl 3.0 stamps the time on a line it comments out to make room for a set,
+# so 2 drivers a second apart print it differently.
+NOTE_STAMP = re.compile(r"(## commented out by shcl when setting .*?, )\d{4}-\d\d-\d\d \d\d:\d\d:\d\d[^:\n]*(?=: )")
+
+
+def unstamped(out: str) -> str:
+	return NOTE_STAMP.sub(r"\1<time>", out)
 
 
 @dataclass
@@ -66,12 +79,12 @@ def gen_scalar(rng: random.Random) -> str:
 	return rng.choice(NAMES)
 
 
-def gen_array(rng: random.Random, version: int) -> str:
+def gen_array(rng: random.Random, fmt: int) -> str:
 	items = [rng.choice(("1", "2", "red", "0.5", "x y")) for _ in range(rng.randrange(1, 4))]
-	return ", ".join(items) if version < 3 else "[" + ", ".join(items) + "]"
+	return ", ".join(items) if fmt < 3 else "[" + ", ".join(items) + "]"
 
 
-def gen_block(rng: random.Random, version: int, depth: int, out: list[str]) -> None:
+def gen_block(rng: random.Random, fmt: int, depth: int, out: list[str]) -> None:
 	for _ in range(rng.randrange(1, 5)):
 		name = rng.choice(NAMES)
 		if rng.random() < 0.1:
@@ -85,18 +98,18 @@ def gen_block(rng: random.Random, version: int, depth: int, out: list[str]) -> N
 		elif roll < 0.35 and depth < 3:
 			val = rng.choice(("", " " + rng.choice(NAMES)))
 			out.append(f"{pad}{name}:{val}")
-			gen_block(rng, version, depth + 1, out)
+			gen_block(rng, fmt, depth + 1, out)
 		elif roll < 0.5:
-			out.append(f"{pad}{name}: {gen_array(rng, version)}")
+			out.append(f"{pad}{name}: {gen_array(rng, fmt)}")
 		else:
 			out.append(f"{pad}{name}: {gen_scalar(rng)}".rstrip())
 
 
-def gen_info(rng: random.Random, version: int) -> list[str]:
-	mark, fmt, home, tag, legal_id = rng.choice(INFO_BLOCKS)
-	n = version if rng.random() < 0.8 else rng.choice(VERSIONS)
+def gen_info(rng: random.Random, fmt: int) -> list[str]:
+	mark, has_format, home, tag, legal_id = rng.choice(INFO_BLOCKS)
+	n = fmt if rng.random() < 0.8 else rng.choice(FORMATS)
 	lines = [mark, f"{mark} {TITLE}", f'{mark} "Simple Hierarchical Config Language"']
-	if fmt:
+	if has_format:
 		lines.append(f"{mark}    Format   {n}")
 	lines += [
 		f"{mark}    Home     https://github.com/{home}/shcl",
@@ -109,19 +122,19 @@ def gen_info(rng: random.Random, version: int) -> list[str]:
 	return lines
 
 
-def gen_doc(rng: random.Random, version: int) -> tuple[str, bool]:
+def gen_doc(rng: random.Random, fmt: int) -> tuple[str, bool]:
 	lines: list[str] = []
-	gen_block(rng, version, 0, lines)
-	if version >= 3 and rng.random() < 0.2:
+	gen_block(rng, fmt, 0, lines)
+	if fmt >= 3 and rng.random() < 0.2:
 		lines.append("##    Format   3")
 	stray = False
 	if rng.random() < 0.1:
 		# A raw body holding the block's text is the body's, not a block.
-		lines += ["tmpl:", "\t~~~", "##", f"## {TITLE}", f"##    Format   {version}", "##", "\t~~~"]
+		lines += ["tmpl:", "\t~~~", "##", f"## {TITLE}", f"##    Format   {fmt}", "##", "\t~~~"]
 		stray = True
 	if rng.random() < 0.3:
 		at = rng.choice((0, len(lines), rng.randrange(len(lines) + 1)))
-		lines[at:at] = gen_info(rng, version)
+		lines[at:at] = gen_info(rng, fmt)
 	return "\n".join(lines) + ("\n" if rng.random() < 0.9 else ""), stray
 
 
@@ -170,7 +183,7 @@ def gen_case(seed: int, corpus: list[str]) -> Case:
 	if corpus and rng.random() < 0.25:
 		doc, stray = mutate(rng, rng.choice(corpus)), True
 	else:
-		doc, stray = gen_doc(rng, version)
+		doc, stray = gen_doc(rng, rng.choice(FORMATS))
 	case = Case(seed=seed, version=version, doc=doc, script="", stray_titles=stray)
 	ops: list[str] = []
 	for _ in range(rng.randrange(3, 20)):
@@ -467,7 +480,7 @@ def main() -> int:
 					problems.append(f"{name} crashed with exit {run[0]}")
 				if name != "go" and run[0] != go[0]:
 					problems.append(f"exit codes differ: go {go[0]}, {name} {run[0]}")
-				if name != "go" and run[1] != go[1]:
+				if name != "go" and unstamped(run[1]) != unstamped(go[1]):
 					problems.append(f"{name} output differs from go")
 			if not problems and go[0] == 0:
 				problems += check_roundtrips(case, go[1])

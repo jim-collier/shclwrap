@@ -13,11 +13,11 @@ put	int	n	3
 syntax	n	3
 comment	n	c
 # A path that names one instance at each step is fine.
-put	int	tv[#1].h	7
-syntax	tv[two].k	8
-comment	tv[#0].g	first tv
-put	int	u.v[#0].w	9
-put	int	u.v[#1].w	10
+put	int	tv(1).h	7
+syntax	tv(two).k	8
+comment	tv(0).g	first tv
+put	int	u.v(0).w	9
+put	int	u.v(1).w	10
 # Each, first, and last narrow every step that repeats.
 each	tv.h
 first	int	tv.g

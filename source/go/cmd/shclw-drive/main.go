@@ -6,7 +6,7 @@
 //
 //	shclw-drive VERSION DOCFILE [DIR] < SCRIPT
 //
-// VERSION is 1, 2, or 3. DIR is where the script's check and write ops find
+// VERSION is 3. DIR is where the script's check and write ops find
 // and put files.
 package main
 
@@ -18,12 +18,10 @@ import (
 	"unicode/utf8"
 
 	"github.com/jim-collier/shclwrap/source/go/shclw"
-	"github.com/jim-collier/shclwrap/source/go/shclw1"
-	"github.com/jim-collier/shclwrap/source/go/shclw2"
 	"github.com/jim-collier/shclwrap/source/go/shclw3"
 )
 
-var libs = map[string]shclw.Lib{"1": shclw1.Lib, "2": shclw2.Lib, "3": shclw3.Lib}
+var libs = map[string]shclw.Lib{"3": shclw3.Lib}
 
 func main() {
 	if len(os.Args) < 3 || len(os.Args) > 4 {

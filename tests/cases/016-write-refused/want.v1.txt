@@ -1,6 +1,0 @@
-> remove	a
-1
-> write	out.shcl
-ok
-> errors
-1

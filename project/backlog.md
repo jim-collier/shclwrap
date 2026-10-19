@@ -81,7 +81,7 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 - Make shcl 3.0 the floor
 	- ID: 2026101613005800
 	- Type: Feature
-	- Status: Queued
+	- Status: Started
 	- Priority: High
 	- Opened: 20261016-130058
 	- Opened by: JC
@@ -99,6 +99,13 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Note: Makes the C 1.2 and 2.0 item moot. 4 keeps 3.0's file format but changes the API a lot, so a 4 adapter is still real work.
 	- Decisions:
 		- 20261016, JC: the upgrade is required, not opt-in. 2.0 adds about 164 KB to a small Go program and 29 KB to a C one.
+	- Progress log:
+		- 20261019: Part 1 is done. The 1.2 and 2.0 adapters are gone in Go, Rust, and C, with their tests, want files, the `SHCLW_SHCL` pick, and the cicd and fuzz paths that ran them. shcl 2.0 stays built in for the upgrade's check in all 3. design.md and README say 3.0 is the floor.
+		- 20261019: Files the 1.2 and 2.0 adapters wrote were kept as 2 new shared cases before the adapters went. The fuzz now writes half its documents in the old syntax, and masks the time 3.0 stamps on a line it comments out, which had made one case differ by a second.
+		- 20261019: Left for part 2: test cases from real files each program wrote, and moving Tallowbase, Mossrealm, and Lenscart onto the wrapper at 3.0. Open upgrading an old file in memory isn't built yet either.
+	- Branch: floor3
+	- Test case: tests/cases/034-upgrade-1x-written and 035-upgrade-2x-written, from files the old adapters wrote. Every existing 3.0 case and API test still passes.
+	- Swept: Go, Rust, and C for the helpers only 1.2 and 2.0 used (the step-count edit check, the path splitter for `Each`, the 1.2 save, the 1.2 and 2.0 info block text, and the Format line reader), all removed. Comments, cicd, `c_cases.py`, `fuzz.py`, design.md, and README for 1.2 and 2.0 mentions.
 
 - Layered loading
 	- ID: 2026101512024156

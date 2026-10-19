@@ -27,12 +27,6 @@ var oldBlocks = []string{
 	s3.GenBanner,
 }
 
-func TestInfoTextIsGenBanner(t *testing.T) {
-	if got := shclw.InfoText(s3.FormatMajor, "v3.0.0-beta1"); got != s3.GenBanner {
-		t.Errorf("InfoText(3) =\n%s\nshcl's GenBanner is\n%s", got, s3.GenBanner)
-	}
-}
-
 // infoOn is text with InfoBlock(true), and the block it ends with taken
 // off, so the versions compare.
 func infoOn(t *testing.T, n int, lib shclw.Lib, text string) string {
@@ -42,15 +36,11 @@ func infoOn(t *testing.T, n int, lib shclw.Lib, text string) string {
 		t.Fatalf("v%d: InfoBlock on %q: %v", n, text, err)
 	}
 	got := d.Text()
-	block := infoBlockOf(n)
+	block := s3.GenBanner
 	if !strings.HasSuffix(got, block) || strings.Count(got, "This config file format is SHCL.") != 1 {
 		t.Fatalf("v%d: text after InfoBlock on %q is\n%s", n, text, got)
 	}
 	return strings.TrimSuffix(got, block)
-}
-
-func infoBlockOf(n int) string {
-	return map[int]string{1: shclw.InfoText(1, "v1.2.0"), 2: shclw.InfoText(2, "v2.0.0"), 3: s3.GenBanner}[n]
 }
 
 // Each old spelling, above the first field, between two, and at the end,
@@ -60,9 +50,6 @@ func TestInfoOldSpellings(t *testing.T) {
 		for _, at := range []string{"%sa: 1\nb: 2\n", "a: 1\n%sb: 2\n", "a: 1\nb: 2\n\n%s"} {
 			var first string
 			for _, v := range libs {
-				if old == s3.GenBanner && v.n < 3 {
-					continue
-				}
 				block := strings.ReplaceAll(old, "%d", strconv.Itoa(v.n))
 				got := infoOn(t, v.n, v.lib, strings.Replace(at, "%s", block, 1))
 				if first == "" {
@@ -100,7 +87,7 @@ func TestInfoMatchesSetBanner(t *testing.T) {
 			want = sd.ToCanonical()
 		}
 		for _, on := range []bool{true, false} {
-			d := libs[2].lib.Parse(text)
+			d := libs[0].lib.Parse(text)
 			if err := d.InfoBlock(on); err != nil {
 				t.Fatalf("%q: %v", text, err)
 			}

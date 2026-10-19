@@ -1,0 +1,88 @@
+> format
+1
+> diags
+9	error	E026	a comma then a space or the end in a bare value; write an array in brackets, [a, b], or quote the text
+13	hint	H001	'name' repeats as a bare leaf - did you mean 'name: [one, two]'?
+14	hint	H001	'cols' repeats as a bare leaf - did you mean 'cols: [3, 5]'?
+22	error	E026	a comma then a space or the end in a bare value; write an array in brackets, [a, b], or quote the text
+24	error	E026	a comma then a space or the end in a bare value; write an array in brackets, [a, b], or quote the text
+26	error	E026	a comma then a space or the end in a bare value; write an array in brackets, [a, b], or quote the text
+33	hint	H007	the file names format 1, older than this reader's format 3, so some lines may read differently than written; shcl upgrade --from-2x rewrites it
+> upgrade
+from 1 changed true unsure 0
+| # app settings
+| server:
+| \thost: example.org
+| \t# the port
+| \tport: 8080
+| \ttls: true
+| \ttimeout: 2.5
+| \tworkers: -7
+| tags: [red, green]
+| table:
+| \tname: one
+| \tcols: 3
+| \tname: two
+| \tcols: 5
+| 
+| title: "two words"
+| 
+| path: "C:\\\\temp"
+| 
+| note: "a # b"
+| 
+| hosts: [alpha, "two words", "x#y"]
+| 
+| ports: [80, 443]
+| 
+| ratios: [0.5, -2.25]
+| 
+| empty:
+| 
+| ##
+| ## This config file format is SHCL.
+| ## "Simple Hierarchical Config Language"
+| ##    Format   3
+| ##    Home     https://github.com/yottacore/shcl
+| ##    Syntax   https://github.com/yottacore/shcl/blob/v3.0.0-beta1/project/spec.md
+| ##    Legal    SHCL is Copyright © 2026 Jim Collier [ID: 2უNაɘ«҂թȹɤξπ๙¿ձϖ]. License: MIT. No warranty.
+| ##
+> upgrade	2
+from 1 changed true unsure 0
+| # app settings
+| server:
+| \thost: example.org
+| \t# the port
+| \tport: 8080
+| \ttls: true
+| \ttimeout: 2.5
+| \tworkers: -7
+| tags: [red, green]
+| table:
+| \tname: one
+| \tcols: 3
+| \tname: two
+| \tcols: 5
+| 
+| title: "two words"
+| 
+| path: "C:\\\\temp"
+| 
+| note: "a # b"
+| 
+| hosts: [alpha, "two words", "x#y"]
+| 
+| ports: [80, 443]
+| 
+| ratios: [0.5, -2.25]
+| 
+| empty:
+| 
+| ##
+| ## This config file format is SHCL.
+| ## "Simple Hierarchical Config Language"
+| ##    Format   3
+| ##    Home     https://github.com/yottacore/shcl
+| ##    Syntax   https://github.com/yottacore/shcl/blob/v3.0.0-beta1/project/spec.md
+| ##    Legal    SHCL is Copyright © 2026 Jim Collier [ID: 2უNაɘ«҂թȹɤξπ๙¿ձϖ]. License: MIT. No warranty.
+| ##

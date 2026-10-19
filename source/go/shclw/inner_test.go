@@ -11,8 +11,6 @@ import (
 	s3 "github.com/yottacore/shcl/source/go/v2"
 
 	"github.com/jim-collier/shclwrap/source/go/shclw"
-	"github.com/jim-collier/shclwrap/source/go/shclw1"
-	"github.com/jim-collier/shclwrap/source/go/shclw2"
 	"github.com/jim-collier/shclwrap/source/go/shclw3"
 )
 
@@ -35,18 +33,6 @@ func innerSeen(t *testing.T, n int, d shclw.Doc, paths []string) {
 }
 
 func TestInner(t *testing.T) {
-	d1 := shclw1.Parse("a: 1\n")
-	if !d1.Inner().SetEmpty("a") || !d1.Inner().SetString("b", "set inside") {
-		t.Fatal("v1: an inner setter refused")
-	}
-	innerSeen(t, 1, d1, d1.Inner().Paths())
-
-	d2 := shclw2.Parse("a: 1\n")
-	if !d2.Inner().SetEmpty("a") || !d2.Inner().SetString("b", "set inside") {
-		t.Fatal("v2: an inner setter refused")
-	}
-	innerSeen(t, 2, d2, d2.Inner().Paths())
-
 	d3 := shclw3.Parse("a: 1\n")
 	if d3.Inner().SetEmpty("a") != s3.SetOk || d3.Inner().SetString("b", "set inside") != s3.SetOk {
 		t.Fatal("v3: an inner setter refused")

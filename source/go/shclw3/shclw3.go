@@ -15,8 +15,8 @@ import (
 	"os"
 	"strings"
 
+	shcl2 "github.com/jim-collier/shcl/source/go/v2"
 	"github.com/jim-collier/shclwrap/source/go/shclw"
-	"github.com/jim-collier/shclwrap/source/go/shclw2"
 	shcl "github.com/yottacore/shcl/source/go/v2"
 )
 
@@ -219,9 +219,9 @@ func oldErrors(text string, fromV2 bool, u shcl.Upgraded) *shclw.Error {
 	}
 	var errs []Diag
 	lines := map[int]bool{}
-	for _, d := range shclw2.Parse(text).Diags() {
-		if d.Severity == shclw.SevError {
-			errs = append(errs, d)
+	for _, d := range shcl2.Parse(text).Diagnostics() {
+		if d.Severity == shcl2.SeverityError {
+			errs = append(errs, Diag{Line: d.Line, Severity: shclw.SevError, Code: d.Code, Message: d.Message})
 			lines[d.Line] = true
 		}
 	}

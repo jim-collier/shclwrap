@@ -8,7 +8,7 @@
 //! shclw-drive VERSION DOCFILE [DIR] < SCRIPT
 //! ```
 //!
-//! VERSION is 1, 2, or 3. DIR is where the script's check and write ops find
+//! VERSION is 3. DIR is where the script's check and write ops find
 //! and put files.
 
 use std::io::Read as _;
@@ -38,8 +38,6 @@ fn main() -> ExitCode {
 		dir: args.get(3).map(Into::into),
 	};
 	let out = match args[1].as_str() {
-		"1" => run::<shclw::v1::Version>(&doc, &script, &opt),
-		"2" => run::<shclw::v2::Version>(&doc, &script, &opt),
 		"3" => run::<shclw::v3::Version>(&doc, &script, &opt),
 		v => {
 			eprintln!("shclw-drive: no such version: {v}");

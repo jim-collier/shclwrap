@@ -72,7 +72,7 @@ int main(int argc, char **argv) {
 		return fail("usage: shclw-drive VERSION DOCFILE [DIR] < SCRIPT", NULL);
 	}
 	char version[8];
-	(void)snprintf(version, sizeof version, "%d", SHCLW_SHCL);
+	(void)snprintf(version, sizeof version, "%d", SHCLW_FORMAT_MAJOR);
 	if (strcmp(argv[1], version) != 0) {
 		return fail("built for shcl version ", version);
 	}

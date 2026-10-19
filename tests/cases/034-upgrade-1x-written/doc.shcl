@@ -1,0 +1,37 @@
+# app settings
+server:
+	host: example.org
+	# the port
+	port: 8080
+	tls: true
+	timeout: 2.5
+	workers: -7
+tags: red, green
+table:
+	name: one
+	cols: 3
+	name: two
+	cols: 5
+
+title: "two words"
+
+path: "C:\\temp"
+
+note: "a # b"
+
+hosts: alpha, "two words", "x#y"
+
+ports: 80, 443
+
+ratios: 0.5, -2.25
+
+empty:
+
+##
+## This config file format is SHCL.
+## "Simple Hierarchical Config Language"
+##    Format   1
+##    Home     https://github.com/yottacore/shcl
+##    Syntax   https://github.com/yottacore/shcl/blob/v1.2.0/project/spec.md
+##    Legal    SHCL is Copyright © 2026 Jim Collier [ID: 2უNაɘ«҂թȹɤξπ๙¿ձϖ]. License: MIT. No warranty.
+##

@@ -23,19 +23,10 @@ shift 2
 [[ "$(clang-format-22 --version)" == *"${PIN_CLANG_TIDY}"* ]] || { echo "clang-format-22 is not ${PIN_CLANG_TIDY}" >&2; exit 1; }
 [[ "$(heaptrack --version)" == *"${PIN_HEAPTRACK}"* ]] || { echo "heaptrack is not ${PIN_HEAPTRACK}" >&2; exit 1; }
 
-shcl1Dir="${root}/cicd/cache/shcl-c/${SHCL1_REV}"
 shcl2Dir="${root}/cicd/cache/shcl-c/${SHCL2_REV}"
 shcl3Dir="${root}/cicd/cache/shcl-c/${SHCL3_REV}"
-shclDir="${shcl1Dir}"
-case "${version}" in
-	1) shclDir="${shcl1Dir}" ;;
-	2) shclDir="${shcl2Dir}" ;;
-	3) shclDir="${shcl3Dir}" ;;
-	all) [[ "${mode}" == fuzz ]] || { echo "only fuzz takes all" >&2; exit 2; } ;;
-	*) echo "version must be 1, 2, or 3" >&2; exit 2 ;;
-esac
-shclDirs=([1]="${shcl1Dir}" [2]="${shcl2Dir}" [3]="${shcl3Dir}")
-for header in "${shcl1Dir}/shcl.h" "${shcl2Dir}/shcl.h" "${shcl3Dir}/shcl.h"; do
+[[ "${version}" == 3 ]] || { echo "version must be 3" >&2; exit 2; }
+for header in "${shcl2Dir}/shcl.h" "${shcl3Dir}/shcl.h"; do
 	[[ -f "${header}" ]] || { echo "missing pinned C header: ${header}" >&2; exit 1; }
 done
 
@@ -44,17 +35,11 @@ jobs=$(( $(nproc) / 2 )); if ((jobs < 1)); then jobs=1; fi
 
 make_c(){
 	make -s -C "${root}/source/c" \
-		SHCLW_SHCL="${version}" SHCL_DIR="${shclDir}" SHCL2_DIR="${shcl2Dir}" \
-		SHCL1_DIR="${shcl1Dir}" SHCL3_DIR="${shcl3Dir}" OUT="/work/c${version}" \
+		SHCL_DIR="${shcl3Dir}" SHCL2_DIR="${shcl2Dir}" OUT="/work/c${version}" \
 		CC=gcc-15 CXX=g++-15 CC15=gcc-15 CLANG=clang-22 CLANG_TIDY=clang-tidy-22 CLANG_FORMAT=clang-format-22 "$@"
 }
 
 case "${mode}" in
-	pick)
-		make -s -C "${root}/source/c" pick \
-			SHCL1_DIR="${shcl1Dir}" SHCL2_DIR="${shcl2Dir}" SHCL3_DIR="${shcl3Dir}" \
-			CC=gcc-15 CXX=g++-15
-		;;
 	lint)
 		make_c lint strict analyze format-check
 		;;
@@ -75,10 +60,7 @@ case "${mode}" in
 	fuzz)
 		## DRIVE is shclw-drive, or shclw-drive-plain under --quick. The test stage made them, so make only checks.
 		drive="$1"; shift
-		for version in 1 2 3; do
-			shclDir="${shclDirs[${version}]}"
-			make_c -j "${jobs}" "/work/c${version}/${drive}"
-		done
+		make_c -j "${jobs}" "/work/c${version}/${drive}"
 		LSAN_OPTIONS="suppressions=${root}/source/c/lsan.supp" \
 		ASAN_OPTIONS="detect_leaks=1:halt_on_error=1" \
 		python3 "${here}/fuzz.py" --go /work/bin/go-drive --rust /work/bin/rust-drive --c "/work/c{v}/${drive}" \
@@ -92,7 +74,6 @@ case "${mode}" in
 	esac
 
 if [[ "${mode}" == leakcheck || "${mode}" == leakcheck-resume ]]; then
-		[[ "${version}" == 3 ]] || { echo "leakcheck currently runs against shcl 3" >&2; exit 2; }
 		artifact_dir="/artifacts/c-leakcheck-v${version}"
 		mkdir -p "${artifact_dir}" /work/ctu
 		if [[ "${mode}" == leakcheck ]]; then
@@ -120,15 +101,11 @@ PY
 set -Eeuo pipefail
 case "\${1:-capture}" in
 	validate)
-		make -s -C ${root}/source/c SHCLW_SHCL=1 SHCL_DIR=${shcl1Dir} SHCL2_DIR=${shcl2Dir} SHCL1_DIR=${shcl1Dir} SHCL3_DIR=${shcl3Dir} OUT=/work/codeql-build-v1 CC=gcc-15 CXX=g++-15 CC15=gcc-15 CLANG=clang-22 CLANG_TIDY=clang-tidy-22 drive-plain
-		make -s -C ${root}/source/c SHCLW_SHCL=2 SHCL_DIR=${shcl2Dir} SHCL2_DIR=${shcl2Dir} SHCL1_DIR=${shcl1Dir} SHCL3_DIR=${shcl3Dir} OUT=/work/codeql-build-v2 CC=gcc-15 CXX=g++-15 CC15=gcc-15 CLANG=clang-22 CLANG_TIDY=clang-tidy-22 drive-plain
-		make -s -C ${root}/source/c SHCLW_SHCL=3 SHCL_DIR=${shcl3Dir} SHCL2_DIR=${shcl2Dir} SHCL1_DIR=${shcl1Dir} SHCL3_DIR=${shcl3Dir} OUT=/work/codeql-build-v3 CC=gcc-15 CXX=g++-15 CC15=gcc-15 CLANG=clang-22 CLANG_TIDY=clang-tidy-22 drive-plain
+		make -s -C ${root}/source/c SHCL_DIR=${shcl3Dir} SHCL2_DIR=${shcl2Dir} OUT=/work/codeql-build-v3 CC=gcc-15 CXX=g++-15 CC15=gcc-15 CLANG=clang-22 CLANG_TIDY=clang-tidy-22 drive-plain
 		;;
 	capture)
-		for version in 1 2 3; do make -s -C ${root}/source/c OUT=/work/codeql-build-v\${version} clean; done
-		make -s -C ${root}/source/c SHCLW_SHCL=1 SHCL_DIR=${shcl1Dir} SHCL2_DIR=${shcl2Dir} SHCL1_DIR=${shcl1Dir} SHCL3_DIR=${shcl3Dir} OUT=/work/codeql-build-v1 CC=gcc-15 CXX=g++-15 CC15=gcc-15 CLANG=clang-22 CLANG_TIDY=clang-tidy-22 drive-plain
-		make -s -C ${root}/source/c SHCLW_SHCL=2 SHCL_DIR=${shcl2Dir} SHCL2_DIR=${shcl2Dir} SHCL1_DIR=${shcl1Dir} SHCL3_DIR=${shcl3Dir} OUT=/work/codeql-build-v2 CC=gcc-15 CXX=g++-15 CC15=gcc-15 CLANG=clang-22 CLANG_TIDY=clang-tidy-22 drive-plain
-		make -s -C ${root}/source/c SHCLW_SHCL=3 SHCL_DIR=${shcl3Dir} SHCL2_DIR=${shcl2Dir} SHCL1_DIR=${shcl1Dir} SHCL3_DIR=${shcl3Dir} OUT=/work/codeql-build-v3 CC=gcc-15 CXX=g++-15 CC15=gcc-15 CLANG=clang-22 CLANG_TIDY=clang-tidy-22 drive-plain
+		make -s -C ${root}/source/c OUT=/work/codeql-build-v3 clean
+		make -s -C ${root}/source/c SHCL_DIR=${shcl3Dir} SHCL2_DIR=${shcl2Dir} OUT=/work/codeql-build-v3 CC=gcc-15 CXX=g++-15 CC15=gcc-15 CLANG=clang-22 CLANG_TIDY=clang-tidy-22 drive-plain
 		;;
 	*) echo "unknown CodeQL build mode: \${1}" >&2; exit 2 ;;
 esac
@@ -144,33 +121,24 @@ EOF
 			--format=sarif-latest --output="${artifact_dir}/codeql.sarif"
 		fi
 		jq -e '[.runs[].results[]? | select(([.suppressions[]?.kind] | index("inSource")) == null)] | length == 0' "${artifact_dir}/codeql.sarif" >/dev/null || { echo "CodeQL findings; see ${artifact_dir}/codeql.sarif" >&2; exit 1; }
-		for ctu_version in 1 2 3; do
-			case "${ctu_version}" in
-				1) ctu_shcl_dir="${shcl1Dir}" ;;
-				2) ctu_shcl_dir="${shcl2Dir}" ;;
-				3) ctu_shcl_dir="${shcl3Dir}" ;;
-			esac
-			ctu_dir="/work/ctu/v${ctu_version}"
-			mkdir -p "${ctu_dir}/ast"
-			: > "${ctu_dir}/externalDefMap.txt"
-			ctu_sources=(shclw.c info.c "shclw${ctu_version}.c" run.c shclw-drive.c)
-			[[ "${ctu_version}" == 3 ]] && ctu_sources+=(shclw3_v2.c)
-			ctu_define=(); [[ "${ctu_version}" != 3 ]] && ctu_define=(-DSHCLW_SHCL="${ctu_version}")
-			for src in "${ctu_sources[@]}"; do
-				inc="${ctu_shcl_dir}"; [[ "${src}" == shclw3_v2.c ]] && inc="${shcl2Dir}"
-				ast="${ctu_dir}/ast/${src//\//_}.ast"
-				clang-22 -std=c11 -O1 -g "${ctu_define[@]}" -I"${root}/source/c" -I"${inc}" \
-					-emit-ast "${root}/source/c/${src}" -o "${ast}"
-				clang-extdef-mapping-22 "${ast}" >> "${ctu_dir}/externalDefMap.txt"
-			done
-			for src in "${ctu_sources[@]}"; do
-				inc="${ctu_shcl_dir}"; [[ "${src}" == shclw3_v2.c ]] && inc="${shcl2Dir}"
-				clang-22 --analyze -std=c11 -O1 -g -Wall -Wextra -Wpedantic -Wshadow -Wconversion -Werror \
-					"${ctu_define[@]}" -I"${root}/source/c" -I"${inc}" \
-					-Xclang -analyzer-config -Xclang experimental-enable-naive-ctu-analysis=true \
-					-Xclang -analyzer-config -Xclang "ctu-dir=${ctu_dir}" -Xclang -analyzer-output=text \
-					-o /dev/null "${root}/source/c/${src}" >"${artifact_dir}/ctu-v${ctu_version}-${src}.log" 2>&1
-			done
+		ctu_dir="/work/ctu/v3"
+		mkdir -p "${ctu_dir}/ast"
+		: > "${ctu_dir}/externalDefMap.txt"
+		ctu_sources=(shclw.c info.c shclw3.c run.c shclw-drive.c shclw3_v2.c)
+		for src in "${ctu_sources[@]}"; do
+			inc="${shcl3Dir}"; [[ "${src}" == shclw3_v2.c ]] && inc="${shcl2Dir}"
+			ast="${ctu_dir}/ast/${src//\//_}.ast"
+			clang-22 -std=c11 -O1 -g -I"${root}/source/c" -I"${inc}" \
+				-emit-ast "${root}/source/c/${src}" -o "${ast}"
+			clang-extdef-mapping-22 "${ast}" >> "${ctu_dir}/externalDefMap.txt"
+		done
+		for src in "${ctu_sources[@]}"; do
+			inc="${shcl3Dir}"; [[ "${src}" == shclw3_v2.c ]] && inc="${shcl2Dir}"
+			clang-22 --analyze -std=c11 -O1 -g -Wall -Wextra -Wpedantic -Wshadow -Wconversion -Werror \
+				-I"${root}/source/c" -I"${inc}" \
+				-Xclang -analyzer-config -Xclang experimental-enable-naive-ctu-analysis=true \
+				-Xclang -analyzer-config -Xclang "ctu-dir=${ctu_dir}" -Xclang -analyzer-output=text \
+				-o /dev/null "${root}/source/c/${src}" >"${artifact_dir}/ctu-v3-${src}.log" 2>&1
 		done
 		probe_dir="/work/c-leak-probes"
 		mkdir -p "${probe_dir}"
@@ -208,24 +176,17 @@ def leaked(path):
 if leaked(sys.argv[2]) <= leaked(sys.argv[1]) + 65536:
     raise SystemExit("heap growth probe did not exceed the 64 KiB margin")
 PY
-		for soak_version in 1 2 3; do
-			case "${soak_version}" in
-				1) soak_shcl_dir="${shcl1Dir}"; soak_doc="doc.v1.shcl" ;;
-				2) soak_shcl_dir="${shcl2Dir}"; soak_doc="doc.v1.shcl" ;;
-				3) soak_shcl_dir="${shcl3Dir}"; soak_doc="doc.v3.shcl" ;;
-			esac
-			make -s -C "${root}/source/c" SHCLW_SHCL="${soak_version}" SHCL_DIR="${soak_shcl_dir}" \
-				SHCL1_DIR="${shcl1Dir}" SHCL2_DIR="${shcl2Dir}" SHCL3_DIR="${shcl3Dir}" \
-				OUT="/work/c${soak_version}" CC=gcc-15 CXX=g++-15 CC15=gcc-15 CLANG=clang-22 \
-				CLANG_TIDY=clang-tidy-22 drive-plain
-			for rounds in 128 256; do
-				out="${artifact_dir}/heaptrack-v${soak_version}-${rounds}"
-				SHCLW_SOAK_ROUNDS="${rounds}" heaptrack -o "${out}" "/work/c${soak_version}/shclw-drive-plain" "${soak_version}" \
-					"${root}/tests/cases/019-first-last/${soak_doc}" <"${root}/tests/cases/019-first-last/ops.txt" \
-					>"${probe_dir}/soak-v${soak_version}-${rounds}.out"
-				heaptrack_print -f "${out}.gz" --print-leaks >"${out}.txt"
-			done
-			python3 - "${artifact_dir}/heaptrack-v${soak_version}-128.txt" "${artifact_dir}/heaptrack-v${soak_version}-256.txt" <<'PY'
+		make -s -C "${root}/source/c" SHCL_DIR="${shcl3Dir}" SHCL2_DIR="${shcl2Dir}" \
+			OUT="/work/c3" CC=gcc-15 CXX=g++-15 CC15=gcc-15 CLANG=clang-22 \
+			CLANG_TIDY=clang-tidy-22 drive-plain
+		for rounds in 128 256; do
+			out="${artifact_dir}/heaptrack-v3-${rounds}"
+			SHCLW_SOAK_ROUNDS="${rounds}" heaptrack -o "${out}" "/work/c3/shclw-drive-plain" 3 \
+				"${root}/tests/cases/019-first-last/doc.shcl" <"${root}/tests/cases/019-first-last/ops.txt" \
+				>"${probe_dir}/soak-v3-${rounds}.out"
+			heaptrack_print -f "${out}.gz" --print-leaks >"${out}.txt"
+		done
+		python3 - "${artifact_dir}/heaptrack-v3-128.txt" "${artifact_dir}/heaptrack-v3-256.txt" <<'PY'
 import re, sys
 def leaked(path):
     text = open(path, encoding="utf-8").read()
@@ -237,10 +198,9 @@ def leaked(path):
 if leaked(sys.argv[2]) > leaked(sys.argv[1]) + 65536:
     raise SystemExit("heap grew by more than 64 KiB from N to 2N")
 PY
-		done
 fi
 
-if [[ "${mode}" != pick && "${mode}" != lint && "${mode}" != test && "${mode}" != quick && "${mode}" != fuzz && "${mode}" != leakcheck && "${mode}" != leakcheck-resume ]]; then
+if [[ "${mode}" != lint && "${mode}" != test && "${mode}" != quick && "${mode}" != fuzz && "${mode}" != leakcheck && "${mode}" != leakcheck-resume ]]; then
 	echo "unknown mode: ${mode}" >&2
 	exit 2
 fi

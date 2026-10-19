@@ -14,8 +14,6 @@ import (
 	"time"
 
 	"github.com/jim-collier/shclwrap/source/go/shclw"
-	"github.com/jim-collier/shclwrap/source/go/shclw1"
-	"github.com/jim-collier/shclwrap/source/go/shclw2"
 	"github.com/jim-collier/shclwrap/source/go/shclw3"
 	shcl3 "github.com/yottacore/shcl/source/go/v2"
 )
@@ -247,26 +245,6 @@ func TestUpgradeRealFile(t *testing.T) {
 	if _, err := shclw3.UpgradeFile(newer, 0); shclw.KindOf(err) != shclw.ErrTooNew || readFile(t, newer) != "a: 1\n##    Format   9\n" {
 		t.Errorf("format 9 file: got %v", err)
 	}
-
-	// 1.2 and 2.0 have nothing to convert, and never write.
-	for _, v := range []struct {
-		n       int
-		upgrade func(string, int) (shclw.Upgraded, error)
-	}{{1, shclw1.UpgradeFile}, {2, shclw2.UpgradeFile}} {
-		dir := t.TempDir()
-		path := filepath.Join(dir, "c.shcl")
-		writeFile(t, path, clean2x, 0o644)
-		if u, err := v.upgrade(path, 0); err != nil || u.Changed || u.Text != clean2x {
-			t.Errorf("v%d: got %+v, %v", v.n, u, err)
-		}
-		writeFile(t, path, clean2to+"##    Format   3\n", 0o644)
-		if _, err := v.upgrade(path, 0); shclw.KindOf(err) != shclw.ErrTooNew {
-			t.Errorf("v%d: format 3 file: got %v, want toonew", v.n, err)
-		}
-		if got := readFile(t, path); got != clean2to+"##    Format   3\n" || len(names(t, dir)) != 1 {
-			t.Errorf("v%d: file %q, %v", v.n, got, names(t, dir))
-		}
-	}
 }
 
 // Something already at the backup's name is never written over, and the
@@ -324,14 +302,13 @@ func TestSaveRefusedByFolder(t *testing.T) {
 }
 
 // A save that would drop lines the load couldn't use is refused, and the
-// file it was read from stays as it was. 1.2 has no such check.
+// file it was read from stays as it was.
 func TestSaveRefusedOverFile(t *testing.T) {
 	for _, c := range []struct {
 		n    int
 		text string
 		open func(string) (shclw.Doc, error)
 	}{
-		{2, "* x\na: 1\n", func(p string) (shclw.Doc, error) { return shclw2.Open(p) }},
 		{3, "a: 1\na(5): 2\n", func(p string) (shclw.Doc, error) { return shclw3.Open(p) }},
 	} {
 		dir := t.TempDir()

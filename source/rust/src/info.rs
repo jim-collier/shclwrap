@@ -12,21 +12,6 @@ const FORMAT_WORD: &str = "##    Format";
 const MIGRATED_LINE: &str = "##    Migrated from SHCL 2.x.";
 const SCHEMA_HEAD: &str = "##    Schema   ";
 
-/// The info block for a file of the given format, worded as shcl 3.0's
-/// `GEN_BANNER`, with its Syntax line linking the spec at `tag`.
-pub fn info_text(format: u32, tag: &str) -> String {
-	format!(
-		"##\n\
-		## This config file format is SHCL.\n\
-		## \"Simple Hierarchical Config Language\"\n\
-		{FORMAT_WORD}   {format}\n\
-		##    Home     https://github.com/yottacore/shcl\n\
-		##    Syntax   https://github.com/yottacore/shcl/blob/{tag}/project/spec.md\n\
-		##    Legal    SHCL is Copyright © 2026 Jim Collier [ID: 2უNაɘ«҂թȹɤξπ๙¿ձϖ]. License: MIT. No warranty.\n\
-		##\n"
-	)
-}
-
 /// What a save does with the info block.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Info {
@@ -114,26 +99,6 @@ pub fn finish_info(text: &str, info: Info, stamp: bool, e: &InfoEdit<'_>) -> Res
 		return Err(Error::new(ErrKind::Refused).msg("the file ends in a raw block that never closes"));
 	}
 	Ok(format!("{bom}{out}"))
-}
-
-/// The format `text`'s Format line names, or 0, for a module whose shcl
-/// doesn't read the line. It reads it as shcl 3.0 does, and a line in a raw
-/// body is the body's. Of several, the first naming `major` or newer wins,
-/// or else the highest.
-pub fn format_in(text: &str, e: &InfoEdit<'_>) -> u32 {
-	let text = text.strip_prefix('\u{feff}').unwrap_or(text);
-	// Most files have none, and every open asks.
-	if !text.contains(FORMAT_WORD) {
-		return 0;
-	}
-	let mut highest = 0;
-	for v in formats_named(&InfoLines::split(text), e, &(e.values)(text)) {
-		if v >= e.major {
-			return v;
-		}
-		highest = highest.max(v);
-	}
-	highest
 }
 
 /// The number on each Format line that counts, in order. A line counts when
