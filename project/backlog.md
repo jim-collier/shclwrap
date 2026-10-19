@@ -175,7 +175,7 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Swept: Go, Rust, and C for the helpers only 1.2 and 2.0 used (the step-count edit check, the path splitter for `Each`, the 1.2 save, the 1.2 and 2.0 info block text, and the Format line reader), all removed. Comments, cicd, `c_cases.py`, `fuzz.py`, design.md, and README for 1.2 and 2.0 mentions.
 		- Part 2: Open, OpenWith, Write, and Rewrites in all 3 languages, the 3 ops runners, the `Doc` interface, the `ShclDoc` and `Lib` traits, Go's docMethods list, `fuzz.py`, and every test that opens an unstamped file with an error.
 		- Errors on both: `Upgrade` in all 3, which `Open` and `UpgradeFile` go through, and its doc comments. Every test and case that opens or upgrades an unstamped file with an error, or expects `ErrAmbiguous`. design.md's Open, Format and upgrade, the evens-out table, and Decisions, and README's note on old files.
-	- Verified: On 5a800e6, `cicd/cicd.bash --quick` passes, and the C API tests and shared cases pass sanitized. The C clang-tidy and analyzers and the full run with the leak checks haven't run on it.
+	- Verified: On 5a800e6, `cicd/cicd.bash --quick` and `--ci` pass, with the C clang-tidy, analyzers, and sanitized cases. The full run with the leak checks hasn't run on it.
 
 - Tell a 2.x file from a current one by its banner
 	- ID: 2026101513330010
@@ -204,7 +204,7 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- The save's swap: 050's last `Open`, and Go's TestWriteSwapsOldBlock, Rust's write_swaps_old_block, and C's test_write_swaps_old_block (a CRLF file with the block in the middle, a block's text in a raw body, and a block with a Format line). They fail in all 3 with the swap turned off, and pass with it.
 	- Swept: `Upgrade` in Go, Rust, and C, which `Open` and `UpgradeFile` go through, and the doc comments on all 3. design.md's Open, Format and upgrade, and Decisions, and README's note on old files. The ops runners, `fuzz.py`, and `c_cases.py` only compare outputs.
 		- The swap: `Write`, `Text`, and `Canonical` in all 3, which share one save step, and the `Write` doc comments. design.md's Loading and saving, the evens-out table, and Decisions, and README.
-	- Verified: On 5a800e6, `cicd/cicd.bash --quick` passes, and the C API tests and shared cases pass sanitized. The C clang-tidy and analyzers and the full run with the leak checks haven't run on it.
+	- Verified: On 5a800e6, `cicd/cicd.bash --quick` and `--ci` pass, with the C clang-tidy, analyzers, and sanitized cases. The full run with the leak checks hasn't run on it.
 
 - Layered loading
 	- ID: 2026101512024156
