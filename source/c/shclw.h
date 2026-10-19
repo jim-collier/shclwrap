@@ -252,9 +252,9 @@ typedef struct {
 } shclw_upgraded;
 
 // Converts a file written for an older format. With from 0 the file's Format
-// line decides, and a file with none is taken as current. Pass from 2 for a
-// file known to be from shcl 2.x or older; it can't tell those apart by
-// itself. A file that reads two ways is SHCLW_ERR_AMBIGUOUS, and one shcl 2.0
+// line decides. A file with none is taken as 2.x when it has 2.x's info
+// block, and otherwise as current. Pass from 2 for a file known to be from
+// shcl 2.x or older. A file that reads two ways is SHCLW_ERR_AMBIGUOUS, and one shcl 2.0
 // reports errors on is SHCLW_ERR_REFUSED, with them in its diags. A 2.x file
 // comes out reading what 2.0 read, backslash escapes included, and one that
 // can't is SHCLW_ERR_REFUSED too. 2.x's info block is swapped for the

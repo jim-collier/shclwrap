@@ -173,8 +173,9 @@ pub fn format_of(text: &str) -> u32 {
 }
 
 /// Converts a file written for an older format. With `from` 0 the file's
-/// Format line decides, and a file with none is taken as current. Pass 2 for
-/// a file known to be from shcl 2.x or older. A file that reads two ways is `Ambiguous`, and one
+/// Format line decides. A file with none is taken as 2.x when it has 2.x's
+/// info block, and otherwise as current. Pass 2 for a file known to be from
+/// shcl 2.x or older. A file that reads two ways is `Ambiguous`, and one
 /// shcl 2.0 reports errors on is `Refused`, with those errors in `diags`. A
 /// 2.x file comes out reading what 2.0 read, backslash escapes included, and
 /// one that can't is `Refused` too. 2.x's block is swapped for the current
@@ -191,6 +192,9 @@ pub fn upgrade(text: &str, from: u32) -> Result<Upgraded, Error> {
 	} else {
 		(text.to_owned(), false)
 	};
+	// A file with no Format line that has 2.x's block is 2.x (design.md,
+	// Decisions).
+	let from = if banner && from == 0 { 2 } else { from };
 	let from_v2 = from > 0 && from < FORMAT_MAJOR;
 	let u = shcl::upgrade(&input, from_v2);
 	if u.ambiguous > 0 {

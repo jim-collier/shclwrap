@@ -87,7 +87,7 @@ return doc.Write("app.shcl")
 
 `shclw3` matches shcl 3.0. A program still on 1.2 or 2.0 moves to 3.0 along with the wrapper, and `Open` brings its old files forward. It upgrades one in memory and `UpgradedFrom` says so. The first `Write` over the file keeps the original beside it, and `BackupName` says where. `UpgradeFile` converts a file ahead of time instead.
 
-A file with no Format line that has errors is taken for an old one. Saving after `StampFormat()` or `InfoBlock(true)` makes a file name its format, so it never is.
+A file with no Format line that has errors, or that has 2.x's info block, is taken for an old one. Saving after `StampFormat()` or `InfoBlock(true)` makes a file name its format, so it never is.
 
 ### Rust
 
