@@ -6,16 +6,22 @@
 ##	- Purpose: Local CI/CD pipeline for the shcl wrappers.
 ##	- Stages (fail-fast, any error aborts before the next stage):
 ##	   0. remote sync (fast-forward from upstream before anything is built)
-##	   1. format (in place; check-only under --gate)
+##	   1. format (in place; check-only under --ci)
 ##	   2. lint (go vet, staticcheck, clippy, clang-tidy, gcc-15, shellcheck, ruff)
 ##	   3. tests (shared cases against every shcl version, in every language)
-##	   4. fuzz (Go against Rust from generated cases, plus Go's own fuzzer)
+##	   4. leak checks (CodeQL, CTU analysis, and the heaptrack soak, for C)
+##	   5. fuzz (Go against Rust from generated cases, plus Go's own fuzzer)
 ##	- Syntax:
 ##	  cicd/cicd.bash [options]
+##	  With no options it runs every stage.
 ##	  Options:
-##	   --gate          format check, lint, and tests only; what the pre-push hook runs
-##	   --quick         a short fuzz stage
-##	   --leakcheck     add CodeQL, CTU analysis, and the heaptrack soak
+##	   --ci            format check, lint, and tests only; what the pre-push hook runs
+##	   --quick         the fast checks only, in about a minute. No remote sync,
+##	                   C analyzers, sanitizers, or leak checks, and a short fuzz.
+##	                   Nothing that needs the network. C is skipped when a pinned
+##	                   shcl.h isn't cached yet.
+##	   --leakcheck     add the leak checks to --ci or --quick
+##	   --no-leakcheck  skip the leak checks
 ##	   -q, --quiet     no preflight block and no prompt
 ##	   -y, --yes       no prompt
 ##	   --no-sync       skip the remote sync stage
@@ -52,11 +58,12 @@ export PATH="${HOME}/.cargo/bin:${PATH}"
 ## Half the cores, since a workstation is usually running something else.
 cpuCap=$(( $(nproc 2>/dev/null || echo 2) / 2 )); if ((cpuCap < 1)); then cpuCap=1; fi
 
-doGate=0; doQuick=0; doLeakcheck=0; doQuiet=0; assumeYes=0; doSync=1; doFuzz=1
+doCi=0; doQuick=0; doLeakcheck=""; doQuiet=0; assumeYes=0; doSync=1; doFuzz=1
 while (($#)); do case "$1" in
-	--gate)     doGate=1; doFuzz=0; shift ;;
-	--quick)    doQuick=1; shift ;;
+	--ci)       doCi=1; doFuzz=0; shift ;;
+	--quick)    doQuick=1; doSync=0; shift ;;
 	--leakcheck) doLeakcheck=1; shift ;;
+	--no-leakcheck) doLeakcheck=0; shift ;;
 	-q|--quiet) doQuiet=1; assumeYes=1; shift ;;
 	-y|--yes)   assumeYes=1; shift ;;
 	--no-sync)  doSync=0; shift ;;
@@ -64,6 +71,7 @@ while (($#)); do case "$1" in
 	-h|--help)  sed -n '/^##	- Purpose:/,/^##	History:/p' "${BASH_SOURCE[0]}" | sed '$d; s/^##	\{0,1\}//'; exit 0 ;;
 	*) echo "unknown option: $1 (try --help)" >&2; exit 2 ;;
 esac; done
+if [[ -z "${doLeakcheck}" ]]; then doLeakcheck=$( ((doCi || doQuick)) && echo 0 || echo 1); fi
 
 fuzzSecs="${SHCLW_FUZZ_SECONDS:-$( ((doQuick)) && echo 10 || echo 60)}"
 goFuzzSecs="${SHCLW_GOFUZZ_SECONDS:-$( ((doQuick)) && echo 0 || echo 30)}"
@@ -88,12 +96,14 @@ fCheckPin(){   ## fCheckPin NAME PINNED ACTUAL
 }
 
 ## Fetches the pinned shcl.h into the gitignored cache and checks its sha256.
+## Under --quick it only checks, and returns 1 when the header isn't cached.
 fShclHeader(){   ## fShclHeader REV SHA256
 	local rev="$1" sum="$2"
 	local dir="${root}/cicd/cache/shcl-c/${rev}"
 	local got=""
 	if [[ -f "${dir}/shcl.h" ]]; then got="$(sha256sum "${dir}/shcl.h" | cut -d' ' -f1)"; fi
 	if [[ "${got}" != "${sum}" ]]; then
+		if ((doQuick)); then fEcho "WARNING: shcl.h at ${rev} isn't cached, and --quick doesn't fetch; skipping C"; return 1; fi
 		mkdir -p "${dir}"
 		curl -fsSL --retry 2 -o "${dir}/shcl.h.part" "https://raw.githubusercontent.com/yottacore/shcl/${rev}/source/c/shcl.h" \
 			|| fDie "couldn't fetch shcl.h at ${rev}"
@@ -123,8 +133,14 @@ if ((! doQuiet)); then
 	fEcho_Clean "shclwrap local CI/CD"
 	fEcho_Clean
 	fEcho_Clean "Repo root ....: ${root}"
-	fEcho_Clean "Mode .........: $( ((doGate)) && echo 'gate (format check, lint, tests)' || echo 'full')"
+	if   ((doCi && doQuick)); then mode='ci, quick (format check, fast lint, fast tests)'
+	elif ((doCi));            then mode='ci (format check, lint, tests)'
+	elif ((doQuick));         then mode='quick (format, fast lint, fast tests, short fuzz)'
+	else                           mode='full'
+	fi
+	fEcho_Clean "Mode .........: ${mode}"
 	fEcho_Clean "Remote sync ..: $( ((doSync)) && echo 'fast-forward when behind; abort when diverged' || echo '(skipped)')"
+	fEcho_Clean "Leak checks ..: $( ((doLeakcheck)) && echo 'CodeQL, CTU, heaptrack soak' || echo '(skipped)')"
 	fEcho_Clean "Fuzz .........: $( ((doFuzz)) && echo "${fuzzSecs}s Go against Rust, ${goFuzzSecs}s Go fuzzer" || echo '(skipped)')"
 	fEcho_Clean "CPU cap ......: ${cpuCap}"
 	fEcho_Clean "Scratch ......: ${work}"
@@ -134,7 +150,7 @@ mkdir -p "${work}" && touch "${work}/.shclw-cicd-owned"
 
 #•••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••
 if ((doSync)); then
-	fSection "0/4  Remote sync"
+	fSection "0/5  Remote sync"
 	branch="$(git -C "${root}" symbolic-ref --quiet --short HEAD || true)"
 	upstream="$(git -C "${root}" rev-parse --abbrev-ref --symbolic-full-name '@{upstream}' 2>/dev/null || true)"
 	if [[ -z "${branch}" ]]; then
@@ -165,8 +181,8 @@ if ((doSync)); then
 fi
 
 #•••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••
-fSection "1/4  Format"
-if ((doGate)); then
+fSection "1/5  Format"
+if ((doCi)); then
 	unformatted="$(cd "${root}/source/go" && gofmt -l .)"
 	[[ -z "${unformatted}" ]] || fDie "gofmt would change: ${unformatted}"
 	(cd "${root}/source/rust" && cargo fmt --check) || fDie "cargo fmt would change files"
@@ -180,7 +196,7 @@ else
 fi
 
 #•••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••
-fSection "2/4  Lint"
+fSection "2/5  Lint"
 fCheckPin go           "${PIN_GO}"          "$(go version)"
 fCheckPin staticcheck  "${PIN_STATICCHECK}" "$(staticcheck --version 2>/dev/null || echo missing)"
 fCheckPin shellcheck   "${PIN_SHELLCHECK}"  "$(shellcheck --version 2>/dev/null | sed -n 2p || echo missing)"
@@ -191,15 +207,20 @@ fCheckPin clang-format "${PIN_CLANG_FORMAT}" "$(clang-format --version 2>/dev/nu
 fEcho "OK: go vet, staticcheck"
 (cd "${root}/source/rust" && cargo clippy --quiet -j "${cpuCap}" --all-features --all-targets -- -D warnings -W clippy::pedantic)
 fEcho "OK: clippy"
-fShclHeader "${SHCL1_REV}" "${SHCL1_SHA256}"
-fShclHeader "${SHCL2_REV}" "${SHCL2_SHA256}"
-fShclHeader "${SHCL3_REV}" "${SHCL3_SHA256}"
-bash "${here}/c-checks.bash" pick 1 "${work}"
-fEcho "OK: C builds only with the right SHCLW_SHCL for each shcl.h"
-for v in 1 2 3; do
-	bash "${here}/c-checks.bash" lint "${v}" "${work}"
-	fEcho "OK: clang-tidy, gcc-15 at C17, and static analyzers (C over shcl ${v})"
-done
+doC=1
+fShclHeader "${SHCL1_REV}" "${SHCL1_SHA256}" || doC=0
+fShclHeader "${SHCL2_REV}" "${SHCL2_SHA256}" || doC=0
+fShclHeader "${SHCL3_REV}" "${SHCL3_SHA256}" || doC=0
+if ((doC)); then
+	bash "${here}/c-checks.bash" pick 1 "${work}"
+	fEcho "OK: C builds only with the right SHCLW_SHCL for each shcl.h"
+fi
+if ((doC && ! doQuick)); then
+	for v in 1 2 3; do
+		bash "${here}/c-checks.bash" lint "${v}" "${work}"
+		fEcho "OK: clang-tidy, gcc-15 at C17, and static analyzers (C over shcl ${v})"
+	done
+fi
 mapfile -t shellFiles < <(find "${root}/cicd" -type f \( -name '*.bash' -o -path '*/hooks/*' \) | sort)
 ((${#shellFiles[@]})) || fDie "shellcheck found no files"
 shellcheck "${shellFiles[@]}"
@@ -209,25 +230,33 @@ ruff format --check --quiet "${root}/cicd"
 fEcho "OK: ruff"
 
 #•••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••
-fSection "3/4  Tests"
+fSection "3/5  Tests"
 (cd "${root}/source/go" && TMPDIR="${work}" go test -p "${cpuCap}" ./...)
 fEcho "OK: Go tests"
 (cd "${root}/source/rust" && TMPDIR="${work}" cargo test --quiet -j "${cpuCap}" --all-features)
 fEcho "OK: Rust tests"
-for v in 1 2 3; do
-	bash "${here}/c-checks.bash" test "${v}" "${work}"
-	fEcho "OK: C API tests and shared cases over shcl ${v}, sanitized, plain, and as C++"
-done
+if ((doC && doQuick)); then
+	for v in 1 2 3; do
+		bash "${here}/c-checks.bash" quick "${v}" "${work}"
+		fEcho "OK: gcc-15 at C17, C API tests, and shared cases over shcl ${v}, plain build"
+	done
+elif ((doC)); then
+	for v in 1 2 3; do
+		bash "${here}/c-checks.bash" test "${v}" "${work}"
+		fEcho "OK: C API tests and shared cases over shcl ${v}, sanitized, plain, and as C++"
+	done
+fi
 
+#•••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••
 if ((doLeakcheck)); then
-	fSection "3/5  C slow leak checks"
+	fSection "4/5  C leak checks"
 	bash "${here}/c-checks.bash" leakcheck 3 "${work}"
 	fEcho "OK: CodeQL, clang CTU, and heaptrack soak"
 fi
 
 #•••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••
 if ((doFuzz)); then
-	fSection "4/4  Fuzz"
+	fSection "5/5  Fuzz"
 	mkdir -p "${work}/bin"
 	(cd "${root}/source/go" && go build -o "${work}/bin/go-drive" ./cmd/shclw-drive)
 	(cd "${root}/source/rust" && cargo build --quiet -j "${cpuCap}" --release --all-features --bin shclw-drive)
@@ -254,3 +283,4 @@ fEcho_Clean
 ##		- 2026-10-15 JC: C over shcl 3.0: clang-format, clang-tidy, gcc-15, sanitized API tests, a C++ build, and the shared cases.
 ##		- 2026-10-15 JC: The C 3.0 build fetches shcl 2.0's shcl.h too, for the upgrade check.
 ##		- 2026-10-15 JC: C over shcl 1.2 and 2.0 too, each linted, tested, and run on the shared cases, plus the SHCLW_SHCL pick check.
+##		- 2026-10-19 JC: --gate is now --ci. --quick runs only the fast checks, and no options runs everything, leak checks included.

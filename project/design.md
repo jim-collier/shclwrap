@@ -336,7 +336,7 @@ An ops script is one op per line, with fields split by tabs. `\t`, `\n`, `\r`, a
 
 - Go's own fuzzer runs `Run` on random documents and scripts against every version, looking for panics.
 
-- `cicd/cicd.bash` runs format, lint, tests, and both fuzzers. `--gate` runs all but the fuzzers, and is the pre-push hook.
+- `cicd/cicd.bash` runs format, lint, tests, the C leak checks, and both fuzzers. `--ci` runs format check, lint, and tests, and is the pre-push hook. `--quick` leaves out the C sanitizers, analyzers, and leak checks, and anything that needs the network, and fuzzes for 10s.
 
 ## Sharing the code
 
