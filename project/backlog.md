@@ -25,31 +25,6 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 
 ## Issues
 
-- Tell a 2.x file from a current one by its banner
-	- ID: 2026101513330010
-	- Type: Feature
-	- Status: Waiting for answers
-	- Priority: Avg
-	- Opened: 20261015-133300
-	- Opened by: JC
-	- Requirements:
-		- With `from` 0, a file with no Format line but with the 2.x banner is taken as 2.x.
-	- Related IDs: 2026101910455900, 2026101513330011
-	- Note: Since 2026101910455900, Open reads such a file's 2.x escapes wrong until this is done. 039-quillroute shows it. The risk is a 3.0 program that saved over a 2.x file without the wrapper, which keeps the block, and a backslash it wrote would then be read the 2.x way.
-	- Note: Quillroute looks for the banner. Cobblevale, Folderkite, Mossrealm, and Wovenshell take any file with no Format line as old, which is wrong for a new file with no banner.
-	- Progress log:
-		- 20261019: Built as asked in Go, Rust, and C. `Upgrade` with `from` 0, and so `Open`, take a file with no Format line as 2.x when it has 2.x's `#` block as comments. A block's text in a raw body doesn't count. 039-quillroute now reads `C:\new` through Open, as 2.x did.
-		- 20261019: The risk in the note is real through the wrapper itself. `Parse` of a 2.x file, a `Put` of `C:\temp`, and a `Write` keep the `#` block and add no Format line. The next `Open` takes the file as 2.x and reads a tab, at exit 0. Before this change it read `C:\temp`. 050-banner-2x shows it. No program on 3.0 is known to save over a 2.x file without upgrading it.
-		- 20261019: Question: Should `Write` swap 2.x's block for the current one, with its Format line, whenever it saves? Then nothing the wrapper writes can be misread this way, and only programs off the wrapper keep the risk. The other choices are to take the risk as it is, or to drop the rule.
-		- 20261019: Reverted in 907e496 before the merge, since dev reads that file right today. 765f524 has the change and 050-banner-2x, to bring back once this is answered.
-	- Decisions:
-		- Waits on the question above. The design.md line went with the revert.
-	- Branch: banner
-	- Commit: 765f524, reverted in 907e496
-	- Test case: tests/cases/050-banner-2x in 765f524, and the corrected want file of 039-quillroute. Both fail without the change in Go, Rust, and C, and pass with it.
-	- Swept: `Upgrade` in Go, Rust, and C, which `Open` and `UpgradeFile` go through, and the doc comments on all 3. design.md's Open, Format and upgrade, and Decisions, and README's note on old files. The ops runners, `fuzz.py`, and `c_cases.py` only compare outputs.
-	- Verified: `cicd/cicd.bash --ci --no-sync` passes, with the C clang-tidy, analyzers, and sanitized cases. The full run with the leak checks hasn't run.
-
 - Updates to CICD script flags
 	- ID: 2026101816214270
 	- Type: Enhancement
@@ -73,45 +48,6 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- No flags now runs the leak checks too. `--no-leakcheck` skips them, and `--leakcheck` adds them to `--ci` or `--quick`.
 	- Branch: ci-flags
 	- Test case: None. Each flag mix was checked by hand, plus `--quick` with a header missing from the cache.
-
-- Make shcl 3.0 the floor
-	- ID: 2026101613005800
-	- Type: Feature
-	- Status: Waiting on signoff
-	- Needs local test suite run?: The full `cicd/cicd.bash`, with the leak checks.
-	- Priority: High
-	- Opened: 20261016-130058
-	- Opened by: JC
-	- Related IDs: 2026101611292826, 2026101516111070, 2026101613005801
-	- Requirements:
-		- Drop the 1.2 and 2.0 adapters in Go, Rust, and C, with their tests and want files.
-		- Pin 3.0 dev until `v3.0.0-beta1` is tagged, then pin the tag.
-		- Programs move old files through the wrapper's upgrade, in place of their own upgrade code.
-		- The upgrade, with its 2.0 check, is part of every build. Each program moves its old files forward.
-		- Open upgrades an old file in memory. A file that fails the 2.0 check is `ErrRefused`. The first Write backs up the original before replacing it, and a program that only reads never writes. `UpgradeFile` stays for converting ahead of time.
-		- It covers 1.2 and 2.0 files as the existing programs wrote them. Wovenshell's released betas wrote 1.2.
-		- Test cases from real files each program wrote.
-		- Tallowbase, Mossrealm, and Lenscart move to 3.0 as they move onto the wrapper.
-		- design.md and README say 3.0 is the floor.
-	- Note: Makes the C 1.2 and 2.0 item moot. 4 keeps 3.0's file format but changes the API a lot, so a 4 adapter is still real work.
-	- Decisions:
-		- 20261016, JC: the upgrade is required, not opt-in. 2.0 adds about 164 KB to a small Go program and 29 KB to a C one.
-	- Progress log:
-		- 20261019: Part 1 is done. The 1.2 and 2.0 adapters are gone in Go, Rust, and C, with their tests, want files, the `SHCLW_SHCL` pick, and the cicd and fuzz paths that ran them. shcl 2.0 stays built in for the upgrade's check in all 3. design.md and README say 3.0 is the floor.
-		- 20261019: Files the 1.2 and 2.0 adapters wrote were kept as 2 new shared cases before the adapters went. The fuzz now writes half its documents in the old syntax, and masks the time 3.0 stamps on a line it comments out, which had made one case differ by a second.
-		- 20261019: Left for part 2: Open upgrading an old file in memory with the first Write backing up the original, and test cases from real files each program wrote. Moving Tallowbase, Mossrealm, and Lenscart is 2026101512024167's.
-		- 20261019: 2 tests of the 1.2 and 2.0 info block text are commented out, since that text is gone.
-		- 20261019: Part 2 is done. Open upgrades an old file in memory in Go, Rust, and C, and writes nothing. The first Write over the file backs up the original with UpgradeFile's code, and later ones don't. `UpgradedFrom` and `BackupName` say what happened. The calls on Lines, Diags, Text, Parse, and Rewrites are in design.md's Decisions.
-		- 20261019: Real files from all 9 programs are shared cases 038 to 046. Quillroute's and Mossrealm's come from their tests, and Folderkite's from its own old-format writer built against 2.0. Tallowbase's 1.2 sample reads two ways with no Format line, so Open refuses it and the program converts it with `from` 2.
-		- 20261019: The real files show the upgrade keeps a 2.x backslash escape as typed, which 3.0 reads as text. Filed as 2026101910455900.
-		- 20261019: Waiting on signoff for one call users will notice. Open takes a file with no Format line that has errors on 3.0 as 2.x, as `Upgrade` with `from` 0 does. So a 3.0 file with a typo is upgraded, or refused when 2.0 has errors on it too, where it used to open with its errors in Diags. Files saved after `StampFormat` or `InfoBlock` are never taken as 2.x, and README says so.
-		- 20261019: 3 tests opened an unstamped file with an error, which Open now refuses. Each one's old input is commented out, and the same input with a Format 3 line takes its place: Go's TestSaveRefusedOverFile, Rust's save_refused_over_file, and the strict open in C's test_errors.
-	- Branch: floor3, openup
-	- Commit: 3754832, 326ccf9, 6b18859, ba5d92e, b5e2128
-	- Test case: tests/cases/034-upgrade-1x-written and 035-upgrade-2x-written, from files the old adapters wrote. 034 fails when the upgrade skips a format 1 file. Every existing 3.0 case and API test still passes.
-		- Part 2: tests/cases/036-open-upgrade and 037-open-refused, the real files in 038 to 046, and the Open tests in Go's files_test.go, Rust's tests/files.rs, and C's test_open_upgrade. They fail in all 3 languages with the upgrade in Open turned off, and again with the backup in Write turned off. The fuzz opens the file and saves over it in a quarter of its scripts.
-	- Swept: Go, Rust, and C for the helpers only 1.2 and 2.0 used (the step-count edit check, the path splitter for `Each`, the 1.2 save, the 1.2 and 2.0 info block text, and the Format line reader), all removed. Comments, cicd, `c_cases.py`, `fuzz.py`, design.md, and README for 1.2 and 2.0 mentions.
-		- Part 2: Open, OpenWith, Write, and Rewrites in all 3 languages, the 3 ops runners, the `Doc` interface, the `ShclDoc` and `Lib` traits, Go's docMethods list, `fuzz.py`, and every test that opens an unstamped file with an error.
 
 - The upgrade keeps a 2.x backslash escape as typed, and 3.0 reads it as text
 	- ID: 2026101910455900
@@ -194,6 +130,71 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- The tag is spelled with no dot, per shcl's own backlog.
 		- shcl's Go module path is still `.../v2`, and Go won't take a v3 tag on it. Go stays on a commit until that changes.
 		- Quillroute plans to have its release refuse a commit pin. The same check would fit here.
+
+- Make shcl 3.0 the floor
+	- ID: 2026101613005800
+	- Type: Feature
+	- Status: Queued
+	- Needs local test suite run?: The full `cicd/cicd.bash`, with the leak checks.
+	- Priority: High
+	- Opened: 20261016-130058
+	- Opened by: JC
+	- Related IDs: 2026101611292826, 2026101516111070, 2026101613005801
+	- Requirements:
+		- Drop the 1.2 and 2.0 adapters in Go, Rust, and C, with their tests and want files.
+		- Pin 3.0 dev until `v3.0.0-beta1` is tagged, then pin the tag.
+		- Programs move old files through the wrapper's upgrade, in place of their own upgrade code.
+		- The upgrade, with its 2.0 check, is part of every build. Each program moves its old files forward.
+		- Open upgrades an old file in memory. A file that fails the 2.0 check is `ErrRefused`. The first Write backs up the original before replacing it, and a program that only reads never writes. `UpgradeFile` stays for converting ahead of time.
+		- It covers 1.2 and 2.0 files as the existing programs wrote them. Wovenshell's released betas wrote 1.2.
+		- Test cases from real files each program wrote.
+		- Tallowbase, Mossrealm, and Lenscart move to 3.0 as they move onto the wrapper.
+		- design.md and README say 3.0 is the floor.
+	- Note: Makes the C 1.2 and 2.0 item moot. 4 keeps 3.0's file format but changes the API a lot, so a 4 adapter is still real work.
+	- Decisions:
+		- 20261016, JC: the upgrade is required, not opt-in. 2.0 adds about 164 KB to a small Go program and 29 KB to a C one.
+		- 20261019, JC left the signoff question to the project's goals: a file with no Format line and no 2.x block is taken as 2.x only when 2.0 reads it clean. One with errors on both opens as current, with 3.0's errors in Diags, as before the floor. A file its Format line or 2.x block marks as 2.x is still `ErrRefused` when 2.0 has errors on it. `Upgrade` with `from` 0 does the same, so Open and Upgrade still agree. A typo in a current file then gives that file's own errors, and the guess is taken only when 2.0 backs it.
+	- Progress log:
+		- 20261019: Part 1 is done. The 1.2 and 2.0 adapters are gone in Go, Rust, and C, with their tests, want files, the `SHCLW_SHCL` pick, and the cicd and fuzz paths that ran them. shcl 2.0 stays built in for the upgrade's check in all 3. design.md and README say 3.0 is the floor.
+		- 20261019: Files the 1.2 and 2.0 adapters wrote were kept as 2 new shared cases before the adapters went. The fuzz now writes half its documents in the old syntax, and masks the time 3.0 stamps on a line it comments out, which had made one case differ by a second.
+		- 20261019: Left for part 2: Open upgrading an old file in memory with the first Write backing up the original, and test cases from real files each program wrote. Moving Tallowbase, Mossrealm, and Lenscart is 2026101512024167's.
+		- 20261019: 2 tests of the 1.2 and 2.0 info block text are commented out, since that text is gone.
+		- 20261019: Part 2 is done. Open upgrades an old file in memory in Go, Rust, and C, and writes nothing. The first Write over the file backs up the original with UpgradeFile's code, and later ones don't. `UpgradedFrom` and `BackupName` say what happened. The calls on Lines, Diags, Text, Parse, and Rewrites are in design.md's Decisions.
+		- 20261019: Real files from all 9 programs are shared cases 038 to 046. Quillroute's and Mossrealm's come from their tests, and Folderkite's from its own old-format writer built against 2.0. Tallowbase's 1.2 sample reads two ways with no Format line, so Open refuses it and the program converts it with `from` 2.
+		- 20261019: The real files show the upgrade keeps a 2.x backslash escape as typed, which 3.0 reads as text. Filed as 2026101910455900.
+		- 20261019: Waiting on signoff for one call users will notice. Open takes a file with no Format line that has errors on 3.0 as 2.x, as `Upgrade` with `from` 0 does. So a 3.0 file with a typo is upgraded, or refused when 2.0 has errors on it too, where it used to open with its errors in Diags. Files saved after `StampFormat` or `InfoBlock` are never taken as 2.x, and README says so.
+		- 20261019: 3 tests opened an unstamped file with an error, which Open now refuses. Each one's old input is commented out, and the same input with a Format 3 line takes its place: Go's TestSaveRefusedOverFile, Rust's save_refused_over_file, and the strict open in C's test_errors.
+	- Branch: floor3, openup
+	- Commit: 3754832, 326ccf9, 6b18859, ba5d92e, b5e2128
+	- Test case: tests/cases/034-upgrade-1x-written and 035-upgrade-2x-written, from files the old adapters wrote. 034 fails when the upgrade skips a format 1 file. Every existing 3.0 case and API test still passes.
+		- Part 2: tests/cases/036-open-upgrade and 037-open-refused, the real files in 038 to 046, and the Open tests in Go's files_test.go, Rust's tests/files.rs, and C's test_open_upgrade. They fail in all 3 languages with the upgrade in Open turned off, and again with the backup in Write turned off. The fuzz opens the file and saves over it in a quarter of its scripts.
+	- Swept: Go, Rust, and C for the helpers only 1.2 and 2.0 used (the step-count edit check, the path splitter for `Each`, the 1.2 save, the 1.2 and 2.0 info block text, and the Format line reader), all removed. Comments, cicd, `c_cases.py`, `fuzz.py`, design.md, and README for 1.2 and 2.0 mentions.
+		- Part 2: Open, OpenWith, Write, and Rewrites in all 3 languages, the 3 ops runners, the `Doc` interface, the `ShclDoc` and `Lib` traits, Go's docMethods list, `fuzz.py`, and every test that opens an unstamped file with an error.
+
+- Tell a 2.x file from a current one by its banner
+	- ID: 2026101513330010
+	- Type: Feature
+	- Status: Queued
+	- Priority: Avg
+	- Opened: 20261015-133300
+	- Opened by: JC
+	- Requirements:
+		- With `from` 0, a file with no Format line but with the 2.x banner is taken as 2.x.
+	- Related IDs: 2026101910455900, 2026101513330011
+	- Note: Since 2026101910455900, Open reads such a file's 2.x escapes wrong until this is done. 039-quillroute shows it. The risk is a 3.0 program that saved over a 2.x file without the wrapper, which keeps the block, and a backslash it wrote would then be read the 2.x way.
+	- Note: Quillroute looks for the banner. Cobblevale, Folderkite, Mossrealm, and Wovenshell take any file with no Format line as old, which is wrong for a new file with no banner.
+	- Progress log:
+		- 20261019: Built as asked in Go, Rust, and C. `Upgrade` with `from` 0, and so `Open`, take a file with no Format line as 2.x when it has 2.x's `#` block as comments. A block's text in a raw body doesn't count. 039-quillroute now reads `C:\new` through Open, as 2.x did.
+		- 20261019: The risk in the note is real through the wrapper itself. `Parse` of a 2.x file, a `Put` of `C:\temp`, and a `Write` keep the `#` block and add no Format line. The next `Open` takes the file as 2.x and reads a tab, at exit 0. Before this change it read `C:\temp`. 050-banner-2x shows it. No program on 3.0 is known to save over a 2.x file without upgrading it.
+		- 20261019: Question: Should `Write` swap 2.x's block for the current one, with its Format line, whenever it saves? Then nothing the wrapper writes can be misread this way, and only programs off the wrapper keep the risk. The other choices are to take the risk as it is, or to drop the rule.
+		- 20261019: Reverted in 907e496 before the merge, since dev reads that file right today. 765f524 has the change and 050-banner-2x, to bring back once this is answered.
+	- Decisions:
+		- 20261019, JC left it to the project's goals: bring the rule back, and have `Write` swap 2.x's block for the current one, with its Format line, when the text has no Format line. Real 2.x files from Quillroute read wrong through Open without the rule. With the swap, a file the wrapper saves says what it is, as the upgrade's swap in 2026101513330011 does, and the next Open reads what the program had. Only programs off the wrapper keep the risk, and none is known.
+	- Branch: banner
+	- Commit: 765f524, reverted in 907e496
+	- Test case: tests/cases/050-banner-2x in 765f524, and the corrected want file of 039-quillroute. Both fail without the change in Go, Rust, and C, and pass with it.
+	- Swept: `Upgrade` in Go, Rust, and C, which `Open` and `UpgradeFile` go through, and the doc comments on all 3. design.md's Open, Format and upgrade, and Decisions, and README's note on old files. The ops runners, `fuzz.py`, and `c_cases.py` only compare outputs.
+	- Verified: `cicd/cicd.bash --ci --no-sync` passes, with the C clang-tidy, analyzers, and sanitized cases. The full run with the leak checks hasn't run.
 
 - Layered loading
 	- ID: 2026101512024156
