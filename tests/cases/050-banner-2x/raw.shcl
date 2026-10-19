@@ -1,0 +1,9 @@
+path: C:\\temp
+tmpl:
+	~~~
+#
+# This config file format is SHCL.
+# "Simple Hierarchical Config Language"
+#    Home     https://github.com/jim-collier/shcl
+#
+	~~~

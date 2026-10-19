@@ -135,7 +135,7 @@ Go names are listed. Rust uses the same words in snake case, and `ShclDoc` has t
 	- `InfoBlock` and `StampFormat` don't change it. They touch only the block and the Format line, and the rest of the save is what it was.
 
 - `Open` upgrades a file the way `Upgrade` does with `from` 0, adn nothing is written until a `Write`.
-	- A file with no Format line that loads clean on 3.0 is taken as current. One that loads with errors is taken as 2.x, upgraded when shcl 2.0 reads it clean, and `ErrRefused` with 2.0's errors when it doesn't. One that reads two ways is `ErrAmbiguous`. Either way the document is empty, as for `ErrTooNew`. In C the empty document's `shclw_diags` has 2.0's errors.
+	- A file with no Format line that has 2.x's `#` info block is taken as 2.x. Otherwise one that loads clean on 3.0 is taken as current. One that loads with errors is taken as 2.x, upgraded when shcl 2.0 reads it clean, and `ErrRefused` with 2.0's errors when it doesn't. One that reads two ways is `ErrAmbiguous`. Either way the document is empty, as for `ErrTooNew`. In C the empty document's `shclw_diags` has 2.0's errors.
 	- A file whose Format line names 3 is current, errors and all, and skips the upgrade.
 	- Reads, `Lines`, `Diags`, and `Text` are all of the upgraded text, and the strictness applies to it.
 	- The first `Write` over the file backs up the original as `UpgradeFile` does, with the same name and `ErrBackupTaken`. Over the file means the path `Open` read, or the same file by another name. A `Write` anywhere else makes no backup, and later ones over the file make none either. A file that changed since `Open` read it is left alone with `ErrIO`.
@@ -214,7 +214,7 @@ Go names are listed. Rust uses the same words in snake case, and `ShclDoc` has t
 - `FormatOf(text)` is the format a file's `##    Format   N` line names, or 0.
 
 - `Upgrade(text, from)` and `UpgradeFile(path, from)` move a file to the bound shcl's format. `Open` does the same in memory, as [Loading and saving](#loading-and-saving) says, and `UpgradeFile` is for converting ahead of time.
-	- With `from` 0 the Format line decides, and a file with none is taken as current. When it's left as it is, `From` is the bound format.
+	- With `from` 0 the Format line decides. A file with none is taken as 2.x when it has 2.x's `#` info block, and otherwise as current. When it's left as it is, `From` is the bound format.
 	- `from` 2 says the file is known to be from shcl 2.x or older. The file can't say so itself, so only the program can.
 	- `UpgradeFile` copies the original beside it first, and `Backup` names the copy.
 	- `UpgradeFile` reads the file once. The 2.0 check, the conversion, and the backup all use that text.
@@ -229,7 +229,7 @@ Go names are listed. Rust uses the same words in snake case, and `ShclDoc` has t
 	- In C, 2.0's `shcl.h` and 3.0's declare the same names, so 2.0's goes in 2 files of its own with each call renamed. The C upgrade gives 2.0's errors in its result, `shclw_upgraded`, since C's error has no list.
 	- 2.x's `#` info block is swapped for the current one where it sits, in a file with no Format line. shcl leaves a clean file's block alone, and puts the new block at the end of a file it writes out again.
 	- When shcl writes a CRLF file out again with LF only, the upgrade puts the CRLF back, unless that would change a value.
-	- The files 1.2 and 2.0 wrote come forward this way. One with no Format line that loads clean on 3.0 is taken as current, so a program taht knows its files are older passes `from` 2. A file the wrapper's own 1.2 or 2.0 adapter wrote has an info block naming format 1 or 2, and the upgrade puts 3.0's in its place.
+	- The files 1.2 and 2.0 wrote come forward this way. One with no Format line or 2.x info block that loads clean on 3.0 is taken as current, so a program taht knows its files are older passes `from` 2. A file the wrapper's own 1.2 or 2.0 adapter wrote has an info block naming format 1 or 2, and the upgrade puts 3.0's in its place.
 
 - `d.InfoBlock(on)` puts the info block at the end of what the save writes, or with `on` false leaves it out.
 	- Every old block comes off first, wherever it is. That's each spelling shcl has written, 2.x's `#` one, and a lone Format line with the note `migrate` writes under it. A Schema line in a block stays where it is.
@@ -392,7 +392,7 @@ An ops script is one op per line, with fields split by tabs. `\t`, `\n`, `\r`, a
 
 - The upgrade writes each 2.x value so 3.0 reads what 2.0 read, rather than keep `migrate`'s backslashes as typed, which read as text now. A line it can't carry that way is refused, rather than counted in `Unsure`, as with 2.0's errors, and `Open` doesn't show `Unsure` at all (2026101910455900).
 	- So a 3.0 file with no Format line and an error, which `Open` takes as 2.x, has its backslash escapes read the 2.x way too. A program that writes its files with `StampFormat` or `InfoBlock` never has that happen.
-	- A file `Open` takes as current keeps its backslashes as typed, even one 2.x wrote, since nothing in it says so.
+	- A file `Open` takes as current keeps its backslashes as typed, even one 2.x wrote, when nothing in it says so.
 
 - `Open` upgrades an old file in memory, rather than leave it to the program to call `UpgradeFile` first. A program that only reads then never writes, and one that saves gets the backup on its first `Write` (2026101613005800).
 	- It upgrades as `Upgrade` with `from` 0 does, never 2. shcl says a program calling its upgrade on every start must not pass 2, since a 3.0 file that picks up an error would then be read by 2.x rules.
@@ -405,6 +405,9 @@ An ops script is one op per line, with fields split by tabs. `\t`, `\n`, `\r`, a
 	- It uses `UpgradeFile`'s backup and replace code, so a file that changed since `Open` read it is `ErrIO`, and the backup name and `ErrBackupTaken` are the same.
 	- An `Open` that's refused or ambiguous gives an empty document, as for `ErrTooNew`, rather than the original read by 3.0's rules. In C, 2.0's errors are that document's diagnostics, since C's error has no list.
 	- Rust's `write` takes `&mut self`, since it records the backup.
+
+- With `from` 0, a file with no Format line that has 2.x's `#` info block is taken as 2.x, rather than as current (2026101513330010). No 3.0 writer makes that block, and Quillroute checked for it the same way.
+	- A 3.0 program that saves over a 2.x file without upgrading it keeps the block, and a backslash escape it writes is then read the 2.x way. No program on 3.0 is known to do that. The wrapper's own `Parse` followed by `Write` does, so this call waits on an answer.
 
 - `UpgradeFile` on 3.0 does its own read, backup, and write with shcl's parts, rather than call shcl's `UpgradeFile`. shcl's reads the file again after the wrapper's 2.0 check, so an edit in between was converted with no check.
 
