@@ -182,7 +182,7 @@ shclw_kind shclw_parse_with(const char *text, size_t len, shclw_strictness level
 // written for a newer format SHCLW_ERR_TOO_NEW. An older file is upgraded in
 // memory, as shclw_upgrade with from 0 does, and shclw_upgraded_from says so.
 // Nothing is written until shclw_write, and the first save over the file
-// backs it up. A file that reads two ways is SHCLW_ERR_AMBIGUOUS, and one shcl
+// backs it up. A 2.x file that reads two ways is SHCLW_ERR_AMBIGUOUS, and one shcl
 // 2.0 reports errors on, or that can't be made to read as 2.0 read it,
 // SHCLW_ERR_REFUSED, with the lines in the empty document's shclw_diags. On a failure *doc is an empty document, so
 // reads give their fallbacks. Free it either way.
@@ -207,7 +207,8 @@ char *shclw_canonical(shclw_doc *d, size_t *len);
 // shclw_stamp_format. After a good save it gives back the memory earlier
 // edits left behind. The first save over a file shclw_open upgraded backs up
 // the original first, as shclw_upgrade_file does, and leaves a file that
-// changed since it was read alone with SHCLW_ERR_IO.
+// changed since it was read alone with SHCLW_ERR_IO. A save with no Format
+// line has 2.x's info block swapped for the current one where it sat.
 shclw_kind shclw_write(shclw_doc *d, const char *path, shclw_error *err);
 // Gives back what earlier edits left behind, as a good shclw_write does, for a
 // program that edits a lot between saves. C only, since Go and Rust free it
@@ -253,8 +254,9 @@ typedef struct {
 
 // Converts a file written for an older format. With from 0 the file's Format
 // line decides. A file with none is taken as 2.x when it has 2.x's info
-// block, and otherwise as current. Pass from 2 for a file known to be from
-// shcl 2.x or older. A file that reads two ways is SHCLW_ERR_AMBIGUOUS, and one shcl 2.0
+// block, or errors on 3.0 that shcl 2.0 doesn't have, and otherwise as
+// current. Pass from 2 for a file known to be from shcl 2.x or older. A 2.x
+// file that reads two ways is SHCLW_ERR_AMBIGUOUS, and one shcl 2.0
 // reports errors on is SHCLW_ERR_REFUSED, with them in its diags. A 2.x file
 // comes out reading what 2.0 read, backslash escapes included, and one that
 // can't is SHCLW_ERR_REFUSED too. 2.x's info block is swapped for the

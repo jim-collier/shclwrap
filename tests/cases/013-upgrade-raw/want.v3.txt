@@ -1,6 +1,10 @@
 > diags
 2	error	E005	unterminated raw block
 > upgrade
-error refused
+from 3 changed false unsure 0
+| a: 1
+| b: ```
+| raw line
+| c: 2
 > upgrade	2
 error refused

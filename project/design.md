@@ -135,13 +135,18 @@ Go names are listed. Rust uses the same words in snake case, and `ShclDoc` has t
 	- `InfoBlock` and `StampFormat` don't change it. They touch only the block and the Format line, and the rest of the save is what it was.
 
 - `Open` upgrades a file the way `Upgrade` does with `from` 0, adn nothing is written until a `Write`.
-	- A file with no Format line that has 2.x's `#` info block is taken as 2.x. Otherwise one that loads clean on 3.0 is taken as current. One that loads with errors is taken as 2.x, upgraded when shcl 2.0 reads it clean, and `ErrRefused` with 2.0's errors when it doesn't. One that reads two ways is `ErrAmbiguous`. Either way the document is empty, as for `ErrTooNew`. In C the empty document's `shclw_diags` has 2.0's errors.
+	- A file with no Format line that has 2.x's `#` info block is taken as 2.x. Otherwise one that loads clean on 3.0 is taken as current. One that loads with errors is taken as 2.x when shcl 2.0 reads it clean, and upgraded. One that 2.0 has errors on too is taken as current, with 3.0's errors in `Diags`, and a strict `Open` fails on it with `ErrStrict` as usual.
+	- A file its Format line or its 2.x block marks as 2.x is `ErrRefused` with 2.0's errors when 2.0 has errors on it. A 2.x file that reads two ways is `ErrAmbiguous`. Either way the document is empty, as for `ErrTooNew`. In C the empty document's `shclw_diags` has 2.0's errors.
 	- A file whose Format line names 3 is current, errors and all, and skips the upgrade.
 	- Reads, `Lines`, `Diags`, and `Text` are all of the upgraded text, and the strictness applies to it.
 	- The first `Write` over the file backs up the original as `UpgradeFile` does, with the same name and `ErrBackupTaken`. Over the file means the path `Open` read, or the same file by another name. A `Write` anywhere else makes no backup, and later ones over the file make none either. A file that changed since `Open` read it is left alone with `ErrIO`.
 	- `Rewrites` is true until that first `Write`, since it replaces the original's lines.
 	- `Parse` never upgrades. Text has no file to back up, and `Upgrade` is there for it.
 	- A program whose files can't say they're older converts them ahead of time with `UpgradeFile(path, 2)`. To only read one, it passes `Upgrade(text, 2)`'s text to `Parse`.
+
+- A save whose text has no Format line has 2.x's `#` info block swapped for the current one, with its Format line, where the old one sat (2026101513330010). That's `Write`, `Text`, and `Canonical`.
+	- It's the upgrade's swap, with the same block finder, so a block's text inside a raw body doesn't count. The lines end as the file's did.
+	- So a 2.x file read with `Parse` and saved names format 3, and the next `Open` reads what the program had.
 
 - C also has `shclw_compact`, for a program that edits a lot between saves. [Decisions](#decisions) says why.
 
@@ -214,14 +219,14 @@ Go names are listed. Rust uses the same words in snake case, and `ShclDoc` has t
 - `FormatOf(text)` is the format a file's `##    Format   N` line names, or 0.
 
 - `Upgrade(text, from)` and `UpgradeFile(path, from)` move a file to the bound shcl's format. `Open` does the same in memory, as [Loading and saving](#loading-and-saving) says, and `UpgradeFile` is for converting ahead of time.
-	- With `from` 0 the Format line decides. A file with none is taken as 2.x when it has 2.x's `#` info block, and otherwise as current. When it's left as it is, `From` is the bound format.
+	- With `from` 0 the Format line decides. A file with none is taken as 2.x when it has 2.x's `#` info block, or when it has errors on 3.0 and shcl 2.0 reads it clean. Otherwise it's current, errors and all. When it's left as it is, `From` is the bound format.
 	- `from` 2 says the file is known to be from shcl 2.x or older. The file can't say so itself, so only the program can.
 	- `UpgradeFile` copies the original beside it first, and `Backup` names the copy.
 	- `UpgradeFile` reads the file once. The 2.0 check, the conversion, and the backup all use that text.
 	- A file that changed since that read is left alone with `ErrIO`. It's checked before the backup and again right before the write. That's a check and not a lock, so an edit in the moment between the last check and the rename is still lost.
 	- The new text goes to a temp file that's renamed into place, so a failed write leaves the original. If a failed replace left nothing at the path, the backup is moved back. The backup is removed whenever the original is still there, and only kept, and named in the error, when it can't be put back.
 	- A file whose Format line names a newer format is `ErrTooNew`, as `Upgrade` says, and anything that isn't a regular file is `ErrIO`.
-	- A file taken as 2.x that shcl 2.0 reports errors on is `ErrRefused`, with those errors in the error's `Diags`. Nothing is written and no backup is made. 2.0 read such a line the way it repaired it, or not at all, and a raw block that never closes took the rest of the file. The upgrade would make a clean file out of it that means something else.
+	- A file its Format line, its 2.x block, or `from` 2 marks as 2.x, and that shcl 2.0 reports errors on, is `ErrRefused`, with those errors in the error's `Diags`. Nothing is written and no backup is made. 2.0 read such a line the way it repaired it, or not at all, and a raw block that never closes took the rest of the file. The upgrade would make a clean file out of it that means something else.
 	- A 2.x file comes out reading the values 2.0 read. shcl's `migrate` leaves a 2.x backslash escape as typed, and 3.0 reads a backslash as text, so `C:\\new` read as `C:\new` in 2.x and would read as `C:\\new` after. The upgrade sets each value with an escape in it again, so 3.0 reads what 2.0 read. Then every path 2.0 reads one value at is read back against 2.0.
 	- 1.2 read values the same way, but read names as typed, as 3.0 does. A name 2.0 read with an escape resolved can't be renamed, so it's refused, unless the file's Format line names 1.
 	- A value that still reads differently, or such a name, is `ErrRefused`, with the lines in `Diags`. Nothing is written.
@@ -276,10 +281,11 @@ Each row has a test, either a shared case or an API test.
 | `PutSyntax` text with a trailing comment | Drops the comment and says ok.                              | `NoReadBack`, with the edit left in place.
 | Opening a newer format's file            | 3.0 reads it, with a hint.                                  | `ErrTooNew`. A Format line in a raw body doesn't count, as in 3.0.
 | Opening a 1.2 or 2.0 file                | 3.0 reads it by its own rules, with errors.                 | `Open` upgrades it in memory, and the first `Write` backs up the original.
-| Upgrading a 2.x file 2.0 had errors on   | 3.0 writes a clean file, with nothing lost and no error.    | Refuses with `ErrRefused` and leaves the file alone.
+| Upgrading a 2.x file 2.0 had errors on   | 3.0 writes a clean file, with nothing lost and no error.    | Refuses with `ErrRefused` and leaves the file alone. With nothing to mark the file as 2.x, it's current.
 | A 2.x backslash escape in a value        | 3.0 keeps it as typed, and reads it as text.                | The upgrade writes it so 3.0 reads what 2.x read.
 | An old info block above the first field  | 3.0's `SetBanner` leaves it and adds a second block.        | `InfoBlock` takes it off.
 | Upgrading a file with 2.x's info block   | 3.0 moves it to the end, or leaves it when nothing changed. | Swaps in the current block where the old one was.
+| Saving a file with 2.x's info block      | 3.0 keeps the block, and adds no Format line.               | Swaps in the current block where the old one was.
 | Upgrading a CRLF file 3.0 writes again   | 3.0 writes LF.                                              | Keeps CRLF.
 | A Format line without the block          | 3.0 has it only as part of `Migrate`.                       | `StampFormat`.
 | A file that isn't UTF-8                  | Varies by language.                                         | `ErrIO`, everywhere.
@@ -391,12 +397,13 @@ An ops script is one op per line, with fields split by tabs. `\t`, `\n`, `\r`, a
 - An upgrade refuses a 2.x file that shcl 2.0 reports errors on, rather than count those lines in `Unsure`. A count is easy to skip over, and the upgraded file loads clean, so nothing would point at those lines again. It's the same answer shcl's own `migrate` gives a raw block that never closes.
 
 - The upgrade writes each 2.x value so 3.0 reads what 2.0 read, rather than keep `migrate`'s backslashes as typed, which read as text now. A line it can't carry that way is refused, rather than counted in `Unsure`, as with 2.0's errors, and `Open` doesn't show `Unsure` at all (2026101910455900).
-	- So a 3.0 file with no Format line and an error, which `Open` takes as 2.x, has its backslash escapes read the 2.x way too. A program that writes its files with `StampFormat` or `InfoBlock` never has that happen.
+	- So a 3.0 file with no Format line and an error that 2.0 reads clean, which `Open` takes as 2.x, has its backslash escapes read the 2.x way too. A program that writes its files with `StampFormat` or `InfoBlock` never has that happen.
 	- A file `Open` takes as current keeps its backslashes as typed, even one 2.x wrote, when nothing in it says so.
 
 - `Open` upgrades an old file in memory, rather than leave it to the program to call `UpgradeFile` first. A program that only reads then never writes, and one that saves gets the backup on its first `Write` (2026101613005800).
 	- It upgrades as `Upgrade` with `from` 0 does, never 2. shcl says a program calling its upgrade on every start must not pass 2, since a 3.0 file that picks up an error would then be read by 2.x rules.
-	- So a 3.0 file with no Format line and an error is taken as 2.x, and is upgraded or refused. A program that writes its files with `StampFormat` or `InfoBlock` never has that happen.
+	- So a 3.0 file with no Format line and an error is taken as 2.x when shcl 2.0 reads it clean, and upgraded. A program that writes its files with `StampFormat` or `InfoBlock` never has that happen.
+	- One with errors on 3.0 and 2.0 both opens as current, with 3.0's errors in `Diags`, as before 3.0 was the floor. A typo in a current file then gives that file's own errors, and the guess is taken only when 2.0 backs it. A file its Format line or its 2.x block marks as 2.x is still `ErrRefused` when 2.0 has errors on it. `Upgrade` with `from` 0 does the same, so `Open`, `Upgrade`, and `UpgradeFile` agree.
 	- Reads, `Lines`, `Diags`, and `Text` are the upgraded text's, rather than the original's line numbers. shcl gives no line map, the upgraded text is what the save writes and the next `Open` reads, and the original's errors are why it was upgraded.
 	- `Parse` of text never upgrades. There's no file to back up, and `Upgrade` already takes text.
 	- `UpgradedFrom` and `BackupName` say what happened, rather than an `Upgraded` value on the document. Its text would be the document's own, and its count of unsure lines is from `UpgradeFile`, for a program that wants it ahead of time.
@@ -407,7 +414,7 @@ An ops script is one op per line, with fields split by tabs. `\t`, `\n`, `\r`, a
 	- Rust's `write` takes `&mut self`, since it records the backup.
 
 - With `from` 0, a file with no Format line that has 2.x's `#` info block is taken as 2.x, rather than as current (2026101513330010). No 3.0 writer makes that block, and Quillroute checked for it the same way.
-	- A 3.0 program that saves over a 2.x file without upgrading it keeps the block, and a backslash escape it writes is then read the 2.x way. No program on 3.0 is known to do that. The wrapper's own `Parse` followed by `Write` does, so this call waits on an answer.
+	- A 3.0 program that saves over a 2.x file without upgrading it keeps the block, and a backslash escape it writes is then read the 2.x way. So the wrapper's own save swaps 2.x's block for the current one when the text has no Format line, as the upgrade does. A file the wrapper saves says what it is. Only programs off the wrapper keep the risk, and none is known.
 
 - `UpgradeFile` on 3.0 does its own read, backup, and write with shcl's parts, rather than call shcl's `UpgradeFile`. shcl's reads the file again after the wrapper's 2.0 check, so an edit in between was converted with no check.
 

@@ -1,10 +1,22 @@
-# shcl 2.0 reports errors on this file too, so Open refuses it with 2.0's
-# errors, gives an empty document, and writes nothing.
-open	doc.shcl
+# 2.x's info block marks this file as 2.x, and shcl 2.0 reports errors on
+# it, so Open refuses it with 2.0's errors, gives an empty document, and
+# writes nothing.
+open	marked.shcl
 get	int	a
 files
-# Lines that read two ways.
+# The same with a Format line naming 2.
+open	format2.shcl
+# With nothing in it to say it's 2.x, a file 2.0 has errors on too is taken
+# as current, errors and all (052-open-fails-both).
+open	doc.shcl
+upgraded
+get	int	a
+# Lines that read two ways, in a file taken as 2.x since only 3.0 has errors
+# on it.
+open	twoways.shcl
+# This one reads two ways too, but 2.0 has errors on it, so it's current.
 open	ambiguous.shcl
+upgraded
 # A file naming format 3 is current, errors and all.
 open	stamped.shcl
 upgraded

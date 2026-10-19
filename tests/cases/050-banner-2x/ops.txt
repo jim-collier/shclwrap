@@ -17,9 +17,8 @@ open	raw.shcl
 upgraded
 get	str	path
 get	raw	tmpl
-# Saving over it with no Open keeps 2.x's block and no Format line, so the
-# next Open reads a backslash put in by 3.0's rules the 2.x way. That's the
-# risk 2026101513330010 waits on.
+# Saving over it with no Open swaps 2.x's block for the current one, so the
+# next Open reads the backslash put in by 3.0's rules as it was put.
 parse
 put	str	dir	C:\\temp
 write	doc.shcl

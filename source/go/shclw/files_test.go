@@ -309,8 +309,7 @@ func TestSaveRefusedOverFile(t *testing.T) {
 		text string
 		open func(string) (shclw.Doc, error)
 	}{
-		// Open now takes an unstamped file with an error as 2.x, and 2.0 refuses this one.
-		// {3, "a: 1\na(5): 2\n", func(p string) (shclw.Doc, error) { return shclw3.Open(p) }},
+		{3, "a: 1\na(5): 2\n", func(p string) (shclw.Doc, error) { return shclw3.Open(p) }},
 		{3, "a: 1\na(5): 2\n##    Format   3\n", func(p string) (shclw.Doc, error) { return shclw3.Open(p) }},
 	} {
 		dir := t.TempDir()
@@ -422,4 +421,92 @@ func TestOpenUpgradeBackupTaken(t *testing.T) {
 		return
 	}
 	t.Fatal("the clock ticked on every try")
+}
+
+const block2x = "#\r\n# This config file format is SHCL.\r\n# \"Simple Hierarchical Config Language\"\r\n" +
+	"#    Home     https://github.com/jim-collier/shcl\r\n#\r\n"
+
+// A save of a file with 2.x's block and no Format line puts the current block
+// where it sat, with its Format line, so the next Open reads what was put
+// rather than take the file as 2.x (2026101513330010).
+func TestWriteSwapsOldBlock(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "c.shcl")
+	text := "# app\r\nname: demo\r\n\r\n" + block2x + "\r\nport: 80\r\n"
+	d := shclw3.Parse(text)
+	if err := d.Put("dir", `C:\temp`); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.Write(path); err != nil {
+		t.Fatal(err)
+	}
+	got := readFile(t, path)
+	if got != d.Text() {
+		t.Errorf("Text %q, file %q", d.Text(), got)
+	}
+	at := strings.Index(got, "##\r\n## This config file format is SHCL.")
+	if shclw3.FormatOf(got) != 3 || strings.Contains(got, "# This config file format is SHCL.\r\n# ") ||
+		at < 0 || at > strings.Index(got, "port:") || strings.Count(got, "\n") != strings.Count(got, "\r\n") {
+		t.Errorf("file holds %q", got)
+	}
+	again, err := shclw3.Open(path)
+	if err != nil || again.UpgradedFrom() != 0 || again.Str("dir", "") != `C:\temp` {
+		t.Errorf("reopen: %v, from %d, dir %q", err, again.UpgradedFrom(), again.Str("dir", ""))
+	}
+
+	// A block's text in a raw body is the body's.
+	raw := "tmpl:\n\t~~~\n" + strings.ReplaceAll(block2x, "\r\n", "\n") + "\t~~~\n"
+	if err := shclw3.Parse(raw).Write(path); err != nil || readFile(t, path) != raw {
+		t.Errorf("raw body: %v, %q", err, readFile(t, path))
+	}
+	// A Format line already says what the file is.
+	stamped := strings.ReplaceAll(block2x, "\r\n", "\n") + "##    Format   3\n"
+	if err := shclw3.Parse(stamped).Write(path); err != nil || readFile(t, path) != stamped {
+		t.Errorf("stamped: %v, %q", err, readFile(t, path))
+	}
+}
+
+// A file with no Format line or 2.x block that has errors on 3.0 and 2.0
+// alike is current, with 3.0's errors in Diags. One marked as 2.x is still
+// refused (2026101613005800).
+func TestOpenFailsBoth(t *testing.T) {
+	const both = "a: 1\nb: ```\nraw line\nc: 2\n"
+	dir := t.TempDir()
+	path := filepath.Join(dir, "c.shcl")
+	writeFile(t, path, both, 0o644)
+	d, err := shclw3.Open(path)
+	want := shclw3.Parse(both).Diags()
+	if err != nil || d.UpgradedFrom() != 0 || d.Rewrites() || d.Int("a", 0) != 1 ||
+		len(d.Diags()) == 0 || d.Diags()[0] != want[0] {
+		t.Fatalf("open: %v, from %d, diags %v", err, d.UpgradedFrom(), d.Diags())
+	}
+	if _, err := shclw3.OpenWith(path, shclw.Strict); shclw.KindOf(err) != shclw.ErrStrict {
+		t.Errorf("strict open: %v", err)
+	}
+	if u, err := shclw3.Upgrade(both, 0); err != nil || u.Changed || u.From != 3 || u.Text != both {
+		t.Errorf("upgrade 0: %v, %+v", err, u)
+	}
+	if u, err := shclw3.UpgradeFile(path, 0); err != nil || u.Changed || len(names(t, dir)) != 1 {
+		t.Errorf("upgrade file: %v, %+v, %v", err, u, names(t, dir))
+	}
+	for _, c := range []struct {
+		name string
+		text string
+		from int
+	}{
+		{"from 2", both, 2},
+		{"2.x block", strings.ReplaceAll(block2x, "\r\n", "\n") + both, 0},
+		{"Format 2", "##    Format   2\n" + both, 0},
+	} {
+		if _, err := shclw3.Upgrade(c.text, c.from); shclw.KindOf(err) != shclw.ErrRefused {
+			t.Errorf("%s: upgrade %v, want refused", c.name, err)
+		}
+		if c.from != 0 {
+			continue
+		}
+		writeFile(t, path, c.text, 0o644)
+		if _, err := shclw3.Open(path); shclw.KindOf(err) != shclw.ErrRefused {
+			t.Errorf("%s: open %v, want refused", c.name, err)
+		}
+	}
 }

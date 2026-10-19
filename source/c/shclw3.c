@@ -271,6 +271,39 @@ static char *values(const char *text, size_t len, size_t *n) {
 
 static const shclw_i_info_edit info_edit = {SHCL_GEN_BANNER, SHCL_FORMAT_MAJOR, values};
 
+// text as a save writes it, in *out, which the caller frees. Where that has no
+// Format line, 2.x's block is swapped for the current one where it sits, as
+// the upgrade does, so the next shclw_open doesn't take the file as 2.x
+// (2026101513330010).
+static shclw_kind saved(const shclw_doc *d, const char *text, size_t len, const char *path, char **out, size_t *out_len,
+                        shclw_error *err) {
+	shclw_kind k = shclw_i_finish_info(text, len, d->info, d->stamp, &info_edit, path, out, out_len, err);
+	if (k != SHCLW_OK || shclw_format_of(*out, *out_len) != 0) {
+		return k;
+	}
+	bool found = false;
+	char *marked = NULL;
+	size_t marked_len = 0;
+	if (!shclw_i_old_block(*out, *out_len, &info_edit, &found, &marked, &marked_len)) {
+		k = shclw_i_fail(err, SHCLW_ERR_NO_MEMORY, path, NULL, 0);
+	} else if (found) {
+		char *swapped = NULL;
+		size_t swapped_len = 0;
+		k = marked ? shclw_i_place_block(marked, marked_len, true, &info_edit, path, &swapped, &swapped_len, err)
+		           : shclw_i_place_block(*out, *out_len, false, &info_edit, path, &swapped, &swapped_len, err);
+		free(*out);
+		*out = swapped;
+		*out_len = swapped_len;
+	}
+	free(marked);
+	if (k != SHCLW_OK) {
+		free(*out);
+		*out = NULL;
+		*out_len = 0;
+	}
+	return k;
+}
+
 // s with the info block and the Format line as asked, or s as it is when an
 // edit since made them impossible; shclw_write says why.
 static char *finish(shclw_doc *d, shcl_str s, size_t *len) {
@@ -278,7 +311,7 @@ static char *finish(shclw_doc *d, shcl_str s, size_t *len) {
 	size_t text_len = s.p ? s.n : 0;
 	char *out = NULL;
 	size_t n = 0;
-	shclw_kind k = shclw_i_finish_info(text, text_len, d->info, d->stamp, &info_edit, NULL, &out, &n, NULL);
+	shclw_kind k = saved(d, text, text_len, NULL, &out, &n, NULL);
 	if (k != SHCLW_OK && k != SHCLW_ERR_NO_MEMORY) {
 		out = shclw_i_dup(text, text_len, &n);
 	}
@@ -389,7 +422,7 @@ shclw_kind shclw_write(shclw_doc *d, const char *path, shclw_error *err) {
 	}
 	char *text = NULL;
 	size_t len = 0;
-	shclw_kind k = shclw_i_finish_info(s.p ? s.p : "", s.n, d->info, d->stamp, &info_edit, path, &text, &len, err);
+	shclw_kind k = saved(d, s.p ? s.p : "", s.p ? s.n : 0, path, &text, &len, err);
 	shcl_reads_release(d->d);
 	if (k != SHCLW_OK) {
 		return k;
@@ -1155,12 +1188,7 @@ static shclw_kind upgrade(const char *text, size_t len, int64_t from, const char
 		was = SHCLW_FORMAT_MAJOR;
 	}
 	shclw_kind k = SHCLW_OK;
-	if (u.ambiguous > 0) {
-		*out = shclw_i_upgraded(text, len, was, !u.current, u.lost, NULL, NULL, 0);
-		char why[64];
-		(void)snprintf(why, sizeof why, "%zu lines read two ways", u.ambiguous);
-		k = shclw_i_fail(err, SHCLW_ERR_AMBIGUOUS, path, why, 0);
-	} else if (u.current && !(from_v2 && u.format < SHCLW_FORMAT_MAJOR)) {
+	if (u.current && !(from_v2 && u.format < SHCLW_FORMAT_MAJOR)) {
 		*out = shclw_i_upgraded(text, len, was, false, u.lost, NULL, NULL, 0);
 	} else {
 		// A file taken as 2.x that 2.0 reports errors on. The old program
@@ -1172,16 +1200,27 @@ static shclw_kind upgrade(const char *text, size_t len, int64_t from, const char
 		if (old) {
 			(void)shclw_i_v2_errors(old, keep_old, &l);
 		}
+		// Nothing in this file says it's 2.x, only its errors on 3.0. With
+		// errors on 2.0 too, it's a current file with a typo (design.md,
+		// Decisions).
+		bool guessed = !from_v2 && named == 0;
 		bool checked = false;
 		char *fixed = NULL;
 		size_t fixed_len = 0;
-		if (!l.oom && !l.n) {
+		if (!l.oom && !l.n && !u.ambiguous) {
 			k = carry_reads(old, u.text, u.len, named == 1, &l, &fixed, &fixed_len);
 			checked = true;
 		}
 		shclw_i_v2_free(old);
 		if (l.oom || k != SHCLW_OK) {
 			k = shclw_i_fail(err, SHCLW_ERR_NO_MEMORY, path, NULL, 0);
+		} else if (l.n && guessed && !checked) {
+			*out = shclw_i_upgraded(text, len, SHCLW_FORMAT_MAJOR, false, 0, NULL, NULL, 0);
+		} else if (u.ambiguous > 0) {
+			*out = shclw_i_upgraded(text, len, was, !u.current, u.lost, NULL, NULL, 0);
+			char why[64];
+			(void)snprintf(why, sizeof why, "%zu lines read two ways", u.ambiguous);
+			k = shclw_i_fail(err, SHCLW_ERR_AMBIGUOUS, path, why, 0);
 		} else if (l.n) {
 			*out = shclw_i_upgraded(text, len, u.format, false, 0, NULL, l.v, l.n);
 			char why[96];

@@ -248,8 +248,10 @@ static void test_errors(void) {
 	}
 	free(ds);
 	shclw_free(d);
-	// Open now takes an unstamped file with an error as 2.x, and 2.0 refuses this one.
-	// put_file("strict.shcl", bad, sizeof bad - 1);
+	put_file("strict.shcl", bad, sizeof bad - 1);
+	CHECK(shclw_open_with(in_scratch("strict.shcl"), SHCLW_STRICT, &d, &err) == SHCLW_ERR_STRICT);
+	CHECK(strstr(err.msg, "strict.shcl") != NULL);
+	shclw_free(d);
 	const char bad_stamped[] = "a: 1\n1x y: 2\n##    Format   3\n";
 	put_file("strict.shcl", bad_stamped, sizeof bad_stamped - 1);
 	CHECK(shclw_open_with(in_scratch("strict.shcl"), SHCLW_STRICT, &d, &err) == SHCLW_ERR_STRICT);
@@ -989,7 +991,11 @@ static void test_upgrade(void) {
 	CHECK(u && u->backup.n == 0 && u->backup.p[0] == '\0' && !u->diags);
 	free(u);
 
-	static const char two_ways[] = "x: [ab]\ny: 1\nz: [ab] c\n";
+	// 2.0 has errors on this one too, so with nothing to mark it as 2.x it's
+	// current now (2026101613005800).
+	// static const char two_ways[] = "x: [ab]\ny: 1\nz: [ab] c\n";
+	// CHECK(shclw_upgrade(two_ways, strlen(two_ways), 0, &u, NULL) == SHCLW_ERR_AMBIGUOUS && u != NULL);
+	static const char two_ways[] = "p: a,b\ntags: a, b\n";
 	CHECK(shclw_upgrade(two_ways, strlen(two_ways), 0, &u, NULL) == SHCLW_ERR_AMBIGUOUS && u != NULL);
 	free(u);
 	static const char newer[] = "a: 1\n##    Format   9\n";
@@ -1113,12 +1119,19 @@ static void test_open_upgrade(void) {
 	free(name);
 	shclw_free(d);
 
-	// 2.0 reports errors on this one too.
-	static const char raw[] = "a: 1\nb: ```\nraw line\nc: 2\n";
+	// 2.0 reports errors on this one too. With nothing to mark it as 2.x it's
+	// current now, so the same file with a Format line naming 2 is the refused
+	// one (2026101613005800).
+	// static const char raw[] = "a: 1\nb: ```\nraw line\nc: 2\n";
+	// write_mode(path, raw, 0644);
+	// CHECK(shclw_open(path, &d, &err) == SHCLW_ERR_REFUSED && strstr(err.msg, "c.shcl"));
+	// shclw_diag *ds = shclw_diags(d, &n);
+	// CHECK(ds && n == 1 && ds[0].line == 2 && shclw_errors(d) == 1 && shclw_int(d, "a", 7) == 7);
+	static const char raw[] = "##    Format   2\na: 1\nb: ```\nraw line\nc: 2\n";
 	write_mode(path, raw, 0644);
 	CHECK(shclw_open(path, &d, &err) == SHCLW_ERR_REFUSED && strstr(err.msg, "c.shcl"));
 	shclw_diag *ds = shclw_diags(d, &n);
-	CHECK(ds && n == 1 && ds[0].line == 2 && shclw_errors(d) == 1 && shclw_int(d, "a", 7) == 7);
+	CHECK(ds && n == 1 && ds[0].line == 3 && shclw_errors(d) == 1 && shclw_int(d, "a", 7) == 7);
 	free(ds);
 	shclw_free(d);
 	CHECK(file_is(path, raw) && count_dir(dir) == 1);
@@ -1150,6 +1163,111 @@ static void test_open_upgrade(void) {
 		make_dir(dir, sizeof dir, "open-taken");
 	}
 	CHECK(tried);
+	drop_dir(dir);
+}
+
+static const char block2x[] = "#\r\n# This config file format is SHCL.\r\n# \"Simple Hierarchical Config Language\"\r\n"
+							  "#    Home     https://github.com/jim-collier/shcl\r\n#\r\n";
+
+// block2x with LF line ends, in buf.
+static const char *lf_block(char *buf, size_t cap) {
+	size_t n = 0;
+	for (const char *c = block2x; *c && n + 1 < cap; c++) {
+		if (*c != '\r') {
+			buf[n++] = *c;
+		}
+	}
+	buf[n] = '\0';
+	return buf;
+}
+
+// A save of a file with 2.x's block and no Format line puts the current block
+// where it sat, with its Format line, so the next open reads what was put
+// rather than take the file as 2.x (2026101513330010).
+static void test_write_swaps_old_block(void) {
+	char dir[4200], path[8192], text[512], lf[256], other[512];
+	make_dir(dir, sizeof dir, "swap");
+	path_in(path, sizeof path, dir, "c.shcl");
+	(void)snprintf(text, sizeof text, "# app\r\nname: demo\r\n\r\n%s\r\nport: 80\r\n", block2x);
+	shclw_doc *d = parse_z(text);
+	shclw_error err;
+	CHECK(shclw_put_str(d, "dir", "C:\\temp", 7, &err) == SHCLW_OK);
+	CHECK(shclw_write(d, path, &err) == SHCLW_OK);
+	char *got = NULL;
+	size_t len = 0;
+	CHECK(shclw_read_text(path, &got, &len, NULL) == SHCLW_OK);
+	if (got) {
+		CHECK(text_is(d, got));
+		const char *at = strstr(got, "##\r\n## This config file format is SHCL.");
+		const char *port = strstr(got, "port:");
+		CHECK(at && port && at < port && shclw_format_of(got, len) == 3);
+		CHECK(!strstr(got, "# This config file format is SHCL.\r\n# "));
+		size_t lfs = 0, crlfs = 0;
+		for (size_t i = 0; i < len; i++) {
+			lfs += got[i] == '\n';
+			crlfs += got[i] == '\n' && i > 0 && got[i - 1] == '\r';
+		}
+		CHECK(lfs == crlfs);
+	}
+	free(got);
+	shclw_free(d);
+	CHECK(shclw_open(path, &d, NULL) == SHCLW_OK && shclw_upgraded_from(d) == 0);
+	shclw_got_str dir_read = shclw_get_str(d, "dir");
+	CHECK(dir_read.status == SHCLW_GOOD && dir_read.len == 7 && !memcmp(dir_read.value, "C:\\temp", 7));
+	free(dir_read.value);
+	shclw_free(d);
+
+	// A block's text in a raw body is the body's.
+	(void)snprintf(other, sizeof other, "tmpl:\n\t~~~\n%s\t~~~\n", lf_block(lf, sizeof lf));
+	d = parse_z(other);
+	CHECK(shclw_write(d, path, NULL) == SHCLW_OK && file_is(path, other));
+	shclw_free(d);
+	// A Format line already says what the file is.
+	(void)snprintf(other, sizeof other, "%s##    Format   3\n", lf);
+	d = parse_z(other);
+	CHECK(shclw_write(d, path, NULL) == SHCLW_OK && file_is(path, other));
+	shclw_free(d);
+	drop_dir(dir);
+}
+
+// A file with no Format line or 2.x block that has errors on 3.0 and 2.0
+// alike is current, with 3.0's errors in its diagnostics. One marked as 2.x
+// is still refused (2026101613005800).
+static void test_open_fails_both(void) {
+	static const char both[] = "a: 1\nb: ```\nraw line\nc: 2\n";
+	char dir[4200], path[8192], lf[256], text[512];
+	make_dir(dir, sizeof dir, "both");
+	path_in(path, sizeof path, dir, "c.shcl");
+	write_mode(path, both, 0644);
+	shclw_doc *d = NULL;
+	shclw_error err;
+	CHECK(shclw_open(path, &d, &err) == SHCLW_OK && shclw_upgraded_from(d) == 0 && !shclw_rewrites(d));
+	CHECK(shclw_int(d, "a", 0) == 1 && shclw_errors(d) == 1);
+	size_t n = 0;
+	shclw_diag *ds = shclw_diags(d, &n);
+	CHECK(ds && n == 1 && ds[0].line == 2 && !strcmp(ds[0].code.p, "E005"));
+	free(ds);
+	shclw_free(d);
+	CHECK(shclw_open_with(path, SHCLW_STRICT, &d, &err) == SHCLW_ERR_STRICT);
+	shclw_free(d);
+	shclw_upgraded *u = NULL;
+	CHECK(shclw_upgrade(both, strlen(both), 0, &u, NULL) == SHCLW_OK);
+	CHECK(u && !u->changed && u->from == 3 && u->text.n == strlen(both) && !strcmp(u->text.p, both) && !u->n_diags);
+	free(u);
+	CHECK(shclw_upgrade_file(path, 0, &u, NULL) == SHCLW_OK && u && !u->changed && count_dir(dir) == 1);
+	free(u);
+
+	CHECK(shclw_upgrade(both, strlen(both), 2, &u, NULL) == SHCLW_ERR_REFUSED);
+	free(u);
+	const char *marked[] = {lf_block(lf, sizeof lf), "##    Format   2\n"};
+	for (size_t i = 0; i < 2; i++) {
+		(void)snprintf(text, sizeof text, "%s%s", marked[i], both);
+		CHECK(shclw_upgrade(text, strlen(text), 0, &u, NULL) == SHCLW_ERR_REFUSED);
+		free(u);
+		write_mode(path, text, 0644);
+		CHECK(shclw_open(path, &d, NULL) == SHCLW_ERR_REFUSED);
+		shclw_free(d);
+	}
 	drop_dir(dir);
 }
 
@@ -1307,6 +1425,8 @@ int main(void) {
 	test_upgrade_file();
 	test_upgrade_raced();
 	test_open_upgrade();
+	test_write_swaps_old_block();
+	test_open_fails_both();
 	test_info();
 	test_rewrites();
 	test_check();

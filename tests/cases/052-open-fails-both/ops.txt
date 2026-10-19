@@ -1,0 +1,19 @@
+# Errors on 3.0 and on 2.0 alike, with no Format line or 2.x block, so the
+# file is current, with 3.0's errors, as before 3.0 was the floor
+# (2026101613005800).
+diags
+upgrade
+upgrade	2
+open	doc.shcl
+upgraded
+rewrites
+diags
+get	int	a
+# Strictness gives 3.0's errors the usual way.
+open	doc.shcl	strict
+# A save over it makes no backup, since nothing was upgraded.
+open	doc.shcl
+put	int	n	1
+write	doc.shcl
+upgraded
+files
