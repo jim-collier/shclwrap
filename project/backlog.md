@@ -134,7 +134,7 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 - Make shcl 3.0 the floor
 	- ID: 2026101613005800
 	- Type: Feature
-	- Status: Queued
+	- Status: Waiting for testing
 	- Needs local test suite run?: The full `cicd/cicd.bash`, with the leak checks.
 	- Priority: High
 	- Opened: 20261016-130058
@@ -164,17 +164,24 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- 20261019: The real files show the upgrade keeps a 2.x backslash escape as typed, which 3.0 reads as text. Filed as 2026101910455900.
 		- 20261019: Waiting on signoff for one call users will notice. Open takes a file with no Format line that has errors on 3.0 as 2.x, as `Upgrade` with `from` 0 does. So a 3.0 file with a typo is upgraded, or refused when 2.0 has errors on it too, where it used to open with its errors in Diags. Files saved after `StampFormat` or `InfoBlock` are never taken as 2.x, and README says so.
 		- 20261019: 3 tests opened an unstamped file with an error, which Open now refuses. Each one's old input is commented out, and the same input with a Format 3 line takes its place: Go's TestSaveRefusedOverFile, Rust's save_refused_over_file, and the strict open in C's test_errors.
-	- Branch: floor3, openup
-	- Commit: 3754832, 326ccf9, 6b18859, ba5d92e, b5e2128
+		- 20261019: Built as the Decisions row says, in Go, Rust, and C. A file with no Format line or 2.x block that has errors on 3.0 and 2.0 alike is current, with 3.0's errors in Diags, and a strict Open fails on it with `ErrStrict`. `Upgrade` with `from` 0 leaves it as it is. One marked as 2.x by its Format line or its block is still refused. A 2.x file that reads two ways is only `ErrAmbiguous` when it's taken as 2.x.
+		- 20261019: The 3 old inputs pass again and are back, beside the stamped ones. 2 C checks failed under the change and are commented out with the reason, since 2.0 has errors on both files: the 2-ways upgrade in test_upgrade, and the refused open in test_open_upgrade. A 2-ways file 2.0 reads clean, and the refused file with a Format line naming 2, take their places.
+		- 20261019: 037-open-refused now refuses a file marked by 2.x's block and one marked by a Format 2 line. Its old file and its 2-ways file, both of which 2.0 has errors on, now open as current, and a 2-ways file 2.0 reads clean is the ambiguous one. `upgrade` with `from` 0 in 013 and 014 now leaves their files as current. 038 to 046 read as before.
+	- Branch: floor3, openup, oldmark
+	- Commit: 3754832, 326ccf9, 6b18859, ba5d92e, b5e2128, 5a800e6
 	- Test case: tests/cases/034-upgrade-1x-written and 035-upgrade-2x-written, from files the old adapters wrote. 034 fails when the upgrade skips a format 1 file. Every existing 3.0 case and API test still passes.
 		- Part 2: tests/cases/036-open-upgrade and 037-open-refused, the real files in 038 to 046, and the Open tests in Go's files_test.go, Rust's tests/files.rs, and C's test_open_upgrade. They fail in all 3 languages with the upgrade in Open turned off, and again with the backup in Write turned off. The fuzz opens the file and saves over it in a quarter of its scripts.
+		- Errors on both: tests/cases/052-open-fails-both, the changed 013, 014, and 037, the 3 tests whose old inputs are back, and Go's TestOpenFailsBoth, Rust's open_fails_both, and C's test_open_fails_both. They fail in all 3 with the change turned off, and pass with it.
 	- Swept: Go, Rust, and C for the helpers only 1.2 and 2.0 used (the step-count edit check, the path splitter for `Each`, the 1.2 save, the 1.2 and 2.0 info block text, and the Format line reader), all removed. Comments, cicd, `c_cases.py`, `fuzz.py`, design.md, and README for 1.2 and 2.0 mentions.
 		- Part 2: Open, OpenWith, Write, and Rewrites in all 3 languages, the 3 ops runners, the `Doc` interface, the `ShclDoc` and `Lib` traits, Go's docMethods list, `fuzz.py`, and every test that opens an unstamped file with an error.
+		- Errors on both: `Upgrade` in all 3, which `Open` and `UpgradeFile` go through, and its doc comments. Every test and case that opens or upgrades an unstamped file with an error, or expects `ErrAmbiguous`. design.md's Open, Format and upgrade, the evens-out table, and Decisions, and README's note on old files.
+	- Verified: On 5a800e6, `cicd/cicd.bash --quick` passes, and the C API tests and shared cases pass sanitized. The C clang-tidy and analyzers and the full run with the leak checks haven't run on it.
 
 - Tell a 2.x file from a current one by its banner
 	- ID: 2026101513330010
 	- Type: Feature
-	- Status: Queued
+	- Status: Waiting for testing
+	- Needs local test suite run?: The full `cicd/cicd.bash`, with the leak checks.
 	- Priority: Avg
 	- Opened: 20261015-133300
 	- Opened by: JC
@@ -188,13 +195,16 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- 20261019: The risk in the note is real through the wrapper itself. `Parse` of a 2.x file, a `Put` of `C:\temp`, and a `Write` keep the `#` block and add no Format line. The next `Open` takes the file as 2.x and reads a tab, at exit 0. Before this change it read `C:\temp`. 050-banner-2x shows it. No program on 3.0 is known to save over a 2.x file without upgrading it.
 		- 20261019: Question: Should `Write` swap 2.x's block for the current one, with its Format line, whenever it saves? Then nothing the wrapper writes can be misread this way, and only programs off the wrapper keep the risk. The other choices are to take the risk as it is, or to drop the rule.
 		- 20261019: Reverted in 907e496 before the merge, since dev reads that file right today. 765f524 has the change and 050-banner-2x, to bring back once this is answered.
+		- 20261019: Brought back in 52cdaa3. A save whose text has no Format line now swaps 2.x's block for the current one, with its Format line, where the old one sat. That's `Write`, `Text`, and `Canonical`, in Go, Rust, and C. It reuses the upgrade's swap and `InfoBlock`'s block finder, so a block's text in a raw body stays, and the lines end as the file's did. In 050-banner-2x the next `Open` now reads `C:\temp`.
 	- Decisions:
 		- 20261019, JC left it to the project's goals: bring the rule back, and have `Write` swap 2.x's block for the current one, with its Format line, when the text has no Format line. Real 2.x files from Quillroute read wrong through Open without the rule. With the swap, a file the wrapper saves says what it is, as the upgrade's swap in 2026101513330011 does, and the next Open reads what the program had. Only programs off the wrapper keep the risk, and none is known.
-	- Branch: banner
-	- Commit: 765f524, reverted in 907e496
-	- Test case: tests/cases/050-banner-2x in 765f524, and the corrected want file of 039-quillroute. Both fail without the change in Go, Rust, and C, and pass with it.
+	- Branch: banner, oldmark
+	- Commit: 765f524, reverted in 907e496, back in 52cdaa3, 5a800e6
+	- Test case: tests/cases/050-banner-2x, and the corrected want file of 039-quillroute. Both fail without the change in Go, Rust, and C, and pass with it.
+		- The save's swap: 050's last `Open`, and Go's TestWriteSwapsOldBlock, Rust's write_swaps_old_block, and C's test_write_swaps_old_block (a CRLF file with the block in the middle, a block's text in a raw body, and a block with a Format line). They fail in all 3 with the swap turned off, and pass with it.
 	- Swept: `Upgrade` in Go, Rust, and C, which `Open` and `UpgradeFile` go through, and the doc comments on all 3. design.md's Open, Format and upgrade, and Decisions, and README's note on old files. The ops runners, `fuzz.py`, and `c_cases.py` only compare outputs.
-	- Verified: `cicd/cicd.bash --ci --no-sync` passes, with the C clang-tidy, analyzers, and sanitized cases. The full run with the leak checks hasn't run.
+		- The swap: `Write`, `Text`, and `Canonical` in all 3, which share one save step, and the `Write` doc comments. design.md's Loading and saving, the evens-out table, and Decisions, and README.
+	- Verified: On 5a800e6, `cicd/cicd.bash --quick` passes, and the C API tests and shared cases pass sanitized. The C clang-tidy and analyzers and the full run with the leak checks haven't run on it.
 
 - Layered loading
 	- ID: 2026101512024156
