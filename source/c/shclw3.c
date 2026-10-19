@@ -934,7 +934,7 @@ static void free_carried(carried *c) {
 	for (size_t i = 0; i < c->n; i++) {
 		free(c->want[i]);
 	}
-	free(c->want);
+	free((void *)c->want);
 	free(c->lens);
 }
 
@@ -1023,7 +1023,7 @@ static shclw_kind carry_reads(shclw_i_v2_doc *old, const char *up, size_t up_len
 		}
 		carried c = {path, (char **)calloc(a.n, sizeof(char *)), (size_t *)calloc(a.n, sizeof(size_t)), a.n};
 		if (!c.want || !c.lens) {
-			free(c.want);
+			free((void *)c.want);
 			free(c.lens);
 			oom = true;
 			break;
@@ -1122,8 +1122,10 @@ static shclw_kind upgrade(const char *text, size_t len, int64_t from, const char
 		// block took the rest of the file. The upgrade would turn that into a
 		// clean file that means something else (design.md, Format and upgrade).
 		shclw_i_v2_doc *old = shclw_i_v2_parse(text, len);
-		old_list l = {NULL, 0, 0, false};
-		(void)shclw_i_v2_errors(old, keep_old, &l);
+		old_list l = {NULL, 0, 0, !old};
+		if (old) {
+			(void)shclw_i_v2_errors(old, keep_old, &l);
+		}
 		bool checked = false;
 		char *fixed = NULL;
 		size_t fixed_len = 0;

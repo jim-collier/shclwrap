@@ -10,18 +10,32 @@
 
 #include "shclw3_v2.h"
 
+#include <stdlib.h>
+
 #ifdef SHCL_FORMAT_MAJOR
 #error "shclw3_v2.c wants shcl 2.0's shcl.h, and this one is 3.0 or newer"
 #endif
 
-// 2.0's own document, under the name the 3.0 side sees.
-static shcl_doc *doc_of(shclw_i_v2_doc *d) { return (shcl_doc *)(void *)d; }
+struct shclw_i_v2_doc {
+	shcl_doc *d;
+};
+
+static shcl_doc *doc_of(shclw_i_v2_doc *d) { return d->d; }
 
 shclw_i_v2_doc *shclw_i_v2_parse(const char *text, size_t len) {
-	return (shclw_i_v2_doc *)(void *)shcl_parse(text, len);
+	shclw_i_v2_doc *d = (shclw_i_v2_doc *)malloc(sizeof *d);
+	if (d) {
+		d->d = shcl_parse(text, len);
+	}
+	return d;
 }
 
-void shclw_i_v2_free(shclw_i_v2_doc *d) { shcl_free(doc_of(d)); }
+void shclw_i_v2_free(shclw_i_v2_doc *d) {
+	if (d) {
+		shcl_free(d->d);
+		free(d);
+	}
+}
 
 size_t shclw_i_v2_errors(shclw_i_v2_doc *v2, shclw_i_v2_each each, void *ctx) {
 	shcl_doc *d = doc_of(v2);

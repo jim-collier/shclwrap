@@ -17,6 +17,7 @@ extern "C" {
 // memory, as it always has.
 typedef struct shclw_i_v2_doc shclw_i_v2_doc;
 
+// NULL only when memory ran out.
 shclw_i_v2_doc *shclw_i_v2_parse(const char *text, size_t len);
 void shclw_i_v2_free(shclw_i_v2_doc *d);
 
