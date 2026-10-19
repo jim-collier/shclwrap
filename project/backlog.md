@@ -25,6 +25,30 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 
 ## Issues
 
+- Updates to CICD script flags
+	- ID: 2026101816214270
+	- Type: Enhancement
+	- Status: Waiting on signoff
+	- Priority: High
+	- Opened: 2026-10-18
+	- Opened by: JC
+	- Requirements:
+		- `--ci`: Rename `--gate`.
+		- `--quick`:
+			- Should run whatever linting, validation, and testing steps are very quick.
+			- Cross-compile whatever is fast; e.g. maybe skip slow arm64.
+			- Skip anything requiring an external host.
+		- No flags, by default, should do everything.
+		- The other existing flags can stay.
+	- Notes:
+		- Pre-next-cut. Do next.
+		- There's no cross-compile in this project yet, so nothing to trim there. No stage uses an external test host either.
+		- `--quick` drops the remote sync, the C analyzers and sanitizers, the leak checks, and Go's fuzzer, and fuzzes Go against Rust for 10s. C still gets a gcc-15 pass and its plain API tests and shared cases on all 3 versions. It runs in about 50s.
+		- It doesn't fetch anything. If a pinned `shcl.h` isn't cached, C is skipped with a warning.
+		- No flags now runs the leak checks too. `--no-leakcheck` skips them, and `--leakcheck` adds them to `--ci` or `--quick`.
+	- Branch: ci-flags
+	- Test case: None. Each flag mix was checked by hand, plus `--quick` with a header missing from the cache.
+
 - shcl 4 adapters
 	- ID: 2026101512024163
 	- Type: Feature
@@ -54,110 +78,27 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- shcl's Go module path is still `.../v2`, and Go won't take a v3 tag on it. Go stays on a commit until that changes.
 		- Quillroute plans to have its release refuse a commit pin. The same check would fit here.
 
-- Implement leak and static checks of the C code run as part of CI/CD
-	- ID: 2026101619042485
+- Make shcl 3.0 the floor
+	- ID: 2026101613005800
 	- Type: Feature
-	- Status: Done
-	- Priority: Avg
-	- Opened: 20261016-190424
-	- Opened by: JC
-	- Related IDs: 2026101512024159
-	- Requirements:
-		- Every full run builds the whole test suite with AddressSanitizer, LeakSanitizer, and UndefinedBehaviorSanitizer, in a build dir of its own.
-			- Any report fails the test that made it.
-			- The suppressions file lists third-party libraries only, matched by library name. A leak in our code is fixed. If the fix has to wait, it gets a backlog item, and the test that shows it turns leak detection off with that item's ID beside it.
-			- For a full leak stack, rerun the test with `ASAN_OPTIONS=fast_unwind_on_malloc=0`.
-			- On a GLib project, set `G_SLICE=always-malloc` and `G_DEBUG=gc-friendly`, or GLib hides blocks from the leak check.
-		- Every full run also runs gcc's `-fanalyzer` and the clang static analyzer over every first-party .c file. Vendored code is left out.
-			- Before the gate goes live, every existing finding is fixed, or suppressed at the line with a one-line reason. There's no baseline file.
-			- They move behind a flag only if a full run measures too slow.
-		- A `--leakcheck` flag adds the slow checks:
-			- CodeQL, from a pinned CLI run locally. No hosted service.
-			- The clang analyzer in cross-file (CTU) mode, so it follows calls across .c files.
-			- A heaptrack soak test. It loops through the program's main actions headless, and fails if the heap at round 2N is larger than at round N by more than a set margin. The heaptrack report is kept as a pipeline artifact.
-		- Coverity Scan and Infer aren't used. Coverity uploads the build to a third party.
-		- Every tool is pinned and runs in the build container or lint image, never installed on the host.
-		- Each new gate is watched to fail before it's trusted: plant a leak, a null dereference, and a loop that grows the heap, and see each one go red.
-		- Traps:
-			- `-fanalyzer` does nothing under `-fsyntax-only`. Compile with `-c -o /dev/null`.
-			- With `-Werror`, analyzer findings print as `error: ... [-Werror=analyzer-*]`, not `warning:`. A parser that only looks for warnings counts 0.
-			- heaptrack and ASan can't share a build. The soak test uses a plain build.
-			- ASan's allocator hides the heap from glibc's own stats, such as `mallinfo2`. A test that reads them should exit as skipped under ASan, not pass.
-	- Note: Pinned C lint, sanitizer, and shared tests pass on shcl 1-3. The slow leakcheck passes CodeQL, CTU, all three failure probes, and heaptrack soak. The merged tree passed `--gate` in the push hook on 2026-10-18.
-		- 2026-10-19: the slow checks now run by default, per 2026101816214270. `--leakcheck` adds them to `--ci` or `--quick`.
-	- Branch: c-leaks
-	- Commit: 90b409c, dbc9f62
-	- Test case: C API tests and 33 shared cases with 345 operations, over shcl 1-3.
-	- Verified: `cicd/cicd.bash --gate --no-sync -y` passed locally and in the push hook. The pinned slow gate passed CodeQL, CTU, the leak, null, and heap-growth probes, and heaptrack soak on all 3 versions.
-	- Closed: 20261019-060000
-	- Acceptance signoff: Self-closed: each gate was watched to fail on a planted fault, and the merged tree passed.
-
-- Updates to CICD script flags
-	- ID: 2026101816214270
-	- Type: Enhancement
-	- Status: Waiting on signoff
+	- Status: Queued
 	- Priority: High
-	- Opened: 2026-10-18
+	- Opened: 20261016-130058
 	- Opened by: JC
+	- Related IDs: 2026101611292826, 2026101516111070, 2026101613005801
 	- Requirements:
-		- `--ci`: Rename `--gate`.
-		- `--quick`:
-			- Should run whatever linting, validation, and testing steps are very quick.
-			- Cross-compile whatever is fast; e.g. maybe skip slow arm64.
-			- Skip anything requiring an external host.
-		- No flags, by default, should do everything.
-		- The other existing flags can stay.
-	- Notes:
-		- Pre-next-cut. Do next.
-		- There's no cross-compile in this project yet, so nothing to trim there. No stage uses an external test host either.
-		- `--quick` drops the remote sync, the C analyzers and sanitizers, the leak checks, and Go's fuzzer, and fuzzes Go against Rust for 10s. C still gets a gcc-15 pass and its plain API tests and shared cases on all 3 versions. It runs in about 50s.
-		- It doesn't fetch anything. If a pinned `shcl.h` isn't cached, C is skipped with a warning.
-		- No flags now runs the leak checks too. `--no-leakcheck` skips them, and `--leakcheck` adds them to `--ci` or `--quick`.
-	- Branch: ci-flags
-	- Test case: None. Each flag mix was checked by hand, plus `--quick` with a header missing from the cache.
-
-- C wrapper
-	- ID: 2026101512024159
-	- Type: Feature
-	- Status: Done
-	- Priority: High
-	- Opened: 2026-10-15
-	- Opened by: JC
-	- Requirements:
-		- One header over `shcl.h`, usable from C++.
-		- The shcl version picked at compile time.
-		- Its own driver, run against the shared cases and in the fuzzer.
-	- Notes:
-		- Cobblevale uses it from C++, and Folderkite from C.
-		- shcl's C header has no version macro before 3.0, so 1.2 and 2.0 are told apart by what they declare.
-	- Progress log:
-		- 20261015: split into 5 parts, each its own item below. This closes when they do.
-		- 20261016: core, read memory, walking and writes, and string lengths are Done. Format and upgrade, and 1.2 and 2.0, wait on signoff. Fuzzing is next.
-		- 20261017: format and upgrade, and 1.2 and 2.0, are Done. Fuzzing is what's left.
-		- 20261019: fuzzing is Done, so this closes.
-	- Closed: 20261019-073500
-	- Acceptance signoff: Self-closed: all 5 parts are Done.
-
-- C: fuzz against Go
-	- ID: 2026101516111107
-	- Type: Feature
-	- Status: Done
-	- Priority: High
-	- Opened: 20261015-161111
-	- Opened by: JC
-	- Parent ID: 2026101512024159
-	- Prereq IDs: 2026101516111070
-	- Requirements:
-		- fuzz.py runs the C driver beside Go and Rust, on every version.
-	- Notes:
-		- The fuzz stage runs in the C container, where the C drivers are built. Go's and Rust's drivers run there too.
-		- C uses the sanitized driver, so a leak or bad memory access fails the case. `--quick` uses the plain one, since it skips the sanitized build.
-		- Without the pinned C headers, as under `--quick` with an empty cache, it fuzzes Go against Rust alone.
-	- Verified: 1,030 cases in 30s, none failed. A count capped at 1 on 2.0 failed 12 of 558 cases, and a leak in 3.0's `has` failed 26. `--quick` and a full run pass.
-	- Branch: c-fuzz
-	- Test case: the fuzz stage of `cicd/cicd.bash`.
-	- Closed: 20261019-073500
-	- Acceptance signoff: Self-closed: built as asked, and watched to fail on 2 planted faults.
+		- Drop the 1.2 and 2.0 adapters in Go, Rust, and C, with their tests and want files.
+		- Pin 3.0 dev until `v3.0.0-beta1` is tagged, then pin the tag.
+		- Programs move old files through the wrapper's upgrade, in place of their own upgrade code.
+		- The upgrade, with its 2.0 check, is part of every build. Each program moves its old files forward.
+		- Open upgrades an old file in memory. A file that fails the 2.0 check is `ErrRefused`. The first Write backs up the original before replacing it, and a program that only reads never writes. `UpgradeFile` stays for converting ahead of time.
+		- It covers 1.2 and 2.0 files as the existing programs wrote them. Wovenshell's released betas wrote 1.2.
+		- Test cases from real files each program wrote.
+		- Tallowbase, Mossrealm, and Lenscart move to 3.0 as they move onto the wrapper.
+		- design.md and README say 3.0 is the floor.
+	- Note: Makes the C 1.2 and 2.0 item moot. 4 keeps 3.0's file format but changes the API a lot, so a 4 adapter is still real work.
+	- Decisions:
+		- 20261016, JC: the upgrade is required, not opt-in. 2.0 adds about 164 KB to a small Go program and 29 KB to a C one.
 
 - Layered loading
 	- ID: 2026101512024156
@@ -459,28 +400,6 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Opened by: JC
 	- Parent ID: 2026101512024159
 	- Note: Cobblevale compiles shcl in one file with `SHCL_NO_FILE_IO`, since the file calls pull in `windows.h`, adn writes files itself. Write would need its own code for that build.
-
-- Make shcl 3.0 the floor
-	- ID: 2026101613005800
-	- Type: Feature
-	- Status: Queued
-	- Priority: High
-	- Opened: 20261016-130058
-	- Opened by: JC
-	- Related IDs: 2026101611292826, 2026101516111070, 2026101613005801
-	- Requirements:
-		- Drop the 1.2 and 2.0 adapters in Go, Rust, and C, with their tests and want files.
-		- Pin 3.0 dev until `v3.0.0-beta1` is tagged, then pin the tag.
-		- Programs move old files through the wrapper's upgrade, in place of their own upgrade code.
-		- The upgrade, with its 2.0 check, is part of every build. Each program moves its old files forward.
-		- Open upgrades an old file in memory. A file that fails the 2.0 check is `ErrRefused`. The first Write backs up the original before replacing it, and a program that only reads never writes. `UpgradeFile` stays for converting ahead of time.
-		- It covers 1.2 and 2.0 files as the existing programs wrote them. Wovenshell's released betas wrote 1.2.
-		- Test cases from real files each program wrote.
-		- Tallowbase, Mossrealm, and Lenscart move to 3.0 as they move onto the wrapper.
-		- design.md and README say 3.0 is the floor.
-	- Note: Makes the C 1.2 and 2.0 item moot. 4 keeps 3.0's file format but changes the API a lot, so a 4 adapter is still real work.
-	- Decisions:
-		- 20261016, JC: the upgrade is required, not opt-in. 2.0 adds about 164 KB to a small Go program and 29 KB to a C one.
 
 - C: one generated header with shcl inside
 	- ID: 2026101613005801
@@ -857,6 +776,49 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Swept: `Upgrade` and `UpgradeFile` in Go `shclw3` and Rust `v3`. The 1.2 and 2.0 adapters convert nothing. A format 3 file passed with `from` 2 that 2.0 has errors on, such as `tags: [a, b]`, is still left alone.
 	- Closed: 20261017-11325800
 	- Acceptance signoff: Self-closed: the 2.0 check is now required in every build, per 2026101613005800, and the test failed before the fix and passes after.
+
+- C wrapper
+	- ID: 2026101512024159
+	- Type: Feature
+	- Status: Done
+	- Priority: High
+	- Opened: 2026-10-15
+	- Opened by: JC
+	- Requirements:
+		- One header over `shcl.h`, usable from C++.
+		- The shcl version picked at compile time.
+		- Its own driver, run against the shared cases and in the fuzzer.
+	- Notes:
+		- Cobblevale uses it from C++, and Folderkite from C.
+		- shcl's C header has no version macro before 3.0, so 1.2 and 2.0 are told apart by what they declare.
+	- Progress log:
+		- 20261015: split into 5 parts, each its own item below. This closes when they do.
+		- 20261016: core, read memory, walking and writes, and string lengths are Done. Format and upgrade, and 1.2 and 2.0, wait on signoff. Fuzzing is next.
+		- 20261017: format and upgrade, and 1.2 and 2.0, are Done. Fuzzing is what's left.
+		- 20261019: fuzzing is Done, so this closes.
+	- Closed: 20261019-073500
+	- Acceptance signoff: Self-closed: all 5 parts are Done.
+
+- C: fuzz against Go
+	- ID: 2026101516111107
+	- Type: Feature
+	- Status: Done
+	- Priority: High
+	- Opened: 20261015-161111
+	- Opened by: JC
+	- Parent ID: 2026101512024159
+	- Prereq IDs: 2026101516111070
+	- Requirements:
+		- fuzz.py runs the C driver beside Go and Rust, on every version.
+	- Notes:
+		- The fuzz stage runs in the C container, where the C drivers are built. Go's and Rust's drivers run there too.
+		- C uses the sanitized driver, so a leak or bad memory access fails the case. `--quick` uses the plain one, since it skips the sanitized build.
+		- Without the pinned C headers, as under `--quick` with an empty cache, it fuzzes Go against Rust alone.
+	- Verified: 1,030 cases in 30s, none failed. A count capped at 1 on 2.0 failed 12 of 558 cases, and a leak in 3.0's `has` failed 26. `--quick` and a full run pass.
+	- Branch: c-fuzz
+	- Test case: the fuzz stage of `cicd/cicd.bash`.
+	- Closed: 20261019-073500
+	- Acceptance signoff: Self-closed: built as asked, and watched to fail on 2 planted faults.
 
 - C: header, loading, saving, and reads on shcl 3.0
 	- ID: 2026101516110959
@@ -1305,6 +1267,44 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Swept: Put, PutSyntax, Comment, and Remove in Go `shclw1` to `shclw3` and Rust `v1` to `v3`, each on the first, an inner, and the last step of a path, with the rest there and not there. 3.0 needs no check of its own, since shcl 3.0 refuses these itself, and the test walks it too. Remove takes every instance on every version, as decided. No other `Doc` or `ShclDoc` method edits the document. `Write` and `UpgradeFile` take a file path, not a document path.
 	- Closed: 20261017-11325800
 	- Acceptance signoff: Self-closed: reproduced, and its test failed before the fix and passes after. The narrowed path is what `Each` already gave.
+
+- Implement leak and static checks of the C code run as part of CI/CD
+	- ID: 2026101619042485
+	- Type: Feature
+	- Status: Done
+	- Priority: Avg
+	- Opened: 20261016-190424
+	- Opened by: JC
+	- Related IDs: 2026101512024159
+	- Requirements:
+		- Every full run builds the whole test suite with AddressSanitizer, LeakSanitizer, and UndefinedBehaviorSanitizer, in a build dir of its own.
+			- Any report fails the test that made it.
+			- The suppressions file lists third-party libraries only, matched by library name. A leak in our code is fixed. If the fix has to wait, it gets a backlog item, and the test that shows it turns leak detection off with that item's ID beside it.
+			- For a full leak stack, rerun the test with `ASAN_OPTIONS=fast_unwind_on_malloc=0`.
+			- On a GLib project, set `G_SLICE=always-malloc` and `G_DEBUG=gc-friendly`, or GLib hides blocks from the leak check.
+		- Every full run also runs gcc's `-fanalyzer` and the clang static analyzer over every first-party .c file. Vendored code is left out.
+			- Before the gate goes live, every existing finding is fixed, or suppressed at the line with a one-line reason. There's no baseline file.
+			- They move behind a flag only if a full run measures too slow.
+		- A `--leakcheck` flag adds the slow checks:
+			- CodeQL, from a pinned CLI run locally. No hosted service.
+			- The clang analyzer in cross-file (CTU) mode, so it follows calls across .c files.
+			- A heaptrack soak test. It loops through the program's main actions headless, and fails if the heap at round 2N is larger than at round N by more than a set margin. The heaptrack report is kept as a pipeline artifact.
+		- Coverity Scan and Infer aren't used. Coverity uploads the build to a third party.
+		- Every tool is pinned and runs in the build container or lint image, never installed on the host.
+		- Each new gate is watched to fail before it's trusted: plant a leak, a null dereference, and a loop that grows the heap, and see each one go red.
+		- Traps:
+			- `-fanalyzer` does nothing under `-fsyntax-only`. Compile with `-c -o /dev/null`.
+			- With `-Werror`, analyzer findings print as `error: ... [-Werror=analyzer-*]`, not `warning:`. A parser that only looks for warnings counts 0.
+			- heaptrack and ASan can't share a build. The soak test uses a plain build.
+			- ASan's allocator hides the heap from glibc's own stats, such as `mallinfo2`. A test that reads them should exit as skipped under ASan, not pass.
+	- Note: Pinned C lint, sanitizer, and shared tests pass on shcl 1-3. The slow leakcheck passes CodeQL, CTU, all three failure probes, and heaptrack soak. The merged tree passed `--gate` in the push hook on 2026-10-18.
+		- 2026-10-19: the slow checks now run by default, per 2026101816214270. `--leakcheck` adds them to `--ci` or `--quick`.
+	- Branch: c-leaks
+	- Commit: 90b409c, dbc9f62
+	- Test case: C API tests and 33 shared cases with 345 operations, over shcl 1-3.
+	- Verified: `cicd/cicd.bash --gate --no-sync -y` passed locally and in the push hook. The pinned slow gate passed CodeQL, CTU, the leak, null, and heap-growth probes, and heaptrack soak on all 3 versions.
+	- Closed: 20261019-060000
+	- Acceptance signoff: Self-closed: each gate was watched to fail on a planted fault, and the merged tree passed.
 
 - C: strings with lengths
 	- ID: 2026101513330047
