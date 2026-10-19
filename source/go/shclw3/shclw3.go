@@ -13,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	shcl2 "github.com/jim-collier/shcl/source/go/v2"
@@ -58,6 +59,17 @@ type Doc struct {
 	d     *shcl.Document
 	info  shclw.Info
 	stamp bool
+	up    *upgradedFile
+}
+
+// upgradedFile is the file Open upgraded, kept until the first Write over it
+// backs it up.
+type upgradedFile struct {
+	from   int
+	path   string
+	st     os.FileInfo
+	text   string
+	backup string
 }
 
 var _ shclw.Doc = (*Doc)(nil)
@@ -69,6 +81,7 @@ var Lib = shclw.Lib{
 	New:         func() shclw.Doc { return New() },
 	Parse:       func(text string) shclw.Doc { return Parse(text) },
 	ParseWith:   func(text string, s Strictness) (shclw.Doc, error) { return ParseWith(text, s) },
+	OpenWith:    func(path string, s Strictness) (shclw.Doc, error) { return OpenWith(path, s) },
 	FormatOf:    FormatOf,
 	Upgrade:     Upgrade,
 }
@@ -102,19 +115,40 @@ func ParseWith(text string, s Strictness) (*Doc, error) {
 }
 
 // Open reads and parses a file. A missing file is ErrNotFound, and a file
-// written for a newer format is ErrTooNew.
+// written for a newer format is ErrTooNew. An older file is upgraded in
+// memory, as Upgrade with from 0 does, and UpgradedFrom says so. Nothing is
+// written until Write, and the first Write over the file backs it up. A file
+// that reads two ways is ErrAmbiguous, and one shcl 2.0 reports errors on is
+// ErrRefused, with those errors in Diags. On an error the document is empty.
 func Open(path string) (*Doc, error) { return OpenWith(path, shclw.Standard) }
 
-// OpenWith is Open at a given strictness.
+// OpenWith is Open at a given strictness, which applies to the upgraded text.
 func OpenWith(path string, s Strictness) (*Doc, error) {
 	text, err := shclw.ReadText(path)
 	if err != nil {
 		return New(), err
 	}
-	if f := FormatOf(text); f > FormatMajor {
+	f := FormatOf(text)
+	if f > FormatMajor {
 		return New(), tooNew(path, f)
 	}
-	d, err := ParseWith(text, s)
+	var up *upgradedFile
+	body := text
+	// A file naming this format is current, so it skips the upgrade's parse.
+	if f != FormatMajor {
+		u, err := Upgrade(text, 0)
+		if err != nil {
+			err.(*shclw.Error).Path = path
+			return New(), err
+		}
+		if u.Changed {
+			up = &upgradedFile{from: u.From, path: path, text: text}
+			up.st, _ = os.Stat(path)
+			body = u.Text
+		}
+	}
+	d, err := ParseWith(body, s)
+	d.up = up
 	if e, ok := err.(*shclw.Error); ok {
 		e.Path = path
 	}
@@ -184,8 +218,23 @@ func UpgradeFile(path string, from int) (Upgraded, error) {
 	if !u.Changed {
 		return u, nil
 	}
-	backup := func() (string, error) {
-		name, err := shcl.WriteBackup(path, text, u.From)
+	write := func(path, data string) error {
+		if err := shcl.WriteFileAtomic(path, data); err != nil {
+			return &shclw.Error{Kind: shclw.ErrIO, Path: path, Err: err}
+		}
+		return nil
+	}
+	if u.Backup, err = shclw.ReplaceRead(path, text, u.Text, keepOriginal(path, text, u.From), write); err != nil {
+		return Upgraded{From: u.From}, err
+	}
+	return u, nil
+}
+
+// keepOriginal copies text, what path held when it was read, beside it under
+// shcl's backup name for format from.
+func keepOriginal(path, text string, from int) func() (string, error) {
+	return func() (string, error) {
+		name, err := shcl.WriteBackup(path, text, from)
 		if err == nil {
 			return name, nil
 		}
@@ -196,16 +245,6 @@ func UpgradeFile(path string, from int) (Upgraded, error) {
 		}
 		return "", e
 	}
-	write := func(path, data string) error {
-		if err := shcl.WriteFileAtomic(path, data); err != nil {
-			return &shclw.Error{Kind: shclw.ErrIO, Path: path, Err: err}
-		}
-		return nil
-	}
-	if u.Backup, err = shclw.ReplaceRead(path, text, u.Text, backup, write); err != nil {
-		return Upgraded{From: u.From}, err
-	}
-	return u, nil
 }
 
 // oldErrors refuses a file taken as 2.x that shcl 2.0 reports errors on.
@@ -269,6 +308,10 @@ func (d *Doc) finish(text string) string {
 // SaveFileKeepLines makes, and writes nothing when the info block or the
 // Format line can't go in, since an edit made after InfoBlock or
 // StampFormat.
+//
+// The first Write over a file Open upgraded backs up the original first, as
+// UpgradeFile does, and BackupName names the copy. A file that changed since
+// Open read it is left alone with ErrIO.
 func (d *Doc) Write(path string) error {
 	text, kept := d.d.ToTextKeepLines()
 	if lost := d.d.LostCount(); !kept && lost > 0 {
@@ -283,7 +326,19 @@ func (d *Doc) Write(path string) error {
 		err.(*shclw.Error).Path = path
 		return err
 	}
-	err = shcl.WriteFileAtomic(path, text)
+	if up := d.up; up != nil && up.backup == "" && up.over(path) {
+		name, err := shclw.ReplaceRead(path, up.text, text, keepOriginal(path, up.text, up.from), writeAtomic)
+		if err != nil {
+			return err
+		}
+		up.backup, up.text = name, ""
+		return nil
+	}
+	return writeAtomic(path, text)
+}
+
+func writeAtomic(path, text string) error {
+	err := shcl.WriteFileAtomic(path, text)
 	if err == nil {
 		return nil
 	}
@@ -294,13 +349,47 @@ func (d *Doc) Write(path string) error {
 	return &shclw.Error{Kind: shclw.ErrIO, Path: path, Err: err}
 }
 
+// over is whether path names the file Open read: the same path, or the same
+// file by another name.
+func (up *upgradedFile) over(path string) bool {
+	a, aerr := filepath.Abs(path)
+	b, berr := filepath.Abs(up.path)
+	if aerr == nil && berr == nil && a == b {
+		return true
+	}
+	st, err := os.Stat(path)
+	return err == nil && up.st != nil && os.SameFile(st, up.st)
+}
+
+// UpgradedFrom is the format Open upgraded the file from, or 0 when it
+// didn't upgrade it. Reads, Lines, Diags, and Text are all of the upgraded
+// text.
+func (d *Doc) UpgradedFrom() int {
+	if d.up == nil {
+		return 0
+	}
+	return d.up.from
+}
+
+// BackupName is where the first Write over an upgraded file put the
+// original, or "" before then.
+func (d *Doc) BackupName() string {
+	if d.up == nil {
+		return ""
+	}
+	return d.up.backup
+}
+
 // Rewrites says whether Write puts the canonical form in place of the lines
 // the document was loaded from. 3.0 does that when it can't keep them with
 // the edits in, such as after a child is added under a flat dotted line,
 // and comments can move. It builds the save's text to find out. InfoBlock
 // and StampFormat change only their own lines, so they don't change the
-// answer.
+// answer. A file Open upgraded is rewritten until the first Write over it.
 func (d *Doc) Rewrites() bool {
+	if d.up != nil && d.up.backup == "" {
+		return true
+	}
 	_, kept := d.d.ToTextKeepLines()
 	return !kept
 }

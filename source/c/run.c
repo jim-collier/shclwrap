@@ -4,6 +4,11 @@
 // shclw_run: the the ops script runner, a port of Go's shclw.Run. Its output has
 // to match Go's byte for byte.
 
+// opendir is POSIX.
+#if !defined(_WIN32) && !defined(_POSIX_C_SOURCE)
+#define _POSIX_C_SOURCE 200809L // NOLINT(bugprone-reserved-identifier,cert-dcl37-c,cert-dcl51-cpp)
+#endif
+
 #include "shclw_adapter.h"
 
 #include <errno.h>
@@ -12,6 +17,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifdef _WIN32
+#include <io.h>
+#else
+#include <dirent.h>
+#endif
 
 typedef struct {
 	char *p;
@@ -263,6 +273,8 @@ static void free_fields(fields *f) {
 	free(f->len);
 }
 
+// src is the text an open loaded the document from, for check's fresh load,
+// and NULL for input.
 typedef struct {
 	const char *input;
 	size_t input_len;
@@ -270,6 +282,8 @@ typedef struct {
 	shclw_doc *doc;
 	shclw_strictness level;
 	buf out;
+	char *src;
+	size_t src_len;
 } runner;
 
 // Fields are NUL-terminated for the C API's paths, which can't hold a NUL.
@@ -502,14 +516,18 @@ static void or_(runner *r, const fields *f) {
 	nl(b);
 }
 
-static void parse(runner *r, const fields *f) {
-	const char *level = arg(f, 1);
-	shclw_strictness s = SHCLW_STANDARD;
+static shclw_strictness strictness_of(const char *level) {
 	if (!strcmp(level, "loose")) {
-		s = SHCLW_LOOSE;
-	} else if (!strcmp(level, "strict")) {
-		s = SHCLW_STRICT;
+		return SHCLW_LOOSE;
 	}
+	if (!strcmp(level, "strict")) {
+		return SHCLW_STRICT;
+	}
+	return SHCLW_STANDARD;
+}
+
+static void parse(runner *r, const fields *f) {
+	shclw_strictness s = strictness_of(arg(f, 1));
 	shclw_doc *doc = NULL;
 	shclw_kind k = shclw_parse_with(r->input, r->input_len, s, &doc, NULL);
 	if (!doc) {
@@ -519,6 +537,8 @@ static void parse(runner *r, const fields *f) {
 	shclw_free(r->doc);
 	r->doc = doc;
 	r->level = s;
+	free(r->src);
+	r->src = NULL;
 	result(r, k);
 }
 
@@ -596,6 +616,204 @@ static void write_(runner *r, const fields *f) {
 	free(saved);
 }
 
+static void print_doc_diags(runner *r, shclw_doc *d) {
+	size_t n = 0;
+	shclw_diag *ds = shclw_diags(d, &n);
+	print_diags(r, ds, n);
+}
+
+// The text an opened document was loaded from: the file, upgraded when the
+// open upgraded it.
+static char *source_of(const char *path, shclw_doc *d, size_t *len) {
+	char *text = NULL;
+	*len = 0;
+	if (shclw_read_text(path, &text, len, NULL) != SHCLW_OK || !shclw_upgraded_from(d)) {
+		return text;
+	}
+	shclw_upgraded *u = NULL;
+	(void)shclw_upgrade(text, *len, 0, &u, NULL);
+	free(text);
+	text = u ? shclw_i_dup(u->text.p, u->text.n, len) : NULL;
+	free(u);
+	return text;
+}
+
+// An error's diagnostics go after it, as Go and Rust print the error's, and
+// the document is then empty.
+static void open_(runner *r, const fields *f) {
+	char *path = file(r, arg(f, 1));
+	if (!path) {
+		return;
+	}
+	shclw_strictness s = strictness_of(arg(f, 2));
+	shclw_doc *doc = NULL;
+	shclw_kind k = shclw_open_with(path, s, &doc, NULL);
+	if (!doc) {
+		free(path);
+		nomem(&r->out);
+		return;
+	}
+	free(r->src);
+	r->src = NULL;
+	if (k != SHCLW_OK) {
+		result(r, k);
+		print_doc_diags(r, doc);
+		shclw_free(doc);
+		doc = shclw_new();
+	} else {
+		line_out(r, "ok");
+		r->src = source_of(path, doc, &r->src_len);
+	}
+	free(path);
+	if (!doc) {
+		nomem(&r->out);
+		return;
+	}
+	shclw_free(r->doc);
+	r->doc = doc;
+	r->level = s;
+}
+
+// name with STAMP in place of the time in a backup's name.
+static void put_masked(buf *b, const char *name) {
+	const char *at = strstr(name, "_backup_");
+	const char *end = at ? strstr(at + 8, "_format-v") : NULL;
+	if (!end) {
+		esc(b, name, strlen(name));
+		return;
+	}
+	esc(b, name, (size_t)(at + 8 - name));
+	puts_(b, "STAMP");
+	esc(b, end, strlen(end));
+}
+
+static void upgraded(runner *r) {
+	size_t n = 0;
+	char *name = shclw_backup_name(r->doc, &n);
+	if (!name) {
+		nomem(&r->out);
+		return;
+	}
+	puts_(&r->out, "from ");
+	put_i64(&r->out, shclw_upgraded_from(r->doc));
+	puts_(&r->out, " backup ");
+	if (!n) {
+		line_out(r, "none");
+		free(name);
+		return;
+	}
+	const char *base = name;
+	for (const char *c = name; *c; c++) {
+		base = *c == '/' || *c == '\\' ? c + 1 : base;
+	}
+	put_masked(&r->out, base);
+	nl(&r->out);
+	char *text = NULL;
+	size_t len = 0;
+	shclw_kind k = shclw_read_text(name, &text, &len, NULL);
+	free(name);
+	if (k != SHCLW_OK) {
+		result(r, k);
+		return;
+	}
+	block(r, text, len);
+	free(text);
+}
+
+static int by_name(const void *a, const void *b) { return strcmp(*(char *const *)a, *(char *const *)b); }
+
+// The names in dir, sorted. NULL when it can't be read.
+static char **list_dir(const char *dir, size_t *n, bool *oom) {
+	*n = 0;
+	*oom = false;
+	char **names = NULL;
+	size_t cap = 0;
+#ifdef _WIN32
+	size_t plen = strlen(dir) + 3;
+	char *pattern = (char *)malloc(plen);
+	if (!pattern) {
+		*oom = true;
+		return NULL;
+	}
+	(void)snprintf(pattern, plen, "%s/*", dir);
+	struct _finddata_t fd;
+	intptr_t h = _findfirst(pattern, &fd);
+	free(pattern);
+	if (h == -1) {
+		return NULL;
+	}
+	int more = 0;
+	for (; more == 0 && !*oom; more = _findnext(h, &fd)) {
+		const char *got = fd.name;
+#else
+	DIR *dh = opendir(dir);
+	if (!dh) {
+		return NULL;
+	}
+	for (struct dirent *e = readdir(dh); e && !*oom; e = readdir(dh)) {
+		const char *got = e->d_name;
+#endif
+		if (!strcmp(got, ".") || !strcmp(got, "..")) {
+			continue;
+		}
+		if (*n == cap) {
+			size_t want = cap ? cap * 2 : 16;
+			char **grown = (char **)realloc((void *)names, want * sizeof *names);
+			if (!grown) {
+				*oom = true;
+				break;
+			}
+			names = grown;
+			cap = want;
+		}
+		names[*n] = shclw_i_dup(got, strlen(got), NULL);
+		*oom = !names[*n];
+		*n += !*oom;
+	}
+#ifdef _WIN32
+	_findclose(h);
+#else
+	closedir(dh);
+#endif
+	if (!names) {
+		names = (char **)malloc(sizeof *names);
+		*oom = *oom || !names;
+	}
+	if (*n) {
+		qsort((void *)names, *n, sizeof *names, by_name);
+	}
+	return names;
+}
+
+static void files(runner *r) {
+	if (!r->dir) {
+		line_out(r, "error unsupported");
+		return;
+	}
+	size_t n = 0;
+	bool oom = false;
+	char **names = list_dir(r->dir, &n, &oom);
+	if (!names) {
+		if (oom) {
+			nomem(&r->out);
+		} else {
+			result(r, SHCLW_ERR_IO);
+		}
+		return;
+	}
+	for (size_t i = 0; i < n; i++) {
+		if (!oom) {
+			put_masked(&r->out, names[i]);
+			nl(&r->out);
+		}
+		free(names[i]);
+	}
+	free((void *)names);
+	if (oom) {
+		nomem(&r->out);
+	}
+}
+
 // A schema check. Mode "all" adds the load's own diagnostics first, and "drop"
 // does that and then drops what the schema declares.
 static void check(runner *r, const fields *f) {
@@ -625,7 +843,7 @@ static void check(runner *r, const fields *f) {
 		// has to keep its hints, so they come off a fresh load of the same
 		// text. Only the load's hints can go; the check gives none.
 		shclw_doc *fresh = NULL;
-		(void)shclw_parse_with(r->input, r->input_len, r->level, &fresh, NULL);
+		(void)shclw_parse_with(r->src ? r->src : r->input, r->src ? r->src_len : r->input_len, r->level, &fresh, NULL);
 		if (fresh) {
 			shclw_drop_declared(schema, fresh);
 			ds = shclw_diags(fresh, &n);
@@ -871,6 +1089,15 @@ static void op_format(runner *r, const fields *f) {
 	nl(&r->out);
 }
 static void op_upgrade(runner *r, const fields *f) { upgrade(r, arg(f, 1)); }
+static void op_open(runner *r, const fields *f) { open_(r, f); }
+static void op_upgraded(runner *r, const fields *f) {
+	(void)f;
+	upgraded(r);
+}
+static void op_files(runner *r, const fields *f) {
+	(void)f;
+	files(r);
+}
 
 // Every op in design.md's "Ops scripts".
 // clang-format off
@@ -905,6 +1132,9 @@ static const struct {
 	{"format",    op_format},
 	{"upgrade",   op_upgrade},
 	{"write",     op_write},
+	{"open",      op_open},
+	{"upgraded",  op_upgraded},
+	{"files",     op_files},
 };
 // clang-format on
 
@@ -942,7 +1172,7 @@ char *shclw_run(const char *input, size_t len, const char *script, size_t script
 		script = "";
 		script_len = 0;
 	}
-	runner r = {input, len, dir, shclw_parse(input, len), SHCLW_STANDARD, {NULL, 0, 0, false}};
+	runner r = {input, len, dir, shclw_parse(input, len), SHCLW_STANDARD, {NULL, 0, 0, false}, NULL, 0};
 	if (!r.doc) {
 		return NULL;
 	}
@@ -973,6 +1203,7 @@ char *shclw_run(const char *input, size_t len, const char *script, size_t script
 		free_fields(&f);
 	}
 	shclw_free(r.doc);
+	free(r.src);
 	if (r.out.oom) {
 		free(r.out.p);
 		return NULL;

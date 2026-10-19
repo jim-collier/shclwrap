@@ -1,0 +1,12 @@
+# Tallowbase's sample schema, as written for shcl 1.2. With no Format line,
+# some of its 1.2 lines read two ways, so Open refuses it. The program knows
+# its files are older and converts them with `from` 2.
+open	doc.shcl
+files
+upgrade	2
+# Its demo schema loads clean on 3.0, so it's taken as current.
+open	demo.shcl
+upgraded
+rewrites
+each	database.tables.table
+get	str	ui.default_view

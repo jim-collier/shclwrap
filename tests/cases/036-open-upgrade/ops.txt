@@ -1,0 +1,30 @@
+# Open upgrades a 2.x file in memory. Reads, lines, and diags are the
+# upgraded text's, and nothing is written until a Write over the file.
+open	doc.shcl
+upgraded
+rewrites
+get	strs	hosts
+lines	hosts
+diags
+text
+files
+# A Write somewhere else makes no backup.
+write	copy.shcl
+upgraded
+put	int	port	9090
+# The first Write over the file backs up the original.
+write	doc.shcl
+upgraded
+rewrites
+# Later ones don't.
+put	int	port	9091
+write	doc.shcl
+files
+# Plain text is never upgraded.
+parse
+upgraded
+rewrites
+# The saved file names format 3, so the next Open leaves it alone.
+open	doc.shcl
+upgraded
+get	int	port

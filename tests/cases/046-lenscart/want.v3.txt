@@ -1,0 +1,86 @@
+> open	doc.shcl
+ok
+> upgraded
+from 2 backup none
+> errors
+0
+> eachget	strs	field	allowed
+0	NotFound	0	0
+1	NotFound	0	0
+2	NotFound	0	0
+3	NotFound	0	0
+4	NotFound	0	0
+5	NotFound	0	0
+6	NotFound	0	0
+7	Good	20	2	lowercase	UPPERCASE
+8	Good	23	2	lowercase	UPPERCASE
+9	NotFound	0	0
+10	NotFound	0	0
+11	NotFound	0	0
+12	NotFound	0	0
+13	NotFound	0	0
+14	NotFound	0	0
+15	NotFound	0	0
+16	NotFound	0	0
+17	NotFound	0	0
+18	NotFound	0	0
+19	NotFound	0	0
+20	NotFound	0	0
+21	NotFound	0	0
+22	NotFound	0	0
+23	NotFound	0	0
+24	NotFound	0	0
+25	NotFound	0	0
+26	NotFound	0	0
+27	NotFound	0	0
+28	NotFound	0	0
+29	NotFound	0	0
+30	NotFound	0	0
+31	NotFound	0	0
+32	NotFound	0	0
+33	Good	74	3	system	light	dark
+34	NotFound	0	0
+35	NotFound	0	0
+36	NotFound	0	0
+37	NotFound	0	0
+38	NotFound	0	0
+39	NotFound	0	0
+40	NotFound	0	0
+41	NotFound	0	0
+42	NotFound	0	0
+43	NotFound	0	0
+44	NotFound	0	0
+45	NotFound	0	0
+46	NotFound	0	0
+47	NotFound	0	0
+48	NotFound	0	0
+49	NotFound	0	0
+50	NotFound	0	0
+51	NotFound	0	0
+52	NotFound	0	0
+53	NotFound	0	0
+54	NotFound	0	0
+55	NotFound	0	0
+56	NotFound	0	0
+57	NotFound	0	0
+58	NotFound	0	0
+59	NotFound	0	0
+60	NotFound	0	0
+61	NotFound	0	0
+62	NotFound	0	0
+63	NotFound	0	0
+64	NotFound	0	0
+65	NotFound	0	0
+66	NotFound	0	0
+67	NotFound	0	0
+68	NotFound	0	0
+69	NotFound	0	0
+70	NotFound	0	0
+71	NotFound	0	0
+72	NotFound	0	0
+73	NotFound	0	0
+74	NotFound	0	0
+75	NotFound	0	0
+76	NotFound	0	0
+77	NotFound	0	0
+78	NotFound	0	0

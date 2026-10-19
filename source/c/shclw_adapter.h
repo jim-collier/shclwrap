@@ -85,6 +85,17 @@ shclw_upgraded *shclw_i_upgraded(const char *text, size_t len, int64_t from, boo
 // Something at path that isn't a regular file, such as a FIFO or a device.
 bool shclw_i_irregular(const char *path);
 
+// Which file a path names, to tell the same file by another name. ok is false
+// when it can't be read, and always on Windows, where only the path counts.
+typedef struct {
+	bool ok;
+	uint64_t dev, ino;
+} shclw_i_file_id;
+shclw_i_file_id shclw_i_file_id_of(const char *path);
+// Whether path names the file was named when it had id: the same path, or
+// the same file by another name.
+bool shclw_i_same_file(const char *path, const char *was, shclw_i_file_id id);
+
 // What a save does with the info block, Go's shclw.Info.
 typedef enum { SHCLW_I_INFO_AS_IS, SHCLW_I_INFO_ON, SHCLW_I_INFO_OFF } shclw_i_info;
 

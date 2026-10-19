@@ -1,0 +1,267 @@
+> open	doc.shcl
+error ambiguous
+> files
+demo.shcl
+doc.shcl
+ops.txt
+> upgrade	2
+from 2 changed true unsure 0
+| code:  ## Application-level
+| \tbefore_open:  ## Function to run when app is loaded, but before showing any UI. Can cancel by returning false. Gets passed <name>, <path to tx log folder>.
+| \tafter_open:
+| \tbefore_sync:
+| \tafter_sync:
+| \tbefore_viewchange:
+| \tafter_viewchange:
+| \tbefore_close:  ## Fires after field then table `before_update`.
+| \tafter_close:  ## After everything is committed and the UI goes away.
+| 
+| database:
+| \ttables:
+| \t\ttable: "table_name1"
+| \t\t\taliases: [table7, "old_table79"]
+| \t\t\taccess:  ## table-level access by user groups (default: all; admins can always read/write, owners can always delete)
+| \t\t\t\tread:
+| \t\t\t\t\twhitelist:  ## Defaults to all unless populated
+| \t\t\t\t\tblacklist:  ## Defaults to none unless populated.
+| \t\t\t\twrite:
+| \t\t\t\t\twhitelist:  ## Defaults to all unless populated
+| \t\t\t\t\tblacklist:  ## Defaults to none unless populated.
+| \t\t\t\tdelete:  ## Any/all records
+| \t\t\t\t\twhitelist:  ## Defaults to all unless populated
+| \t\t\t\t\tblacklist:  ## Defaults to none unless populated.
+| \t\t\tfields:
+| \t\t\t\tfield: field_name1
+| \t\t\t\t\taccess:  ## table-level access by user groups (default: all; admins can always read/write, owners can always delete)
+| \t\t\t\t\t\tread:
+| \t\t\t\t\t\t\twhitelist:  ## Defaults to all unless populated
+| \t\t\t\t\t\t\tblacklist:  ## Defaults to none unless populated.
+| \t\t\t\t\t\twrite:
+| \t\t\t\t\t\t\twhitelist:  ## Defaults to all unless populated
+| \t\t\t\t\t\t\tblacklist:  ## Defaults to none unless populated.
+| \t\t\t\t\taliases: [field99, "favorite_candy"]
+| \t\t\t\t\ttype: string  #..........: string|int|float|bool|datetime[_local]|datetime_utc|binary  ## datetime[_local] stores UTC but displays in user's local time.
+| \t\t\t\t\tspecial: "%|($0|$2|etc) [and other valid currency symbols]"  ## Defaults internal processing (e.g. % <--> float), defaults a UI format for currency unless overridden, etc.
+| \t\t\t\t\tis_active:  #..........: bool. Whether the field itself is in use.
+| \t\t\t\t\tdefaultval: @null  #...........: Three forms: a static value; a sentinel from the closed set @null|@previous (@previous = value from the previously entered row, this session, interactive front-ends only - programmatic writes never inherit it); or a script function name, in format (without quotes): "fMyFunction()". Args that will be passed: table_name, field_name. Quote a sentinel to mean its literal text instead: "@null" stores the five characters.
+| \t\t\t\t\tvalidation:  #....................: Not all validations are valid for all data types. Executable spits warnings if so, and ignores what it can. (Or errors if serious enough.)
+| \t\t\t\t\t\tnull_ok: true  #............: True if not specified.
+| \t\t\t\t\t\tempty_ok: n  #...............: True if not specified.
+| \t\t\t\t\t\trequired: no
+| \t\t\t\t\t\tminlen:
+| \t\t\t\t\t\tmaxlen:
+| \t\t\t\t\t\tminval:  #...............: For numbers
+| \t\t\t\t\t\tmaxval:  #...............: For numbers
+| \t\t\t\t\t\tregex: "(?i)[a-z0-9 ]"  #.: As an example.
+| \t\t\t\t\t\tmethod:  #....................: A script function that, if exists, passes inputs (table_name, field_name, value), and pass|fail boolean as return.
+| \t\t\t\t\tcode:
+| \t\t\t\t\t\tbefore_update:  #.............: Function that, if exists, is sent: table_name, field_name, and a value - to validate and/or change. Return pass|fail boolean to cancel update.
+| \t\t\t\t\t\tafter_update:  #..............: Function that, if exists, is sent: table_name, row_id, field_name, read-only value.
+| \t\t\t\t\tui:
+| \t\t\t\t\t\tvisible_form: true
+| \t\t\t\t\t\tvisible_list: no
+| \t\t\t\t\t\tlabel: ""  #.............: Defaults to field name.
+| \t\t\t\t\t\tdescription: ""  #.......: E.g. for flyover text.
+| \t\t\t\t\t\torder: 3.005  #..........: Display and tab order.
+| \t\t\t\t\t\treadonly: n
+| \t\t\t\t\t\twidth:  ## Integer, approx number of characters.
+| \t\t\t\t\t\twidget:  ## listbox|editbox|radio|checkbox|image|audio
+| \t\t\t\t\t\tformat:  ## e.g. printf format string. Display-only format after saving.
+| \t\t\t\t\t\tlist_type:  #............: literal|sql|lookup
+| \t\t\t\t\t\t\t## Checkbox can only be "literal", listbox can be any.
+| \t\t\t\t\t\tlist_source:  ## string
+| \t\t\t\t\t\t\t## list_type:
+| \t\t\t\t\t\t\t\t## literal: e.g. "Bob", "Sally"
+| \t\t\t\t\t\t\t\t## sql: e.g. `SELECT idx, title FROM ...`, etc.
+| \t\t\t\t\t\t\t\t## lookup: an idx from the 'lookups' table; the field stores the picked lookup_values.idx. Empty group = empty picker until populated.
+| \t\t\t\t\t\tlookup_in_lists: symbol  ## symbol|title|both. Default symbol; a value with no symbol falls back to its title. N/A if list_type <> "lookup".
+| \t\t\t\t\t\tlookup_in_forms: both  #.: symbol|title|both. Default both, rendered "<symbol> <title>".
+| \t\t\t\tfield: field_name2
+| \t\t\t\t\ttype: bool
+| \t\t\t\t\tdefaultval: false
+| \t\t\t\t\tvalidation:
+| \t\t\t\t\t\tnull_ok: no
+| \t\t\t\t\t\tempty_ok: n
+| \t\t\tcode:
+| \t\t\t\tbefore_update:  #.............: Function that, if exists, is sent: table_name, and a key:value array of field values [or something], to validate and/or update. Return pass|fail boolean to cancel update.
+| \t\t\t\tafter_update:  #..............: Function that, if exists, is sent: table_name, row_id.
+| \t\t\tuniques:  ## These get automatically named. These are also indexed.
+| \t\t\t\tunique: [field_name1, field_name2]
+| \t\t\t\tunique: field_name2
+| \t\t\tindexes:  ## Warn if an identical index is already named as a unique (which is inherently also indexed).
+| \t\t\t\tindex: field_name1
+| \t\t\tfeatures:  ## And default values. These are typically shown in a related 1:M inserted grid, that can be drilled into.
+| \t\t\t\tlocal_attachments: n
+| \t\t\t\turi_attachments: n
+| \t\t\t\tcomments: n  ## Arbitrary number of related comment rows.
+| \t\t\t\taudit_trail: n
+| \t\t\t\trow_level_access: n
+| \t\t\t## Fields that all tables get, always and immutably:
+| \t\t\t## A DDL field entry naming one of these may carry `ui:` only (presentation merge); `type:`, `validation:`, `defaultval:` on a system field warn and are ignored.
+| \t\t\t## Even tables "Automatic features that any table can opt-in to" get these:
+| \t\t\t\t## May or may not be visible to UI:
+| \t\t\t\t##   - `id`: Table primary key and first field. It stores a GUID (either binary, hex, or base64 whichever makes the most sense). If binary, then program user-facing interfaces will need to be given [and able to give] hex or base64 representations). Indexed, unique.
+| \t\t\t\t##   - `is_active`: defaults yes.
+| \t\t\t\t##   - `date_created`
+| \t\t\t\t## Hidden from UI:
+| \t\t\t\t##   - `is_deleted`: This gets set for record deletion, with garbage collection. Gets auto-added to uniques (except `id`) if not already specified.
+| 
+| \t\t## Actual tables created for every project, that allow predefined features to be easily "wired up".
+| \t\t## Both lookup tables keep the invisible system `id` (row identity in the tx log) and add `idx`: a unique, read-only, auto-assigned (max+1) int - the reference key used by list_source and stored by lookup-backed fields. Meaning-free, so retitling a value never touches data.
+| \t\t## Values must exist in lookup_values at write time only; replay never re-checks (a value picked while active must still apply after deactivation).
+| \t\t## Deactivated values (is_active: n) can't be picked for new rows, but existing rows still render their symbol/title.
+| \t\t## Caveat: two offline clients minting a value concurrently can allocate the same idx; the unique index drops one at replay with a warning. Prefer seeding via the DDL, where idx conflicts surface as ordinary git merge conflicts.
+| \t\ttable: "lookups"
+| \t\t\t## Any field can "opt in" to wire itself up to this.
+| \t\t\taccess:
+| \t\t\tfields:
+| \t\t\t\tfield: id
+| \t\t\t\t\tui:
+| \t\t\t\t\t\tvisible_form: y
+| \t\t\t\t\t\tvisible_list: n
+| \t\t\t\t\t\treadonly: y
+| \t\t\t\tfield: idx
+| \t\t\t\t\ttype: int  ## Unique, auto-assigned max+1. The handle list_source points at.
+| \t\t\t\t\tui:
+| \t\t\t\t\t\treadonly: y
+| \t\t\t\tfield: title
+| \t\t\t\t\ttype: string
+| \t\t\t\t\tvalidation:
+| \t\t\t\t\t\tnull_ok: n
+| \t\t\t\t\t\tempty_ok: n
+| \t\t\t\t\t\trequired: yes
+| \t\t\t\tfield: description
+| \t\t\t\t\ttype: string
+| \t\t\t\t\tvalidation:
+| \t\t\t\t\t\tnull_ok: y
+| \t\t\t\t\t\tempty_ok: y
+| \t\t\t\t\t\trequired: no
+| \t\t\t\t\t\tdefaultval: @null
+| \t\t\t\tfield: is_active  ## Already a system column, so this entry may only restyle it.
+| \t\t\t\t\tui:
+| \t\t\t\t\t\tlabel: "Active"
+| \t\ttable: "lookup_values"
+| \t\t\taccess:
+| \t\t\tfields:
+| \t\t\t\tfield: id
+| \t\t\t\t\tui:
+| \t\t\t\t\t\tvisible_form: y
+| \t\t\t\t\t\tvisible_list: n
+| \t\t\t\t\t\treadonly: y
+| \t\t\t\tfield: idx
+| \t\t\t\t\ttype: int  ## Unique, auto-assigned max+1. What a lookup-backed field stores.
+| \t\t\t\t\tui:
+| \t\t\t\t\t\treadonly: y
+| \t\t\t\tfield: lookups_idx
+| \t\t\t\t\ttype: int
+| \t\t\t\t\tdefaultval: @previous
+| \t\t\t\t\tvalidation:
+| \t\t\t\t\t\tnull_ok: n
+| \t\t\t\t\t\tempty_ok: n
+| \t\t\t\t\t\trequired: yes
+| \t\t\t\t\tui:
+| \t\t\t\t\t\tlabel: ""  #.............: Defaults to field name.
+| \t\t\t\t\t\tdescription: "Lookup group"
+| \t\t\t\t\t\twidget: listbox
+| \t\t\t\t\t\tlist_type: sql
+| \t\t\t\t\t\tlist_source: ["`SELECT idx", "title FROM lookups WHERE is_active ORDER BY title`"]
+| \t\t\t\tfield: title
+| \t\t\t\t\ttype: string
+| \t\t\t\t\tvalidation:
+| \t\t\t\t\t\tnull_ok: n
+| \t\t\t\t\t\tempty_ok: n
+| \t\t\t\t\t\trequired: yes
+| \t\t\t\tfield: symbol
+| \t\t\t\t\ttype: string  ## E.g. single emoji
+| \t\t\t\t\tvalidation:
+| \t\t\t\t\t\tnull_ok: y
+| \t\t\t\t\t\tempty_ok: y
+| \t\t\t\t\t\trequired: no
+| \t\t\t\tfield: description
+| \t\t\t\t\ttype: string
+| \t\t\t\t\tvalidation:
+| \t\t\t\t\t\tnull_ok: y
+| \t\t\t\t\t\tempty_ok: y
+| \t\t\t\t\t\trequired: no
+| \t\t\t\t\t\tdefaultval: @null
+| \t\t\t\tfield: sort
+| \t\t\t\t\ttype: float  ## Picker order within a group; idx never sorts.
+| \t\t\t\t\tvalidation:
+| \t\t\t\t\t\tnull_ok: y
+| \t\t\t\t\t\tempty_ok: n
+| \t\t\t\t\t\trequired: no
+| \t\t\t\t\t\tdefaultval: @null
+| \t\t\t\tfield: is_active  ## Already a system column, so this entry may only restyle it.
+| \t\t\t\t\tui:
+| \t\t\t\t\t\tlabel: "Active"
+| 
+| \tseed:  ## Rows inserted log-first at open when their idx is absent; never overwrites - runtime edits to a seeded row win forever after.
+| \t\ttable: lookups
+| \t\t\trow: [idx=1, 'title="Task status"']
+| \t\ttable: lookup_values
+| \t\t\trow: [idx=1, lookups_idx=1, 'title="Open"', 'symbol="🟢"', sort=1]
+| \t\t\trow: [idx=2, lookups_idx=1, 'title="Closed"', 'symbol="✅"', sort=2]
+| 
+| \trelationships:
+| \t\trelationship: table1_table2  ## the 1:m link below
+| \t\t\ttype: "1:m"  ## The relationship is managed by a field on the child entity. This basically just provides optional cascading deletes, and isn't necessary to define, if not doing that.
+| \t\t\tparent: table_1
+| \t\t\tchild: table_2
+| \t\t\tparent_id_field: my_parent_id  ## Code makes sure this child field is indexed.
+| \t\t\tcascade_delete: y  ## "y" is the main reason to use this feature, otherwise can be redundant.
+| 
+| \t\trelationship: table1_table2_m2m  ## the m:m link below
+| \t\t\ttype: "m:m"  ## Implies use of the "Many-to-many relationships" table. Very much not redundant with anything two entities can do themselves.
+| \t\t\tparent: table_1
+| \t\t\tchild: table_2
+| \t\t\tcascade_delete: n
+| \t\t\tenable_audit_trail: n  ## The audit trail is on the m:m table.
+| 
+| ui:
+| \tviews:
+| \t\tview: "people"
+| \t\t\taliases:
+| \t\t\tstartup_named_query: ...
+| \t\t\treadonly: no
+| \t\t\taccess:  ## View access by user groups (default: all; admins can always read/write, owners can always delete)
+| \t\t\t\twhitelist:  ## Defaults to all unless populated.
+| \t\t\t\tblacklist:  ## Defaults to none unless populated.
+| \t\t\t\t## Data-level read-or-write access managed at the table level. If the user has no read-access to the top-level table in the view, s/he can't access the view either.
+| \t\t\tlayout:
+| \t\t\t\tblock: "top"
+| \t\t\t\t\tblock: 1
+| \t\t\t\t\t\ttable: table_people
+| \t\t\t\t\t\ttype: form
+| \t\t\t\t\t\tlocation:  ## <relative-to>, <above|below|left|right>, <%>
+| \t\t\t\t\tblock: "people-pets"
+| \t\t\t\t\t\ttable: table_pets
+| \t\t\t\t\t\tlocation: [1, right, 25%]  ## Dynamically figures out where to go based on what came before. In this case, it splits block "1", giving itself 25% of the split to the right.
+| \t\t\t\t\t\ttype: grid
+| \t\t\t\tblock: 3
+| \t\t\t\t\ttable: subordinates
+| \t\t\t\t\tlocation: ["top", below, 25%]  ## Dynamically figures out where to go based on what came before. In this case, splits block "top", giving itself 25% of the split below.
+| \t\t\t\t\ttype: tree_grid  ## Hierarchical grid of records from the same table that are hierarchically related.
+| \t\t\t\t\tparent_field: parent_self_id  ## The field in the table that identifies parent from same table.
+| \t\t\t\t\treadonly: yes
+| \tdefault_view: "people"
+| 
+| ##
+| ## This config file format is SHCL.
+| ## "Simple Hierarchical Config Language"
+| ##    Format   3
+| ##    Home     https://github.com/yottacore/shcl
+| ##    Syntax   https://github.com/yottacore/shcl/blob/v3.0.0-beta1/project/spec.md
+| ##    Legal    SHCL is Copyright © 2026 Jim Collier [ID: 2უNაɘ«҂թȹɤξπ๙¿ձϖ]. License: MIT. No warranty.
+| ##
+> open	demo.shcl
+ok
+> upgraded
+from 0 backup none
+> rewrites
+false
+> each	database.tables.table
+0	7	issue
+1	37	person
+2	50	component
+> get	str	ui.default_view
+Good	76	board

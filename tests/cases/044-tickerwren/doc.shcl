@@ -1,0 +1,40 @@
+# Example bot configuration file.
+#
+#
+# This config file format is:
+#
+# SHCL: Simple Hierarchical Config Language.
+#
+#    "Predictable, precise, and forgiving. The parser does the hard work, not you."
+#
+#    Home     https://github.com/jim-collier/shcl
+#    Syntax   https://github.com/jim-collier/shcl/blob/main/project/spec.md
+#    License  MIT. Copyright © 2026 Jim Collier [ID: 2უNაɘ«҂թȹɤξπ๙¿ձϖ].
+#
+#
+# Copy and edit. Money limits keep every digit you write - they are read as
+# text, so nothing is rounded on the way in.
+bot:
+	user: alice
+	name: btc-dca-grid
+	venue: kraken
+	base: BTC
+	quote: USDC
+
+strategy:
+	engine: lua
+	script: scripts/threshold.lua
+
+indicators:
+	rsi14: "rsi(close, 14)"
+	vwap_s: vwap(session)
+
+risk:
+	max_position_quote: 5000
+	max_order_quote: 250.50
+	cooldown: 30s
+
+tax:
+	jurisdiction: us
+	lot_method: hifo  # fifo | lifo | hifo (spec_id falls back to fifo for now)
+	prefer_ltcg: true

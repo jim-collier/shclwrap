@@ -1,0 +1,9 @@
+# An accounts file as Quillroute wrote it under shcl 2.x, kept in its tests.
+# It loads clean on 3.0, so Open takes it as current. 2.x read the bare \\
+# as one backslash, and 3.0 reads 2 (2026101910455900). `from` 2 leaves it
+# too.
+open	doc.shcl
+upgraded
+rewrites
+get	str	account.email
+upgrade	2

@@ -245,6 +245,9 @@ type Doc interface {
 
 	InfoBlock(on bool) error
 	StampFormat() error
+
+	UpgradedFrom() int
+	BackupName() string
 }
 
 // Lib is one adapter's package-level calls, for code that picks a shcl
@@ -255,6 +258,7 @@ type Lib struct {
 	New         func() Doc
 	Parse       func(text string) Doc
 	ParseWith   func(text string, s Strictness) (Doc, error)
+	OpenWith    func(path string, s Strictness) (Doc, error)
 	FormatOf    func(text string) int
 	Upgrade     func(text string, from int) (Upgraded, error)
 }

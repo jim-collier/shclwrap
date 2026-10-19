@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -133,22 +134,96 @@ func (r *runner) op(f []string) {
 		r.upgrade(arg(1))
 	case "write":
 		r.write(arg(1))
+	case "open":
+		r.open(arg(1), arg(2))
+	case "upgraded":
+		r.upgraded()
+	case "files":
+		r.files()
 	default:
 		r.out("error unknownop")
 	}
 }
 
-func (r *runner) parse(level string) {
-	s := Standard
+func strictnessOf(level string) Strictness {
 	switch level {
 	case "loose":
-		s = Loose
+		return Loose
 	case "strict":
-		s = Strict
+		return Strict
 	}
-	doc, err := r.lib.ParseWith(r.input, s)
+	return Standard
+}
+
+func (r *runner) parse(level string) {
+	doc, err := r.lib.ParseWith(r.input, strictnessOf(level))
 	r.doc = doc
 	r.result(err)
+}
+
+// open prints an error's diagnostics after it, and goes on with an empty
+// document, as C has no list on its error.
+func (r *runner) open(name, level string) {
+	path, ok := r.file(name)
+	if !ok {
+		return
+	}
+	doc, err := r.lib.OpenWith(path, strictnessOf(level))
+	if err != nil {
+		r.result(err)
+		var e *Error
+		if errors.As(err, &e) {
+			r.diags(e.Diags)
+		}
+		r.doc = r.lib.New()
+		return
+	}
+	r.doc = doc
+	r.out("ok")
+}
+
+func (r *runner) upgraded() {
+	from, name := r.doc.UpgradedFrom(), r.doc.BackupName()
+	if name == "" {
+		r.out(fmt.Sprintf("from %d backup none", from))
+		return
+	}
+	r.out(fmt.Sprintf("from %d backup %s", from, esc(maskStamp(filepath.Base(name)))))
+	text, err := ReadText(name)
+	if err != nil {
+		r.result(err)
+		return
+	}
+	r.block(text)
+}
+
+func (r *runner) files() {
+	if r.opt.Dir == "" {
+		r.out("error unsupported")
+		return
+	}
+	ents, err := os.ReadDir(r.opt.Dir)
+	if err != nil {
+		r.result(&Error{Kind: ErrIO, Err: err})
+		return
+	}
+	for _, e := range ents {
+		r.out(esc(maskStamp(e.Name())))
+	}
+}
+
+// maskStamp puts STAMP in place of the time in a backup's name.
+func maskStamp(name string) string {
+	at := strings.Index(name, "_backup_")
+	if at < 0 {
+		return name
+	}
+	start := at + len("_backup_")
+	end := strings.Index(name[start:], "_format-v")
+	if end < 0 {
+		return name
+	}
+	return name[:start] + "STAMP" + name[start+end:]
 }
 
 func (r *runner) result(err error) {

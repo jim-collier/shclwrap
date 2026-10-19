@@ -937,6 +937,38 @@ shclw_upgraded *shclw_i_upgraded(const char *text, size_t len, int64_t from, boo
 	return u;
 }
 
+shclw_i_file_id shclw_i_file_id_of(const char *path) {
+	shclw_i_file_id id = {false, 0, 0};
+#ifndef _WIN32
+	struct stat st;
+	if (stat(path, &st) == 0) {
+		id.ok = true;
+		id.dev = (uint64_t)st.st_dev;
+		id.ino = (uint64_t)st.st_ino;
+	}
+#else
+	(void)path;
+#endif
+	return id;
+}
+
+bool shclw_i_same_file(const char *path, const char *was, shclw_i_file_id id) {
+#ifdef _WIN32
+	char a[_MAX_PATH], b[_MAX_PATH];
+	if (_fullpath(a, path, sizeof a) && _fullpath(b, was, sizeof b)) {
+		return _stricmp(a, b) == 0;
+	}
+	(void)id;
+	return strcmp(path, was) == 0;
+#else
+	if (strcmp(path, was) == 0) {
+		return true;
+	}
+	shclw_i_file_id now = shclw_i_file_id_of(path);
+	return id.ok && now.ok && now.dev == id.dev && now.ino == id.ino;
+#endif
+}
+
 bool shclw_i_irregular(const char *path) {
 #ifdef _WIN32
 	struct _stat64 st;

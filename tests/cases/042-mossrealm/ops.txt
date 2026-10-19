@@ -1,0 +1,9 @@
+# A world save Mossrealm wrote under shcl 1.2, as its tests keep it.
+open	doc.shcl
+upgraded
+rewrites
+get	floats	pos
+get	int	seed
+write	doc.shcl
+upgraded
+files

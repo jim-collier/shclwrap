@@ -1,0 +1,125 @@
+> open	doc.shcl
+ok
+> upgraded
+from 2 backup none
+> rewrites
+true
+> get	strs	search.search-skip-folders
+Good	35	5	node_modules	a, b		x#y	'q'
+> get	strs	windows.associations
+Good	32	3	txt=notepad.exe %1	log=C:\\\\Tools\\\\view.exe "%1"	md=typora, with comma
+> get	str	terminal.exec
+Good	8	\\\\\\\\server\\\\share\\\\term.exe
+> get	str	archive.create-with-rar
+Good	26	rar\\ta
+> get	str	preferences.bulk-rename-tool
+Good	16	C:\\\\Program Files\\\\Renamer\\\\r.exe --flag
+> get	float	file-cache.memory-gib
+Good	45	0.125
+> write	doc.shcl
+ok
+| appearance:
+| \t# Theme, with a # and a \\ in the note
+| \tgtk-theme: Adwaita-dark
+| \ticon-theme: "café icons"
+| \tmode: dark
+| 
+| terminal:
+| \texec: \\\\\\\\server\\\\share\\\\term.exe
+| \t# Argument that terminal takes before a command
+| \texec-arg: '--title="a # b"'
+| 
+| list-view:
+| \trow-shading-color: "rgba(0, 0, 0, 0.1)"
+| 
+| preferences:
+| \tbulk-rename-tool: "C:\\\\Program Files\\\\Renamer\\\\r.exe --flag"
+| \tclick-policy: single
+| \tshow-hidden-files: true
+| \tmenu-config:
+| \t\tbackground-menu-compress: false
+| \tthumbnail-threads: -3
+| \tthumbnail-limit: 1000000
+| 
+| archive:
+| \tcreate-with-7z: tools\\\\7z.exe
+| \tcreate-with-rar: rar\\ta
+| \textract-with-7z: ""
+| \textract-with-rar: " lead and trail "
+| 
+| windows:
+| \tpath-separator: slash
+| \tassociations: ["txt=notepad.exe %1", 'log=C:\\\\Tools\\\\view.exe "%1"', "md=typora, with comma"]
+| 
+| search:
+| \tsearch-skip-folders: [node_modules, "a, b", "", "x#y", "'q'"]
+| 
+| plugins:
+| \tdisabled-extensions:
+| 
+| thumbnailers:
+| \tdisable: image/x-one
+| 
+| file-cache:
+| \tmax-size-gib: 2.5
+| \tmemory-gib: 0.125
+| 
+| ##
+| ## This config file format is SHCL.
+| ## "Simple Hierarchical Config Language"
+| ##    Format   3
+| ##    Home     https://github.com/yottacore/shcl
+| ##    Syntax   https://github.com/yottacore/shcl/blob/v3.0.0-beta1/project/spec.md
+| ##    Legal    SHCL is Copyright © 2026 Jim Collier [ID: 2უNაɘ«҂թȹɤξπ๙¿ձϖ]. License: MIT. No warranty.
+| ##
+> upgraded
+from 2 backup doc_backup_STAMP_format-v2.shcl
+| appearance:
+| \t# Theme, with a # and a \\ in the note
+| \tgtk-theme: Adwaita-dark
+| \ticon-theme: "café icons"
+| \tmode: dark
+| 
+| terminal:
+| \texec: \\\\\\\\server\\\\share\\\\term.exe
+| \t# Argument that terminal takes before a command
+| \texec-arg: '--title="a # b"'
+| 
+| list-view:
+| \trow-shading-color: "rgba(0, 0, 0, 0.1)"
+| 
+| preferences:
+| \tbulk-rename-tool: "C:\\\\Program Files\\\\Renamer\\\\r.exe --flag"
+| \tclick-policy: single
+| \tshow-hidden-files: true
+| \tmenu-config:
+| \t\tbackground-menu-compress: false
+| \tthumbnail-threads: -3
+| \tthumbnail-limit: 1000000
+| 
+| archive:
+| \tcreate-with-7z: tools\\\\7z.exe
+| \tcreate-with-rar: rar\\ta
+| \textract-with-7z: ""
+| \textract-with-rar: " lead and trail "
+| 
+| windows:
+| \tpath-separator: slash
+| \tassociations: "txt=notepad.exe %1", 'log=C:\\\\Tools\\\\view.exe "%1"', "md=typora, with comma"
+| 
+| search:
+| \tsearch-skip-folders: node_modules, "a, b", "", "x#y", "'q'"
+| 
+| plugins:
+| \tdisabled-extensions:
+| 
+| thumbnailers:
+| \tdisable: image/x-one
+| 
+| file-cache:
+| \tmax-size-gib: 2.5
+| \tmemory-gib: 0.125
+> files
+doc.shcl
+doc_backup_STAMP_format-v2.shcl
+ops.txt

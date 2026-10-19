@@ -1,0 +1,267 @@
+# Cobblevale Default Configuration
+# Per-user overrides: ~/.config/cobblevale/cobblevale_user.shcl (Linux)
+#                     %APPDATA%/cobblevale/cobblevale_user.shcl (Windows)
+#                     ~/Library/Application Support/cobblevale/cobblevale_user.shcl (macOS)
+
+world:
+	radius_scale: 1.0           # global size multiplier, 1.0 = literal real (Earth = 6371 km); lower to shrink all worlds for walkability
+	origin_rebasing: true       # shift the world origin onto the player so physics stays precise at real radii (makes a literal Earth walkable)
+	planet_radius: 1.0          # relative to Earth
+	gravity: 1.0                # relative to Earth
+	atmospheric_density: 1.0    # relative to Earth
+	vertical_exaggeration: 1.0
+	avg_temperature: 15.0       # Celsius
+	avg_humidity: 0.5           # 0.0 - 1.0
+	day_length: 1200.0          # seconds (20 minutes real time)
+	trial_all_flora: true       # trial: every world gets Earth's air, warmth and humidity, so every species grows somewhere; false restores the world's own values
+	atmosphere_style: earth     # which atmosphere.style block a world uses when nothing else names one
+
+	# Size presets on the New World screen, listed smallest first. radius_km is the body's real
+	# mean radius. Add your own by repeating the block in the per-user file; repeating a name
+	# already listed here retunes that one instead. At literal scale the small moons are the
+	# comfortably walkable worlds and the planets are vast.
+	# A block may also carry atmosphere_style, gravity, atmospheric_density, avg_temperature,
+	# avg_humidity and day_length. Anything left out falls back to the style, then to a guess from
+	# the radius. The New World sliders clamp what they show (gravity 0.1 - 3.0, temperature
+	# -40 - 50 C, day length 60 - 3600 s), so a real figure well outside that pins to the end of
+	# the track - deliberate, since a body at 0.0006 g or 464 C is not playable as itself.
+	planet: Deimos
+		radius_km: 6.2
+		atmosphere_style: airless
+	planet: Phobos
+		radius_km: 11.08
+		atmosphere_style: airless
+	planet: Amalthea
+		radius_km: 83.5
+		atmosphere_style: airless
+	planet: Phoebe
+		radius_km: 106.5
+		atmosphere_style: airless
+	planet: Mimas
+		radius_km: 198.2
+		atmosphere_style: airless
+	planet: Enceladus
+		radius_km: 252.1
+		atmosphere_style: airless
+	planet: Ceres
+		radius_km: 469.7
+		atmosphere_style: airless
+	planet: Pluto
+		radius_km: 1188.3
+		atmosphere_style: airless
+		gravity: 0.063
+	planet: Europa
+		radius_km: 1560.8
+		atmosphere_style: airless
+		gravity: 0.134
+	planet: Moon
+		radius_km: 1737.4
+		atmosphere_style: airless
+		gravity: 0.166
+		avg_temperature: -20.0
+	planet: Mercury
+		radius_km: 2439.7
+		atmosphere_style: airless
+		gravity: 0.38
+		avg_temperature: 50.0
+	planet: Titan
+		radius_km: 2574.7
+		atmosphere_style: titan
+		gravity: 0.138
+	planet: Earth
+		radius_km: 6371.0
+		atmosphere_style: earth
+		gravity: 1.0
+	planet: Jupiter
+		radius_km: 69911.0
+		atmosphere_style: jupiter
+		gravity: 2.53
+	default_planet: Phobos      # which preset the New World screen opens on
+	biomes:
+		prairie: true
+		mountain: true
+		snowy: true
+		forest: true
+		jungle: true
+		tropical: true
+		desert: true
+		ocean: true
+		urban: false
+		suburban: false
+
+player:
+	walk_speed: 400.0           # UE units/sec
+	sprint_speed: 800.0
+	crouch_speed: 150.0
+	jump_velocity: 600.0
+	double_jump_boost: 1.5      # multiplier on jump_velocity
+	fly_speed: 1200.0
+	swim_speed: 200.0            # jump swims up, crouch dives
+	swim_sprint_speed: 320.0
+	mouse_sensitivity: 1.0       # look speed multiplier
+	invert_look_y: false         # invert vertical mouse look
+	look_return_seconds: 1.0     # on foot, how long the camera takes to swing back behind once free look is let go; 0 snaps
+	fov: 90.0
+	view: third                 # first or third person; the view toggle key switches it and saves it here
+	units: imperial             # HUD readouts: imperial or metric (Settings)
+
+flight:
+	# Fly mode is a thruster-driven craft, not a constant-speed free cam. Forward is the main
+	# thruster and holds about 1 g; back is the retro at half that. Both cut out on their own
+	# once they have cancelled the motion they were fired against. Release the key and the craft
+	# holds the speed it had, spending on drag what it was spending on acceleration - free in
+	# vacuum, cheap in thin air, and the whole thrust budget once it is at its ceiling.
+	#
+	# The drag numbers put the sea-level ceiling just past Mach 1.2. Thin air lifts that a lot;
+	# in real vacuum only the relativistic term is left, and light speed stays out of reach.
+	physics: true               # false falls back to the old constant-speed fly mode
+	mass_kg: 6500.0
+	drag_coefficient: 0.10      # subsonic base; the transonic rise is applied on top
+	frontal_area_m2: 2.0
+	thrust_g: 1.0               # main thruster, in Earth g
+	retro_fraction: 0.5         # retro thruster, as a fraction of the main one
+	lateral_fraction: 0.5       # strafe and vertical thrusters
+	blip_fraction: 0.5          # a tap fires at this power
+	blip_seconds: 0.25          # ...for this long
+	tap_seconds: 0.25           # a press shorter than this counts as a tap
+	# The mouse moves the nose target and the craft turns its nose onto it. The thrusters turn it
+	# anywhere, and the control surfaces add their share with the air's push.
+	turn_rate_thrusters: 25.0   # deg/s on the thrusters alone
+	turn_build_thrusters: 1.0   # seconds to build that rate or stop it
+	turn_rate_air: 180.0        # deg/s at full push, from about 30 m/s in sea-level air
+	turn_build_air: 0.1
+	look_return_seconds: 0.0     # free look in flight: how long the view takes to come back onto the nose; 0 snaps
+
+input:
+	# Key bindings. Values are Unreal FKey names (e.g. W, SpaceBar, LeftShift,
+	# LeftControl, F, Up, Gamepad_FaceButton_Bottom). Rebind in-game via the
+	# Settings menu, which writes overrides to the per-user config file.
+	move_forward: W
+	move_back: S
+	move_left: A
+	move_right: D
+	jump: SpaceBar
+	sprint: LeftShift
+	crouch: LeftControl
+	fly_toggle: F
+	view_toggle: V
+	free_look: RightMouseButton  # hold to look around without steering
+
+graphics:
+	render_distance: 50000.0    # UE units
+	chunk_size: 25600.0         # UE units per terrain chunk side
+	chunk_resolution: 128       # vertices per chunk side
+	lod_distances: 10000, 25000, 50000
+	show_fps: true              # small FPS counter, top-right (toggle in Settings)
+
+display:
+	# Screen mode, resolution and profile are worked out from the machine on first launch, so they
+	# have no line here. These two are the defaults Settings puts back.
+	vsync: false
+	frame_rate_limit: 0         # fps, 0 = unlimited
+
+atmosphere:
+	# Look-dev knobs for the sky/fog/exposure stack, so tuning needs no recompile. Each still has a
+	# -cobblevale* command-line override for quick iteration (see CobblevaleAtmosphereBuilder).
+	sun_start_time: 0.363       # local day phase at the spawn site: 0=midnight, 0.25=sunrise, 0.5=noon (0.363 ~ 40 deg morning sun)
+	# fog_density: 0.005        # raw haze density, overriding the style's visible distance (-cobblevalefog=)
+	fog_max_opacity: 1.0        # haze opacity ceiling; under 1, far land never fades all the way into the sky (-cobblevalefogop=)
+	fog_start_distance: 120000.0 # units before radius scaling; pushed back on bigger worlds, then capped inside the visible distance (-cobblevalefogstart=)
+	volumetric_fog: false       # forward-scatters the low sun into a full-frame wash; god rays when on (-cobblevalevfog=)
+	exposure_ev: -3.0           # the exposure a daylit scene gets; higher = brighter. Metered around it (-cobblevaleexpo= holds it fixed)
+	exposure_key: 2.0           # the metered scene brightness that gets exposure_ev unchanged; darker opens up, brighter stops down
+	bloom_intensity: 0.7
+	ambient_occlusion: 0.6      # contact-shadow AO intensity, 0 to 1, on every performance profile
+	# visibility_km: 10.0       # force one visible distance on every world (-cobblevalevis=); off by default so each style keeps its own
+	underwater_visibility_m: 20.0 # how far you see under the sea; it also gets darker and bluer with depth
+
+	# How much each weather thickens the haze, against fair at 1. It divides the visible distance,
+	# so storm at 2.6 turns a 10 km day into under 4 km.
+	weather_haze:
+		clear: 0.55
+		fair: 1.0
+		cloudy: 1.3
+		overcast: 1.8
+		storm: 2.6
+		mist: 4.0
+
+	# Named kinds of air. A planet preset picks one with atmosphere_style; that also seeds the
+	# New World climate sliders, and each of those stays editable afterward. Colours are linear
+	# "r, g, b" - the sky pair is the gradient at full density (both fade to space as air thins),
+	# and the distance haze takes the horizon colour. visibility_km is how far you can see on an
+	# Earth-sized body; it tightens in proportion on anything bigger, and 0 turns the haze off.
+	style: earth
+		sky_zenith: 0.05, 0.22, 0.85
+		sky_horizon: 0.42, 0.60, 0.90
+		visibility_km: 10.0
+		atmospheric_density: 1.0
+		avg_temperature: 15.0
+		avg_humidity: 0.5
+	style: venus
+		# Oppressive heat under a thick sulphur haze. The real 92 bar and 464 C are far off the
+		# slider ends, so these are the playable end of that.
+		sky_zenith: 0.55, 0.40, 0.12
+		sky_horizon: 0.80, 0.62, 0.25
+		visibility_km: 1.5
+		atmospheric_density: 3.0
+		avg_temperature: 50.0
+		avg_humidity: 0.0
+	style: titan
+		# Venus-like colour, but cold and at roughly Earth pressure - which Titan really is.
+		sky_zenith: 0.35, 0.22, 0.08
+		sky_horizon: 0.62, 0.42, 0.16
+		visibility_km: 3.0
+		atmospheric_density: 1.45
+		avg_temperature: -40.0
+		avg_humidity: 0.3
+	style: jupiter
+		# Towering orange and tan cloud over solid ground, which no gas giant has - the point is
+		# the look, not the body.
+		sky_zenith: 0.42, 0.26, 0.14
+		sky_horizon: 0.75, 0.58, 0.40
+		visibility_km: 2.5
+		atmospheric_density: 3.0
+		avg_temperature: -40.0
+		avg_humidity: 0.6
+	style: airless
+		# No air, so no haze and no sky - the dome falls to the near-black floor on its own.
+		sky_zenith: 0.018, 0.022, 0.035
+		sky_horizon: 0.018, 0.022, 0.035
+		visibility_km: 0.0
+		atmospheric_density: 0.0
+		avg_temperature: -40.0
+		avg_humidity: 0.0
+
+start_scene:
+	# The live scene behind the start menu, built when the game starts with no world. It is picked on
+	# today's terrain, so a change to world generation moves the hill out from under it; launch with
+	# -cobblevalestartscenefind to list hills over mild green valleys on this seed's world.
+	live: true                  # false puts the start menu over plain dark, with nothing drawn behind it
+	seed: sunrise               # as typed on New world
+	planet: Earth               # a world.planet preset
+	latitude: 37.3241           # degrees, south negative
+	longitude: -71.9671         # degrees, west negative
+	time: 0.24                  # local day phase, 0.25 is about sunrise
+	weather: fair               # clear, fair, cloudy, overcast, storm or mist
+	camera_height_m: 2.0        # above the ground
+	camera_pitch_deg: -3.0      # negative looks down
+	view_from_sun_deg: -90.0    # the view's bearing turned from the sun's; positive puts the sun on the left
+	# The scene's own light, over what any world gets. Leave a row out and the world's value stands.
+	exposure_ev: -1.25          # held fixed, over atmosphere.exposure_ev, which is set for a higher sun
+	sun_kelvin: 2700            # the sun's color, in place of the one its height gives
+	sun_strength: 7.0           # times the usual sun for its height
+	sky_zenith: 0.06, 0.22, 0.90  # the sky's colors, in place of the air style's; the haze takes the horizon
+	sky_horizon: 1.0, 0.62, 0.42
+	sky_light: 0.5              # fill in the shade from the sky, 1 as in a world
+
+save:
+	autosave_interval: 60.0     # seconds
+
+##
+## This config file format is SHCL.
+## "Simple Hierarchical Config Language"
+##    Format   3
+##    Home     https://github.com/yottacore/shcl
+##    Syntax   https://github.com/yottacore/shcl/blob/v3.0.0-beta1/project/spec.md
+##    Legal    SHCL is Copyright © 2026 Jim Collier [ID: 2უNაɘ«҂թȹɤξπ๙¿ձϖ]. License: MIT. No warranty.
+##

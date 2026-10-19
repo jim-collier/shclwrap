@@ -47,7 +47,7 @@ Status: draft, 2026-10-15. Go, Rust, and C are built over shcl 3.0, with 2.0 bui
 
 - The quirks each version has, and that each program used to work around on its own, are handled in one place.
 
-- shcl 3.0 is the floor. The files programs wrote on 1.2 and 2.0 come forward through `Upgrade`, which is in every build.
+- shcl 3.0 is the floor. The files programs wrote on 1.2 and 2.0 come forward through the upgrade, which is in every build. `Open` does it in memory, and the first `Write` keeps the original.
 
 - The rest of shcl is still there, through `Inner()`.
 
@@ -73,7 +73,7 @@ Status: draft, 2026-10-15. Go, Rust, and C are built over shcl 3.0, with 2.0 bui
 
 - Building on shcl 1.2 or 2.0. A program on either moves to 3.0 when it moves onto the wrapper.
 
-- Hiding the file format change. A file written for a newer format than the bound shcl's is `ErrTooNew`, and `Upgrade` moves older files forward.
+- Hiding the file format change. A file written for a newer format than the bound shcl's is `ErrTooNew`. An older one is upgraded, and `UpgradedFrom` tells the program so.
 
 - Publishing to a package registry.
 
@@ -116,12 +116,14 @@ Go names are listed. Rust uses the same words in snake case, and `ShclDoc` has t
 | `New()`                   | An empty document.
 | `Parse(text)`             | Never fails. Problems are in `Diags()`.
 | `ParseWith(text, level)`  | `Loose`, `Standard`, or `Strict`. Only `Strict` fails, with `ErrStrict`.
-| `Open(path)`              | Reads and parses a file. A missing file is `ErrNotFound`, and a newer format is `ErrTooNew`.
+| `Open(path)`              | Reads and parses a file, and upgrades an older one in memory. A missing file is `ErrNotFound`, and a newer format is `ErrTooNew`.
 | `OpenWith(path, level)`   | `Open` at a strictness.
 | `d.Text()`                | The document as it would be saved.
 | `d.Canonical()`           | The document in canonical form.
-| `d.Write(path)`           | Saves `Text()` atomically.
+| `d.Write(path)`           | Saves `Text()` atomically. The first one over a file `Open` upgraded backs it up first.
 | `d.Rewrites()`            | Whether `Write` puts the canonical form in place of the lines the document was loaded from.
+| `d.UpgradedFrom()`        | The format `Open` upgraded the file from, or 0.
+| `d.BackupName()`          | Where the first `Write` over an upgraded file put the original, or empty.
 | `d.Diags()`, `d.Errors()` | The load's diagnostics, and how many are errors.
 | `d.Check(schema)`         | Validates against a schema document.
 | `schema.DropDeclared(ds)` | Drops the repeat hints for keys the schema says repeat.
@@ -131,6 +133,15 @@ Go names are listed. Rust uses the same words in snake case, and `ShclDoc` has t
 	- A `New` document has no lines to keep, and says false.
 	- On 3.0 it builds the save's text to find out, so it costs about what `Text` does.
 	- `InfoBlock` and `StampFormat` don't change it. They touch only the block and the Format line, and the rest of the save is what it was.
+
+- `Open` upgrades a file the way `Upgrade` does with `from` 0, adn nothing is written until a `Write`.
+	- A file with no Format line that loads clean on 3.0 is taken as current. One that loads with errors is taken as 2.x, upgraded when shcl 2.0 reads it clean, and `ErrRefused` with 2.0's errors when it doesn't. One that reads two ways is `ErrAmbiguous`. Either way the document is empty, as for `ErrTooNew`. In C the empty document's `shclw_diags` has 2.0's errors.
+	- A file whose Format line names 3 is current, errors and all, and skips the upgrade.
+	- Reads, `Lines`, `Diags`, and `Text` are all of the upgraded text, and the strictness applies to it.
+	- The first `Write` over the file backs up the original as `UpgradeFile` does, with the same name and `ErrBackupTaken`. Over the file means the path `Open` read, or the same file by another name. A `Write` anywhere else makes no backup, and later ones over the file make none either. A file that changed since `Open` read it is left alone with `ErrIO`.
+	- `Rewrites` is true until that first `Write`, since it replaces the original's lines.
+	- `Parse` never upgrades. Text has no file to back up, and `Upgrade` is there for it.
+	- A program whose files can't say they're older converts them ahead of time with `UpgradeFile(path, 2)`. To only read one, it passes `Upgrade(text, 2)`'s text to `Parse`.
 
 - C also has `shclw_compact`, for a program that edits a lot between saves. [Decisions](#decisions) says why.
 
@@ -202,7 +213,7 @@ Go names are listed. Rust uses the same words in snake case, and `ShclDoc` has t
 
 - `FormatOf(text)` is the format a file's `##    Format   N` line names, or 0.
 
-- `Upgrade(text, from)` and `UpgradeFile(path, from)` move a file to the bound shcl's format.
+- `Upgrade(text, from)` and `UpgradeFile(path, from)` move a file to the bound shcl's format. `Open` does the same in memory, as [Loading and saving](#loading-and-saving) says, and `UpgradeFile` is for converting ahead of time.
 	- With `from` 0 the Format line decides, and a file with none is taken as current. When it's left as it is, `From` is the bound format.
 	- `from` 2 says the file is known to be from shcl 2.x or older. The file can't say so itself, so only the program can.
 	- `UpgradeFile` copies the original beside it first, and `Backup` names the copy.
@@ -259,6 +270,7 @@ Each row has a test, either a shared case or an API test.
 | A put that doesn't read back the same    | Says ok.                                                    | Reads every put back. A mismatch is `NoReadBack`, with the edit left in place.
 | `PutSyntax` text with a trailing comment | Drops the comment and says ok.                              | `NoReadBack`, with the edit left in place.
 | Opening a newer format's file            | 3.0 reads it, with a hint.                                  | `ErrTooNew`. A Format line in a raw body doesn't count, as in 3.0.
+| Opening a 1.2 or 2.0 file                | 3.0 reads it by its own rules, with errors.                 | `Open` upgrades it in memory, and the first `Write` backs up the original.
 | Upgrading a 2.x file 2.0 had errors on   | 3.0 writes a clean file, with nothing lost and no error.    | Refuses with `ErrRefused` and leaves the file alone.
 | An old info block above the first field  | 3.0's `SetBanner` leaves it and adds a second block.        | `InfoBlock` takes it off.
 | A Format line without the block          | 3.0 has it only as part of `Migrate`.                       | `StampFormat`.
@@ -294,6 +306,9 @@ An ops script is one op per line, with fields split by tabs. `\t`, `\n`, `\r`, a
 | `check FILE [all\|drop]`                | the schema check, with the load's own diagnostics for `all`, and then dropped ones for `drop`
 | `format`, `upgrade [FROM]`              | the format number, or the upgrade's result and text
 | `write FILE`                            | `ok` and the saved file, or `error KIND`
+| `open FILE [loose\|standard\|strict]`   | `ok`, or `error KIND` and the error's diagnostics, and the document is reloaded
+| `upgraded`                              | `UpgradedFrom` and `BackupName`, then the backup's text
+| `files`                                 | the names in the folder
 
 - TYPE is `int`, `float`, `bool`, `str`, `strs`, `ints`, `floats`, or `raw`.
 
@@ -303,7 +318,7 @@ An ops script is one op per line, with fields split by tabs. `\t`, `\n`, `\r`, a
 
 - Floats print the same in every language: the shortest digits that read back exactly, positional from 1e-5 to 1e17, otherwise with an exponent. When 2 spellings of that length are equally close, the even one wins, as in Go.
 
-- `check` and `write` only work in the folder the driver is given, and refuse a name with a path in it.
+- `check`, `write`, `open`, and `files` only work in the folder the driver is given, and refuse a name with a path in it. A case's own files are in that folder, `doc.shcl` among them. The time in a backup's name prints as `STAMP`.
 
 ## Testing
 
@@ -315,6 +330,8 @@ An ops script is one op per line, with fields split by tabs. `\t`, `\n`, `\r`, a
 
 - `034-upgrade-1x-written` and `035-upgrade-2x-written` hold files the wrapper's 1.2 and 2.0 adapters wrote, kept from before those were dropped, so the upgrade is still tested on them.
 
+- `038` through `046` hold a real file each program wrote, named by its stand-in: a committed default, a sample config, or a fixture from its tests, with project names and anything personal taken out. Each case says what `Open` makes of it. Folderkite's is the output of its own test writer, built against 2.0.
+
 - `SHCLW_UPDATE=1 go test ./shclw/` writes the want files. A changed want file is reviewed in the diff like code.
 
 - Every feature and every fix gets a case, or a line in an existing one.
@@ -324,6 +341,7 @@ An ops script is one op per line, with fields split by tabs. `\t`, `\n`, `\r`, a
 ### Fuzzing
 
 - `cicd/fuzz.py` makes a document and an ops script from each seed, with a generator that knows each format's syntax. Half of the generated documents are in the 1.2 and 2.0 syntax, as old programs wrote them, so the upgrade sees them. A quarter of the documents are mutated copies of the case documents instead.
+	- Each driver gets the document as `doc.shcl` in its own folder. A quarter of the scripts `open` it first and end by saving over it twice, so an old one is upgraded in memory and backed up.
 
 - Each case runs through the Go, Rust, and C drivers on the same shcl version. Rust's and C's outputs must match Go's byte for byte, apart from the time 3.0 stamps on a line it comments out. None may crash, and a put that says ok must read back the same. A float read that says `Good` must not give infinity or NaN. A `first` or `last` read must not say `Multiple`, and has to be on the first or last line `lines` gave for that path. An edit that says ok must have found one instance at every step of its path that exists, counted just before it. The text right after an `info on` that says ok ends with the block naming the version's format, holds one block where the document had no block text in a raw body, and a second `info on` doesn't change it.
 
@@ -363,6 +381,18 @@ An ops script is one op per line, with fields split by tabs. `\t`, `\n`, `\r`, a
 - A put of infinity or NaN is refused with `BadValue` in every version, as 3.0 does. Writing one and then saying `NoReadBack` was the other choice, but it leaves a value in the file that no read takes.
 
 - An upgrade refuses a 2.x file that shcl 2.0 reports errors on, rather than count those lines in `Unsure`. A count is easy to skip over, and the upgraded file loads clean, so nothing would point at those lines again. It's the same answer shcl's own `migrate` gives a raw block that never closes.
+
+- `Open` upgrades an old file in memory, rather than leave it to the program to call `UpgradeFile` first. A program that only reads then never writes, and one that saves gets the backup on its first `Write` (2026101613005800).
+	- It upgrades as `Upgrade` with `from` 0 does, never 2. shcl says a program calling its upgrade on every start must not pass 2, since a 3.0 file that picks up an error would then be read by 2.x rules.
+	- So a 3.0 file with no Format line and an error is taken as 2.x, and is upgraded or refused. A program that writes its files with `StampFormat` or `InfoBlock` never has that happen.
+	- Reads, `Lines`, `Diags`, and `Text` are the upgraded text's, rather than the original's line numbers. shcl gives no line map, the upgraded text is what the save writes and the next `Open` reads, and the original's errors are why it was upgraded.
+	- `Parse` of text never upgrades. There's no file to back up, and `Upgrade` already takes text.
+	- `UpgradedFrom` and `BackupName` say what happened, rather than an `Upgraded` value on the document. Its text would be the document's own, and its count of unsure lines is from `UpgradeFile`, for a program that wants it ahead of time.
+	- `Rewrites` is true until the first `Write` over the file, since that one replaces every line the file had.
+	- The backup goes on the first `Write` over the file `Open` read, by path or the same file by another name, rather than on any `Write`. A copy saved somewhere else replaces nothing.
+	- It uses `UpgradeFile`'s backup and replace code, so a file that changed since `Open` read it is `ErrIO`, and the backup name and `ErrBackupTaken` are the same.
+	- An `Open` that's refused or ambiguous gives an empty document, as for `ErrTooNew`, rather than the original read by 3.0's rules. In C, 2.0's errors are that document's diagnostics, since C's error has no list.
+	- Rust's `write` takes `&mut self`, since it records the backup.
 
 - `UpgradeFile` on 3.0 does its own read, backup, and write with shcl's parts, rather than call shcl's `UpgradeFile`. shcl's reads the file again after the wrapper's 2.0 check, so an edit in between was converted with no check.
 

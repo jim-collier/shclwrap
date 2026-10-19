@@ -1,0 +1,41 @@
+> open	doc.shcl
+ok
+> upgraded
+from 2 backup none
+> rewrites
+true
+> get	floats	pos
+Good	4	3	1.0	2.0	3.0
+> get	int	seed
+Good	3	7
+> write	doc.shcl
+ok
+| name: Old
+| planet: moon
+| seed: 7
+| pos: [1, 2, 3]
+| yaw: 0.5
+| pitch: 0
+| fly: false
+| 
+| ##
+| ## This config file format is SHCL.
+| ## "Simple Hierarchical Config Language"
+| ##    Format   3
+| ##    Home     https://github.com/yottacore/shcl
+| ##    Syntax   https://github.com/yottacore/shcl/blob/v3.0.0-beta1/project/spec.md
+| ##    Legal    SHCL is Copyright © 2026 Jim Collier [ID: 2უNაɘ«҂թȹɤξπ๙¿ձϖ]. License: MIT. No warranty.
+| ##
+> upgraded
+from 2 backup doc_backup_STAMP_format-v2.shcl
+| name: Old
+| planet: moon
+| seed: 7
+| pos: 1, 2, 3
+| yaw: 0.5
+| pitch: 0
+| fly: false
+> files
+doc.shcl
+doc_backup_STAMP_format-v2.shcl
+ops.txt
