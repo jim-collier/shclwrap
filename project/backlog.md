@@ -104,7 +104,8 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- 20261019: Files the 1.2 and 2.0 adapters wrote were kept as 2 new shared cases before the adapters went. The fuzz now writes half its documents in the old syntax, and masks the time 3.0 stamps on a line it comments out, which had made one case differ by a second.
 		- 20261019: Left for part 2: test cases from real files each program wrote, and moving Tallowbase, Mossrealm, and Lenscart onto the wrapper at 3.0. Open upgrading an old file in memory isn't built yet either.
 	- Branch: floor3
-	- Test case: tests/cases/034-upgrade-1x-written and 035-upgrade-2x-written, from files the old adapters wrote. Every existing 3.0 case and API test still passes.
+	- Commit: 3754832, 326ccf9
+	- Test case: tests/cases/034-upgrade-1x-written and 035-upgrade-2x-written, from files the old adapters wrote. 034 fails when the upgrade skips a format 1 file. Every existing 3.0 case and API test still passes.
 	- Swept: Go, Rust, and C for the helpers only 1.2 and 2.0 used (the step-count edit check, the path splitter for `Each`, the 1.2 save, the 1.2 and 2.0 info block text, and the Format line reader), all removed. Comments, cicd, `c_cases.py`, `fuzz.py`, design.md, and README for 1.2 and 2.0 mentions.
 
 - Layered loading
