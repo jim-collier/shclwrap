@@ -24,11 +24,36 @@
 #include <stdlib.h>
 #include <string.h>
 
+// The file shclw_open upgraded, kept until the first shclw_write over it backs
+// it up. text is what the file held, and backup the copy's name once made.
+typedef struct {
+	int64_t from;
+	char *path;
+	shclw_i_file_id id;
+	char *text;
+	size_t len;
+	char *backup;
+} upgraded_file;
+
 struct shclw_doc {
 	shcl_doc *d;
 	shclw_i_info info;
 	bool stamp;
+	upgraded_file *up;
+	// shcl 2.0's errors on a file shclw_open refused, which Go and Rust put on
+	// the error.
+	shclw_diag *refused;
+	size_t n_refused;
 };
+
+static void free_upgraded(upgraded_file *up) {
+	if (up) {
+		free(up->path);
+		free(up->text);
+		free(up->backup);
+		free(up);
+	}
+}
 
 static shclw_status status_of(shcl_status s) {
 	switch (s) {
@@ -80,6 +105,9 @@ shclw_kind shclw_parse_with(const char *text, size_t len, shclw_strictness level
 	d->d = shcl_parse_keep_lines(text ? text : "", text ? len : 0, level_of(level));
 	d->info = SHCLW_I_INFO_AS_IS;
 	d->stamp = false;
+	d->up = NULL;
+	d->refused = NULL;
+	d->n_refused = 0;
 	if (!d->d) {
 		free(d);
 		return shclw_i_fail(err, SHCLW_ERR_NO_MEMORY, NULL, NULL, 0);
@@ -92,6 +120,9 @@ shclw_kind shclw_parse_with(const char *text, size_t len, shclw_strictness level
 	}
 	return shclw_i_ok(err);
 }
+
+static shclw_kind upgrade(const char *text, size_t len, int64_t from, const char *path, shclw_upgraded **out,
+                          shclw_error *err);
 
 shclw_kind shclw_open(const char *path, shclw_doc **doc, shclw_error *err) {
 	return shclw_open_with(path, SHCLW_STANDARD, doc, err);
@@ -108,13 +139,48 @@ shclw_kind shclw_open_with(const char *path, shclw_strictness level, shclw_doc *
 			kind = too_new(err, path, format);
 		}
 	}
+	// A file naming this format is current, so it skips the upgrade's parse.
+	shclw_upgraded *u = NULL;
+	if (kind == SHCLW_OK && shclw_format_of(text, len) != SHCLW_FORMAT_MAJOR) {
+		kind = upgrade(text, len, 0, path, &u, err);
+	}
 	if (kind != SHCLW_OK) {
 		free(text);
 		*doc = shclw_new();
+		if (*doc && u && u->n_diags) {
+			(*doc)->refused = shclw_i_copy_diags(u->diags, u->n_diags, &(*doc)->n_refused);
+		}
+		free(u);
 		return *doc ? kind : shclw_i_fail(err, SHCLW_ERR_NO_MEMORY, path, NULL, 0);
 	}
-	kind = shclw_parse_with(text, len, level, doc, NULL);
-	free(text);
+	upgraded_file *up = NULL;
+	if (u && u->changed) {
+		up = (upgraded_file *)malloc(sizeof *up);
+		char *name = shclw_i_dup(path, strlen(path), NULL);
+		if (!up || !name) {
+			free(up);
+			free(name);
+			free(u);
+			free(text);
+			return shclw_i_fail(err, SHCLW_ERR_NO_MEMORY, path, NULL, 0);
+		}
+		up->from = u->from;
+		up->path = name;
+		up->id = shclw_i_file_id_of(path);
+		up->text = text;
+		up->len = len;
+		up->backup = NULL;
+		kind = shclw_parse_with(u->text.p, u->text.n, level, doc, NULL);
+	} else {
+		kind = shclw_parse_with(text, len, level, doc, NULL);
+		free(text);
+	}
+	free(u);
+	if (*doc) {
+		(*doc)->up = up;
+	} else {
+		free_upgraded(up);
+	}
 	switch (kind) {
 	case SHCLW_OK: return shclw_i_ok(err);
 	case SHCLW_ERR_STRICT: {
@@ -129,8 +195,17 @@ shclw_kind shclw_open_with(const char *path, shclw_strictness level, shclw_doc *
 void shclw_free(shclw_doc *d) {
 	if (d) {
 		shcl_free(d->d);
+		free_upgraded(d->up);
+		free(d->refused);
 		free(d);
 	}
+}
+
+int64_t shclw_upgraded_from(shclw_doc *d) { return d->up ? d->up->from : 0; }
+
+char *shclw_backup_name(shclw_doc *d, size_t *len) {
+	const char *name = d->up && d->up->backup ? d->up->backup : "";
+	return shclw_i_dup(name, strlen(name), len);
 }
 
 shcl_doc *shclw_inner(shclw_doc *d) { return d->d; }
@@ -222,6 +297,9 @@ char *shclw_text(shclw_doc *d, size_t *len) {
 char *shclw_canonical(shclw_doc *d, size_t *len) { return finish(d, shcl_to_canonical(d->d), len); }
 
 bool shclw_rewrites(shclw_doc *d) {
+	if (d->up && !d->up->backup) {
+		return true;
+	}
 	int kept = 0;
 	(void)shcl_to_text_keep_lines(d->d, &kept);
 	shcl_reads_release(d->d);
@@ -250,6 +328,55 @@ shclw_kind shclw_info_block(shclw_doc *d, bool on, shclw_error *err) {
 
 shclw_kind shclw_stamp_format(shclw_doc *d, shclw_error *err) { return try_info(d, d->info, true, err); }
 
+typedef struct {
+	const char *path;
+	const char *text;
+	size_t len;
+	int64_t from;
+} replacing;
+
+static shclw_kind keep_original(void *ctx, char **name, shclw_error *err) {
+	const replacing *r = (const replacing *)ctx;
+	char *message = NULL;
+	shcl_write_status why = SHCL_WRITE_OK;
+	errno = 0;
+	shcl_upgrade_error ue = shcl_write_backup(r->path, r->text, r->len, (uint32_t)r->from, name, &message, &why);
+	int e = errno;
+	if (ue == SHCL_UPGRADE_OK) {
+		free(message);
+		return shclw_i_ok(err);
+	}
+	shclw_kind k = shclw_i_fail(err, ue == SHCL_UPGRADE_BACKUP_TAKEN ? SHCLW_ERR_BACKUP_TAKEN : SHCLW_ERR_IO, r->path,
+	                            message ? message : shcl_write_status_name(why), ue == SHCL_UPGRADE_IO ? e : 0);
+	free(message);
+	free(*name);
+	*name = NULL;
+	return k;
+}
+
+static shclw_kind write_new(void *ctx, const char *path, const char *data, size_t len, shclw_error *err) {
+	(void)ctx;
+	shcl_write_status why = SHCL_WRITE_OK;
+	errno = 0;
+	if (shcl_write_file_atomic(path, data, len, &why)) {
+		return shclw_i_ok(err);
+	}
+	return shclw_i_fail(err, SHCLW_ERR_IO, path, shcl_write_status_name(why), errno);
+}
+
+// shcl's atomic save, with a missing folder as SHCLW_ERR_NOT_FOUND.
+static shclw_kind save(void *ctx, const char *path, const char *data, size_t len, shclw_error *err) {
+	(void)ctx;
+	shcl_write_status why = SHCL_WRITE_OK;
+	errno = 0;
+	if (shcl_write_file_atomic(path, data, len, &why)) {
+		return shclw_i_ok(err);
+	}
+	int e = errno;
+	shclw_kind kind = why == SHCL_WRITE_NOT_FOUND ? SHCLW_ERR_NOT_FOUND : SHCLW_ERR_IO;
+	return shclw_i_fail(err, kind, path, shcl_write_status_name(why), e);
+}
+
 shclw_kind shclw_write(shclw_doc *d, const char *path, shclw_error *err) {
 	int kept = 0;
 	shcl_str s = shcl_to_text_keep_lines(d->d, &kept);
@@ -267,20 +394,28 @@ shclw_kind shclw_write(shclw_doc *d, const char *path, shclw_error *err) {
 	if (k != SHCLW_OK) {
 		return k;
 	}
-	shcl_write_status why = SHCL_WRITE_OK;
-	errno = 0;
-	int wrote = shcl_write_file_atomic(path, text, len, &why);
-	int e = errno;
+	upgraded_file *up = d->up;
+	if (up && !up->backup && shclw_i_same_file(path, up->path, up->id)) {
+		// The first save over a file shclw_open upgraded keeps the original.
+		replacing r = {path, up->text, up->len, up->from};
+		shclw_i_replacer how = {keep_original, save, &r};
+		k = shclw_i_replace_read(path, up->text, up->len, text, len, &how, &up->backup, err);
+		if (k == SHCLW_OK) {
+			free(up->text);
+			up->text = NULL;
+			up->len = 0;
+		}
+	} else {
+		k = save(NULL, path, text, len, err);
+	}
 	free(text);
-	if (wrote) {
+	if (k == SHCLW_OK) {
 		// A save is where a program is done with a round of edits, and what
 		// they replaced stays in shcl's write memory until this
 		// (2026101516110996).
 		shcl_compact(d->d);
-		return shclw_i_ok(err);
 	}
-	shclw_kind kind = why == SHCL_WRITE_NOT_FOUND ? SHCLW_ERR_NOT_FOUND : SHCLW_ERR_IO;
-	return shclw_i_fail(err, kind, path, shcl_write_status_name(why), e);
+	return k;
 }
 
 static shclw_diag diag_of(size_t line, shcl_severity sev, const char *code, shcl_str msg) {
@@ -291,6 +426,9 @@ static shclw_diag diag_of(size_t line, shcl_severity sev, const char *code, shcl
 
 shclw_diag *shclw_diags(shclw_doc *d, size_t *n) {
 	*n = 0;
+	if (d->refused) {
+		return shclw_i_copy_diags(d->refused, d->n_refused, n);
+	}
 	size_t count = shcl_diag_count(d->d);
 	shclw_diag *views =
 		count < SIZE_MAX / sizeof(shclw_diag) ? (shclw_diag *)shclw_i_alloc(count * sizeof(shclw_diag)) : NULL;
@@ -306,7 +444,7 @@ shclw_diag *shclw_diags(shclw_doc *d, size_t *n) {
 	return out;
 }
 
-size_t shclw_errors(shclw_doc *d) { return shcl_error_count(d->d); }
+size_t shclw_errors(shclw_doc *d) { return d->refused ? d->n_refused : shcl_error_count(d->d); }
 
 shclw_diag *shclw_check(shclw_doc *d, shclw_doc *schema, size_t *n) {
 	*n = 0;
@@ -803,42 +941,6 @@ static shclw_kind upgrade(const char *text, size_t len, int64_t from, const char
 
 shclw_kind shclw_upgrade(const char *text, size_t len, int64_t from, shclw_upgraded **out, shclw_error *err) {
 	return upgrade(text, len, from, NULL, out, err);
-}
-
-typedef struct {
-	const char *path;
-	const char *text;
-	size_t len;
-	int64_t from;
-} replacing;
-
-static shclw_kind keep_original(void *ctx, char **name, shclw_error *err) {
-	const replacing *r = (const replacing *)ctx;
-	char *message = NULL;
-	shcl_write_status why = SHCL_WRITE_OK;
-	errno = 0;
-	shcl_upgrade_error ue = shcl_write_backup(r->path, r->text, r->len, (uint32_t)r->from, name, &message, &why);
-	int e = errno;
-	if (ue == SHCL_UPGRADE_OK) {
-		free(message);
-		return shclw_i_ok(err);
-	}
-	shclw_kind k = shclw_i_fail(err, ue == SHCL_UPGRADE_BACKUP_TAKEN ? SHCLW_ERR_BACKUP_TAKEN : SHCLW_ERR_IO, r->path,
-	                            message ? message : shcl_write_status_name(why), ue == SHCL_UPGRADE_IO ? e : 0);
-	free(message);
-	free(*name);
-	*name = NULL;
-	return k;
-}
-
-static shclw_kind write_new(void *ctx, const char *path, const char *data, size_t len, shclw_error *err) {
-	(void)ctx;
-	shcl_write_status why = SHCL_WRITE_OK;
-	errno = 0;
-	if (shcl_write_file_atomic(path, data, len, &why)) {
-		return shclw_i_ok(err);
-	}
-	return shclw_i_fail(err, SHCLW_ERR_IO, path, shcl_write_status_name(why), errno);
 }
 
 // The result of a file upgrade that wrote nothing: only the format, and 2.0's

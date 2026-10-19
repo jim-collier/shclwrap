@@ -179,10 +179,22 @@ shclw_doc *shclw_parse(const char *text, size_t len);
 // Fails only at SHCLW_STRICT, with SHCLW_ERR_STRICT. *doc is set either way.
 shclw_kind shclw_parse_with(const char *text, size_t len, shclw_strictness level, shclw_doc **doc, shclw_error *err);
 // Reads and parses a file. A missing file is SHCLW_ERR_NOT_FOUND, and one
-// written for a newer format SHCLW_ERR_TOO_NEW. On a failure *doc is an empty
-// document, so reads give their fallbacks. Free it either way.
+// written for a newer format SHCLW_ERR_TOO_NEW. An older file is upgraded in
+// memory, as shclw_upgrade with from 0 does, and shclw_upgraded_from says so.
+// Nothing is written until shclw_write, and the first save over the file
+// backs it up. A file that reads two ways is SHCLW_ERR_AMBIGUOUS, and one shcl
+// 2.0 reports errors on SHCLW_ERR_REFUSED, with those errors in the empty
+// document's shclw_diags. On a failure *doc is an empty document, so reads
+// give their fallbacks. Free it either way.
 shclw_kind shclw_open(const char *path, shclw_doc **doc, shclw_error *err);
+// level applies to the upgraded text.
 shclw_kind shclw_open_with(const char *path, shclw_strictness level, shclw_doc **doc, shclw_error *err);
+// The format shclw_open upgraded the file from, or 0 when it didn't upgrade
+// it. Reads, lines, diagnostics, and the text are all of the upgraded text.
+int64_t shclw_upgraded_from(shclw_doc *d);
+// Where the first shclw_write over an upgraded file put the original, or ""
+// before then. Caller frees. NULL only when memory ran out.
+char *shclw_backup_name(shclw_doc *d, size_t *len);
 void shclw_free(shclw_doc *d);
 
 // The document as it would be saved. Caller frees.
@@ -193,7 +205,9 @@ char *shclw_canonical(shclw_doc *d, size_t *len);
 // lines the load couldn't use. It writes nothing when the info block or the
 // Format line can't go in, since an edit made after shclw_info_block or
 // shclw_stamp_format. After a good save it gives back the memory earlier
-// edits left behind.
+// edits left behind. The first save over a file shclw_open upgraded backs up
+// the original first, as shclw_upgrade_file does, and leaves a file that
+// changed since it was read alone with SHCLW_ERR_IO.
 shclw_kind shclw_write(shclw_doc *d, const char *path, shclw_error *err);
 // Gives back what earlier edits left behind, as a good shclw_write does, for a
 // program that edits a lot between saves. C only, since Go and Rust free it
@@ -203,7 +217,8 @@ void shclw_compact(shclw_doc *d);
 // Whether shclw_write puts the canonical form in place of the lines the
 // document was loaded from. 3.0 does that when it can't keep them with the
 // edits in, such as after a child is added under a flat dotted line, and
-// comments can move. It builds the save's text to find out.
+// comments can move. It builds the save's text to find out. A file shclw_open
+// upgraded is rewritten until the first save over it.
 bool shclw_rewrites(shclw_doc *d);
 
 // The load's diagnostics. Caller frees the block. NULL only when memory ran out.

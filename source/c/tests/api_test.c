@@ -248,7 +248,10 @@ static void test_errors(void) {
 	}
 	free(ds);
 	shclw_free(d);
-	put_file("strict.shcl", bad, sizeof bad - 1);
+	// Open now takes an unstamped file with an error as 2.x, and 2.0 refuses this one.
+	// put_file("strict.shcl", bad, sizeof bad - 1);
+	const char bad_stamped[] = "a: 1\n1x y: 2\n##    Format   3\n";
+	put_file("strict.shcl", bad_stamped, sizeof bad_stamped - 1);
 	CHECK(shclw_open_with(in_scratch("strict.shcl"), SHCLW_STRICT, &d, &err) == SHCLW_ERR_STRICT);
 	CHECK(strstr(err.msg, "strict.shcl") != NULL);
 	shclw_free(d);
@@ -1055,6 +1058,101 @@ static void test_upgrade_file(void) {
 	drop_dir(dir);
 }
 
+// shclw_open upgrades a 2.x file in memory and writes nothing. The first save
+// over it, by any name for the same file, backs up the original, and later
+// ones don't. A file 2.0 reports errors on is refused with 2.0's errors in the
+// empty document's diagnostics.
+static void test_open_upgrade(void) {
+	char dir[4200], path[8192], other[8300];
+	make_dir(dir, sizeof dir, "open");
+	path_in(path, sizeof path, dir, "c.shcl");
+	write_mode(path, clean2x, 0600);
+	shclw_doc *d = NULL;
+	shclw_error err;
+	CHECK(shclw_open(path, &d, &err) == SHCLW_OK);
+	CHECK(shclw_upgraded_from(d) == 2 && shclw_rewrites(d));
+	size_t n = 0;
+	char *name = shclw_backup_name(d, &n);
+	CHECK(name && n == 0 && name[0] == '\0');
+	free(name);
+	shclw_got_strs tags = shclw_get_strs(d, "tags");
+	CHECK(tags.status == SHCLW_GOOD && tags.n == 2);
+	free(tags.value);
+	CHECK(file_is(path, clean2x) && count_dir(dir) == 1);
+
+	path_in(other, sizeof other, dir, "./c.shcl");
+	CHECK(shclw_write(d, other, &err) == SHCLW_OK);
+	name = shclw_backup_name(d, &n);
+	CHECK(name && n > strlen(dir) && !strncmp(name, dir, strlen(dir)) && name[strlen(dir)] == '/');
+	CHECK(name && file_is(name, clean2x) && mode_of(name) == 0600);
+	char *saved = NULL;
+	size_t len = 0;
+	CHECK(shclw_read_text(path, &saved, &len, NULL) == SHCLW_OK);
+	CHECK(saved && !strncmp(saved, clean2to, strlen(clean2to)) && shclw_format_of(saved, len) == 3);
+	free(saved);
+	CHECK(!shclw_rewrites(d));
+	CHECK(shclw_put_int(d, "n", 1, NULL) == SHCLW_OK);
+	CHECK(shclw_write(d, path, &err) == SHCLW_OK && count_dir(dir) == 2);
+	char *again = shclw_backup_name(d, NULL);
+	CHECK(again && name && !strcmp(again, name));
+	free(again);
+	free(name);
+	shclw_free(d);
+	CHECK(shclw_open(path, &d, NULL) == SHCLW_OK && shclw_upgraded_from(d) == 0 && shclw_int(d, "n", 0) == 1);
+	shclw_free(d);
+
+	// A file that changed since the open read it is left alone.
+	drop_dir(dir);
+	make_dir(dir, sizeof dir, "open");
+	write_mode(path, clean2x, 0644);
+	CHECK(shclw_open(path, &d, NULL) == SHCLW_OK);
+	write_mode(path, "tags: x, y\n", 0644);
+	CHECK(shclw_write(d, path, &err) == SHCLW_ERR_IO && file_is(path, "tags: x, y\n") && count_dir(dir) == 1);
+	name = shclw_backup_name(d, NULL);
+	CHECK(name && name[0] == '\0');
+	free(name);
+	shclw_free(d);
+
+	// 2.0 reports errors on this one too.
+	static const char raw[] = "a: 1\nb: ```\nraw line\nc: 2\n";
+	write_mode(path, raw, 0644);
+	CHECK(shclw_open(path, &d, &err) == SHCLW_ERR_REFUSED && strstr(err.msg, "c.shcl"));
+	shclw_diag *ds = shclw_diags(d, &n);
+	CHECK(ds && n == 1 && ds[0].line == 2 && shclw_errors(d) == 1 && shclw_int(d, "a", 7) == 7);
+	free(ds);
+	shclw_free(d);
+	CHECK(file_is(path, raw) && count_dir(dir) == 1);
+	drop_dir(dir);
+
+	// Something already at the backup's name is never written over. Go again
+	// on a tick of the clock.
+	make_dir(dir, sizeof dir, "open-taken");
+	path_in(path, sizeof path, dir, "c.shcl");
+	bool tried = false;
+	for (int i = 0; i < 3 && !tried; i++) {
+		write_mode(path, clean2x, 0644);
+		CHECK(shclw_open(path, &d, NULL) == SHCLW_OK);
+		char *taken = shcl_backup_file_name(path, 2);
+		write_mode(taken, "mine\n", 0644);
+		shclw_kind k = shclw_write(d, path, NULL);
+		char *after = shcl_backup_file_name(path, 2);
+		if (!strcmp(taken, after)) {
+			tried = true;
+			CHECK(k == SHCLW_ERR_BACKUP_TAKEN && file_is(path, clean2x) && file_is(taken, "mine\n"));
+			char *none = shclw_backup_name(d, NULL);
+			CHECK(count_dir(dir) == 2 && shclw_upgraded_from(d) == 2 && none && none[0] == '\0');
+			free(none);
+		}
+		shclw_free(d);
+		free(taken);
+		free(after);
+		drop_dir(dir);
+		make_dir(dir, sizeof dir, "open-taken");
+	}
+	CHECK(tried);
+	drop_dir(dir);
+}
+
 // An edit made while the upgrade runs must not get past the 2.0 check. The
 // file flips between a clean 2.x text and one 2.0 has errors on, so a backup
 // holding the bad text means that text was converted unchecked.
@@ -1208,6 +1306,7 @@ int main(void) {
 	test_upgrade();
 	test_upgrade_file();
 	test_upgrade_raced();
+	test_open_upgrade();
 	test_info();
 	test_rewrites();
 	test_check();

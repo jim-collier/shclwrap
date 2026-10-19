@@ -186,6 +186,11 @@ def gen_case(seed: int, corpus: list[str]) -> Case:
 		doc, stray = gen_doc(rng, rng.choice(FORMATS))
 	case = Case(seed=seed, version=version, doc=doc, script="", stray_titles=stray)
 	ops: list[str] = []
+	# A quarter work on what Open made of the file, which an old one upgrades,
+	# and end with 2 saves over it: the first backs it up, the second doesn't.
+	opened = rng.random() < 0.25
+	if opened:
+		ops.append("open\tdoc.shcl")
 	for _ in range(rng.randrange(3, 20)):
 		roll = rng.random()
 		if roll < 0.05:
@@ -238,9 +243,17 @@ def gen_case(seed: int, corpus: list[str]) -> Case:
 						f"upgrade\t{rng.choice(('', '2', '3'))}",
 						f"parse\t{rng.choice(('loose', 'standard', 'strict'))}",
 						"write\tout.shcl",
+						# The driver's folder has the document as doc.shcl, so
+						# an old one gets upgraded and backed up.
+						f"open\tdoc.shcl{rng.choice(('', chr(9) + 'strict'))}",
+						"upgraded",
+						"write\tdoc.shcl",
+						"files",
 					)
 				)
 			)
+	if opened:
+		ops += ["upgraded", "rewrites", "write\tdoc.shcl", "upgraded", "write\tdoc.shcl", "files"]
 	case.script = "\n".join(ops) + "\n"
 	return case
 
@@ -415,6 +428,7 @@ def run_driver(cmd: list[str], version: int, doc: Path, work: Path, script: str)
 	if work.exists():
 		shutil.rmtree(work)
 	work.mkdir(parents=True)
+	shutil.copyfile(doc, work / "doc.shcl")
 	try:
 		p = subprocess.run(
 			[*cmd, str(version), str(doc), str(work)], input=script.encode(), capture_output=True, timeout=30
