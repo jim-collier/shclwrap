@@ -935,12 +935,14 @@ static char *v2_escapes(const char *s, size_t n, size_t *len) {
 		return NULL;
 	}
 	size_t o = 0;
-	for (size_t i = 0; i < n; i++) {
+	size_t i = 0;
+	while (i < n) {
 		if (s[i] != '\\' || i + 1 == n) {
-			out[o++] = s[i];
+			out[o++] = s[i++];
 			continue;
 		}
-		char e = s[++i];
+		char e = s[i + 1];
+		i += 2;
 		switch (e) {
 		case 't': out[o++] = '\t'; break;
 		case 'n': out[o++] = '\n'; break;
@@ -1034,6 +1036,7 @@ static shclw_kind carry_reads(shclw_i_v2_doc *old, const char *up, size_t up_len
 			keep_old(bad, shclw_i_v2_line(old, path.p, path.n), "W002", bad_name, sizeof bad_name - 1);
 			continue;
 		}
+		// a raw body is left as typed
 		if (shcl_read_raw(d, path.p, path.n).status == SHCL_GOOD) {
 			continue;
 		}
@@ -1069,6 +1072,7 @@ static shclw_kind carry_reads(shclw_i_v2_doc *old, const char *up, size_t up_len
 			free_carried(&c);
 			break;
 		}
+		// a scalar goes back as a scalar, not a 1-element array
 		shcl_read_str s = shcl_read_string(d, path.p, path.n);
 		bool scalar = a.n == 1 && s.status == SHCL_GOOD && s.value.n == a.values[0].n &&
 		              (s.value.n == 0 || memcmp(s.value.p, a.values[0].p, s.value.n) == 0);
@@ -1082,6 +1086,7 @@ static shclw_kind carry_reads(shclw_i_v2_doc *old, const char *up, size_t up_len
 		}
 		sets[n_sets++] = c;
 	}
+	// Parse what's written again, so the checks see what the next Open will.
 	shcl_doc *now = NULL;
 	if (!oom && n_sets) {
 		shcl_str t = shcl_to_text_keep_lines(d, NULL);
@@ -1099,6 +1104,7 @@ static shclw_kind carry_reads(shclw_i_v2_doc *old, const char *up, size_t up_len
 			         sizeof not_as_read - 1);
 		}
 	}
+	// and every value 2.0 reads, set or not
 	if (!oom) {
 		carry_check c = {now, bad, {NULL, 0, SHCL_NOT_FOUND, NULL}, false};
 		shclw_i_v2_reads(old, check_old, &c);

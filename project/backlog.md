@@ -25,6 +25,25 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 
 ## Issues
 
+- The full run's CodeQL step can't make its cache dir, since the C checks run as the caller
+	- ID: 2026101914200000
+	- Type: Bug
+	- Status: Waiting for testing
+	- Needs local test suite run?: The full `cicd/cicd.bash`, with the leak checks.
+	- Severity: High
+	- Opened: 20261019-142000
+	- Opened by: JC
+	- Steps to reproduce:
+		- `cicd/cicd.bash -y`, the full run.
+	- Incorrect behavior: The C leak checks stop at CodeQL's first query with `Could not create cache dir /.codeql/compile-cache`, and the run aborts with exit 2.
+	- Expected behavior: The leak checks run through.
+	- Reproduced: 20261019, on dev at `6e1fe94`.
+	- Origin: `dbc9f62` (2026-10-17) runs the C container as the caller's uid, which has no home there, so `HOME` is `/`. The last CodeQL report is from an hour before it.
+	- Actual fix: The container gets a `HOME` of its own, `cicd/cache/c-home`, kept between runs. CodeQL's compiled queries stay there too, which saves about 40 minutes on each full run after the first.
+	- Branch: oldmark
+	- Test case: None. The full run is the test, and it failed before the fix.
+	- Swept: `c-checks.bash` is the only `docker run` in cicd.
+
 - Updates to CICD script flags
 	- ID: 2026101816214270
 	- Type: Enhancement
