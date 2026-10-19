@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 ## Purpose: Fuzzes the wrappers against each other. Each case is a document
-##	plus an ops script, made from one seed, run through the Go and Rust
-##	drivers with the same shcl version. The outputs must match byte for
-##	byte, and a value that was put must read back the same.
+##	plus an ops script, made from one seed, run through the Go, Rust, and
+##	C drivers with the same shcl version. The outputs must match Go's byte
+##	for byte, and a value that was put must read back the same.
 ## Copyright © 2026 Jim Collier [ID: 2უNაɘ«҂թȹɤξπ๙¿ձϖ]
 ## SPDX-License-Identifier: MIT
 
@@ -411,14 +411,14 @@ def run_driver(cmd: list[str], version: int, doc: Path, work: Path, script: str)
 	return p.returncode, p.stdout.decode(errors="replace"), p.stderr.decode(errors="replace")
 
 
-def save_failure(out: Path, case: Case, why: str, go: tuple[int, str, str], rust: tuple[int, str, str]) -> None:
+def save_failure(out: Path, case: Case, why: str, runs: dict[str, tuple[int, str, str]]) -> None:
 	d = out / f"seed-{case.seed}"
 	d.mkdir(parents=True, exist_ok=True)
 	(d / "doc.shcl").write_text(case.doc)
 	(d / "ops.txt").write_text(case.script)
 	(d / "why.txt").write_text(f"version {case.version}\n{why}\n")
-	(d / "go.out").write_text(f"exit {go[0]}\n{go[2]}\n---\n{go[1]}")
-	(d / "rust.out").write_text(f"exit {rust[0]}\n{rust[2]}\n---\n{rust[1]}")
+	for name, (code, stdout, stderr) in runs.items():
+		(d / f"{name}.out").write_text(f"exit {code}\n{stderr}\n---\n{stdout}")
 
 
 def load_corpus(cases_dir: Path) -> list[str]:
@@ -429,6 +429,7 @@ def main() -> int:
 	ap = argparse.ArgumentParser(description=__doc__)
 	ap.add_argument("--go", required=True, help="Go driver binary")
 	ap.add_argument("--rust", required=True, help="Rust driver binary")
+	ap.add_argument("--c", default=None, help="C driver binary, with {v} where its shcl version goes")
 	ap.add_argument("--seconds", type=float, default=30.0, help="wall-clock budget")
 	ap.add_argument("--seed", type=int, default=None, help="first seed; default is from the clock")
 	ap.add_argument("--count", type=int, default=0, help="stop after this many cases; 0 is no limit")
@@ -436,6 +437,10 @@ def main() -> int:
 	ap.add_argument("--work", type=Path, required=True, help="scratch dir this run owns")
 	ap.add_argument("--out", type=Path, required=True, help="where failing cases go")
 	args = ap.parse_args()
+	# C is built once per version, so its path has the version in it.
+	drivers = {"go": args.go, "rust": args.rust}
+	if args.c:
+		drivers["c"] = args.c
 
 	first = args.seed if args.seed is not None else int(time.time())
 	corpus = load_corpus(args.cases)
@@ -449,16 +454,22 @@ def main() -> int:
 		while time.monotonic() < deadline and (args.count == 0 or ran < args.count):
 			case = gen_case(seed, corpus)
 			doc_path.write_text(case.doc)
-			go = run_driver([args.go], case.version, doc_path, args.work / "go", case.script)
-			rust = run_driver([args.rust], case.version, doc_path, args.work / "rust", case.script)
+			runs = {
+				name: run_driver(
+					[cmd.replace("{v}", str(case.version))], case.version, doc_path, args.work / name, case.script
+				)
+				for name, cmd in drivers.items()
+			}
+			go = runs["go"]
 			problems = []
-			if go[0] != rust[0]:
-				problems.append(f"exit codes differ: go {go[0]}, rust {rust[0]}")
-			if go[0] not in (0, 2) or rust[0] not in (0, 2):
-				problems.append("a driver crashed")
-			if go[1] != rust[1]:
-				problems.append("outputs differ")
-			elif go[0] == 0:
+			for name, run in runs.items():
+				if run[0] not in (0, 2):
+					problems.append(f"{name} crashed with exit {run[0]}")
+				if name != "go" and run[0] != go[0]:
+					problems.append(f"exit codes differ: go {go[0]}, {name} {run[0]}")
+				if name != "go" and run[1] != go[1]:
+					problems.append(f"{name} output differs from go")
+			if not problems and go[0] == 0:
 				problems += check_roundtrips(case, go[1])
 				problems += check_edits(case, go[1])
 				problems += check_finite(go[1])
@@ -470,20 +481,23 @@ def main() -> int:
 					good_gets += line.startswith("Good\t")
 			if problems:
 				failures += 1
-				save_failure(args.out, case, "\n".join(problems), go, rust)
+				save_failure(args.out, case, "\n".join(problems), runs)
 				print(f"FAIL seed {seed} (shcl v{case.version}): {problems[0]}", file=sys.stderr)
 			ran += 1
 			seed += 1
 	finally:
 		# Only what this run made. --out may sit inside --work, so the folder goes only if empty.
 		doc_path.unlink(missing_ok=True)
-		for sub in ("go", "rust"):
+		for sub in drivers:
 			shutil.rmtree(args.work / sub, ignore_errors=True)
 		if made_work:
 			with contextlib.suppress(OSError):
 				args.work.rmdir()
 
-	print(f"fuzz: {ran} cases from seed {first}, {failures} failed, {good_gets} of {gets} reads found a value")
+	print(
+		f"fuzz: {ran} cases from seed {first} through {', '.join(drivers)}, {failures} failed,"
+		f" {good_gets} of {gets} reads found a value"
+	)
 	if ran == 0:
 		print("fuzz: no cases ran", file=sys.stderr)
 		return 1

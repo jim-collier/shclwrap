@@ -119,7 +119,7 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 - C wrapper
 	- ID: 2026101512024159
 	- Type: Feature
-	- Status: Queued
+	- Status: Done
 	- Priority: High
 	- Opened: 2026-10-15
 	- Opened by: JC
@@ -134,11 +134,14 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- 20261015: split into 5 parts, each its own item below. This closes when they do.
 		- 20261016: core, read memory, walking and writes, and string lengths are Done. Format and upgrade, and 1.2 and 2.0, wait on signoff. Fuzzing is next.
 		- 20261017: format and upgrade, and 1.2 and 2.0, are Done. Fuzzing is what's left.
+		- 20261019: fuzzing is Done, so this closes.
+	- Closed: 20261019-073500
+	- Acceptance signoff: Self-closed: all 5 parts are Done.
 
 - C: fuzz against Go
 	- ID: 2026101516111107
 	- Type: Feature
-	- Status: Queued
+	- Status: Done
 	- Priority: High
 	- Opened: 20261015-161111
 	- Opened by: JC
@@ -146,6 +149,15 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Prereq IDs: 2026101516111070
 	- Requirements:
 		- fuzz.py runs the C driver beside Go and Rust, on every version.
+	- Notes:
+		- The fuzz stage runs in the C container, where the C drivers are built. Go's and Rust's drivers run there too.
+		- C uses the sanitized driver, so a leak or bad memory access fails the case. `--quick` uses the plain one, since it skips the sanitized build.
+		- Without the pinned C headers, as under `--quick` with an empty cache, it fuzzes Go against Rust alone.
+	- Verified: 1,030 cases in 30s, none failed. A count capped at 1 on 2.0 failed 12 of 558 cases, and a leak in 3.0's `has` failed 26. `--quick` and a full run pass.
+	- Branch: c-fuzz
+	- Test case: the fuzz stage of `cicd/cicd.bash`.
+	- Closed: 20261019-073500
+	- Acceptance signoff: Self-closed: built as asked, and watched to fail on 2 planted faults.
 
 - Layered loading
 	- ID: 2026101512024156

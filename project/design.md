@@ -330,9 +330,11 @@ An ops script is one op per line, with fields split by tabs. `\t`, `\n`, `\r`, a
 
 - `cicd/fuzz.py` makes a document and an ops script from each seed, with a generator that knows each format's syntax. A quarter of the documents are mutated copies of the case documents instead.
 
-- Each case runs through the Go and Rust drivers on the same shcl version. The outputs must match byte for byte, neither may crash, and a put that says ok must read back the same. A float read that says `Good` must not give infinity or NaN. A `first` or `last` read must not say `Multiple`, and has to be on the first or last line `lines` gave for that path. An edit that says ok must have found one instance at every step of its path that exists, counted just before it. The text right after an `info on` that says ok ends with the block naming the version's format, holds one block where the document had no block text in a raw body, and a second `info on` doesn't change it.
+- Each case runs through the Go, Rust, and C drivers on the same shcl version. Rust's and C's outputs must match Go's byte for byte, none may crash, and a put that says ok must read back the same. A float read that says `Good` must not give infinity or NaN. A `first` or `last` read must not say `Multiple`, and has to be on the first or last line `lines` gave for that path. An edit that says ok must have found one instance at every step of its path that exists, counted just before it. The text right after an `info on` that says ok ends with the block naming the version's format, holds one block where the document had no block text in a raw body, and a second `info on` doesn't change it.
 
-- It runs for a wall-clock budget, and a failing seed is saved with its document, script, and both outputs. If too few reads find a value, the run fails, since a generator that stopped making readable documents would pass forever.
+- It runs for a wall-clock budget, and a failing seed is saved with its document, script, and each driver's output. If too few reads find a value, the run fails, since a generator that stopped making readable documents would pass forever.
+
+- C's driver is the sanitized build, so a leak or a bad read fails the case. The fuzz runs in the C container, where the C drivers are built. Without the pinned C headers it fuzzes Go against Rust alone.
 
 - Go's own fuzzer runs `Run` on random documents and scripts against every version, looking for panics.
 
