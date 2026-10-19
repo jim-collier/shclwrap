@@ -49,35 +49,6 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Branch: ci-flags
 	- Test case: None. Each flag mix was checked by hand, plus `--quick` with a header missing from the cache.
 
-- shcl 4 adapters
-	- ID: 2026101512024163
-	- Type: Feature
-	- Status: Stalled
-	- Priority: High
-	- Opened: 2026-10-15
-	- Opened by: JC
-	- Prereq IDs: shcl 4 in each language. It's planned Rust first, then C, then Go and Python.
-	- Requirements:
-		- The same API, over shcl 4.
-	- Notes:
-		- 4 keeps every line as typed, so Text and Write get simpler. Its read-back check in setters can replace the wrapper's.
-	- Progress log:
-		- 20261015: shcl 4 isn't built in any language yet, only planned in its v4 doc. This waits on it.
-
-- Move the 3.0 pin to the first 3.0 beta
-	- ID: 2026101512024165
-	- Type: Task
-	- Status: Stalled
-	- Priority: Avg
-	- Opened: 2026-10-15
-	- Opened by: JC
-	- Requirements:
-		- Pin `v3.0.0-beta1` once it's tagged, in place of a dev commit.
-	- Notes:
-		- The tag is spelled with no dot, per shcl's own backlog.
-		- shcl's Go module path is still `.../v2`, and Go won't take a v3 tag on it. Go stays on a commit until that changes.
-		- Quillroute plans to have its release refuse a commit pin. The same check would fit here.
-
 - Make shcl 3.0 the floor
 	- ID: 2026101613005800
 	- Type: Feature
@@ -116,6 +87,35 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- Part 2: tests/cases/036-open-upgrade and 037-open-refused, the real files in 038 to 046, and the Open tests in Go's files_test.go, Rust's tests/files.rs, and C's test_open_upgrade. They fail in all 3 languages with the upgrade in Open turned off, and again with the backup in Write turned off. The fuzz opens the file and saves over it in a quarter of its scripts.
 	- Swept: Go, Rust, and C for the helpers only 1.2 and 2.0 used (the step-count edit check, the path splitter for `Each`, the 1.2 save, the 1.2 and 2.0 info block text, and the Format line reader), all removed. Comments, cicd, `c_cases.py`, `fuzz.py`, design.md, and README for 1.2 and 2.0 mentions.
 		- Part 2: Open, OpenWith, Write, and Rewrites in all 3 languages, the 3 ops runners, the `Doc` interface, the `ShclDoc` and `Lib` traits, Go's docMethods list, `fuzz.py`, and every test that opens an unstamped file with an error.
+
+- shcl 4 adapters
+	- ID: 2026101512024163
+	- Type: Feature
+	- Status: Stalled
+	- Priority: High
+	- Opened: 2026-10-15
+	- Opened by: JC
+	- Prereq IDs: shcl 4 in each language. It's planned Rust first, then C, then Go and Python.
+	- Requirements:
+		- The same API, over shcl 4.
+	- Notes:
+		- 4 keeps every line as typed, so Text and Write get simpler. Its read-back check in setters can replace the wrapper's.
+	- Progress log:
+		- 20261015: shcl 4 isn't built in any language yet, only planned in its v4 doc. This waits on it.
+
+- Move the 3.0 pin to the first 3.0 beta
+	- ID: 2026101512024165
+	- Type: Task
+	- Status: Stalled
+	- Priority: Avg
+	- Opened: 2026-10-15
+	- Opened by: JC
+	- Requirements:
+		- Pin `v3.0.0-beta1` once it's tagged, in place of a dev commit.
+	- Notes:
+		- The tag is spelled with no dot, per shcl's own backlog.
+		- shcl's Go module path is still `.../v2`, and Go won't take a v3 tag on it. Go stays on a commit until that changes.
+		- Quillroute plans to have its release refuse a commit pin. The same check would fit here.
 
 - The upgrade keeps a 2.x backslash escape as typed, and 3.0 reads it as text
 	- ID: 2026101910455900
