@@ -1,7 +1,7 @@
 # An accounts file as Quillroute wrote it under shcl 2.x, kept in its tests.
-# It loads clean on 3.0, but its 2.x info block says it's 2.x, so Open
-# upgrades it and reads the bare \\ as one backslash, as 2.x did
-# (2026101910455900, 2026101513330010).
+# It loads clean on 3.0, so Open takes it as current, and reads the bare \\
+# as 2 backslashes where 2.x read one. `from` 2 says it's 2.x, and the
+# upgrade writes it so 3.0 reads one too (2026101910455900).
 open	doc.shcl
 upgraded
 rewrites

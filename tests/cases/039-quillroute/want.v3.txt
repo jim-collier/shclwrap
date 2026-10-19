@@ -1,11 +1,11 @@
 > open	doc.shcl
 ok
 > upgraded
-from 2 backup none
+from 0 backup none
 > rewrites
-true
+false
 > get	str	account.email
-Good	4	C:\\new
+Good	4	C:\\\\new
 > upgrade	2
 from 2 changed true unsure 0
 | # mine

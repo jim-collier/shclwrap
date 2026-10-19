@@ -1128,17 +1128,12 @@ static shclw_kind upgrade(const char *text, size_t len, int64_t from, const char
 		return *out ? too_new(err, path, f) : shclw_i_fail(err, SHCLW_ERR_NO_MEMORY, path, NULL, 0);
 	}
 	// The new block goes where 2.x's sat, so a mark shcl leaves be stands in.
-	// A file with no Format line that has 2.x's block is 2.x (design.md,
-	// Decisions).
 	bool banner = false;
 	char *marked = NULL;
 	size_t marked_len = 0;
 	if (named == 0) {
 		if (!shclw_i_old_block(text, len, &info_edit, &banner, &marked, &marked_len)) {
 			return shclw_i_fail(err, SHCLW_ERR_NO_MEMORY, path, NULL, 0);
-		}
-		if (banner && from == 0) {
-			from = 2;
 		}
 	}
 	bool from_v2 = from > 0 && from < SHCLW_FORMAT_MAJOR;

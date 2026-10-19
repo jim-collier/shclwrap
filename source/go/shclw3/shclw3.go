@@ -167,9 +167,8 @@ func FormatOf(text string) int {
 }
 
 // Upgrade converts a file written for an older format. With from 0 the
-// file's Format line decides. A file with none is taken as 2.x when it has
-// 2.x's info block, and otherwise as current. Pass from 2 for a file known
-// to be from shcl 2.x or older. A file that reads two ways is ErrAmbiguous,
+// file's Format line decides, and a file with none is taken as current. Pass
+// from 2 for a file known to be from shcl 2.x or older. A file that reads two ways is ErrAmbiguous,
 // and one shcl 2.0 reports errors on is ErrRefused, with those errors in
 // Diags. A 2.x file comes out reading what 2.0 read, backslash escapes
 // included, and one that can't is ErrRefused too. 2.x's block is swapped for
@@ -179,14 +178,9 @@ func Upgrade(text string, from int) (Upgraded, error) {
 		return Upgraded{Text: text, From: f}, tooNew("", f)
 	}
 	// The new block goes where 2.x's sat, so a mark shcl leaves be stands in.
-	// A file with no Format line that has 2.x's block is 2.x (design.md,
-	// Decisions).
 	in, banner := text, false
 	if FormatOf(text) == 0 {
 		in, banner = shclw.OldBlock(text, infoEdit)
-		if banner && from == 0 {
-			from = 2
-		}
 	}
 	fromV2 := from > 0 && from < FormatMajor
 	u := shcl.Upgrade(in, fromV2)
