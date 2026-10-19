@@ -81,7 +81,8 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 - Make shcl 3.0 the floor
 	- ID: 2026101613005800
 	- Type: Feature
-	- Status: Started
+	- Status: Waiting on signoff
+	- Needs local test suite run?: The full `cicd/cicd.bash`, with the leak checks.
 	- Priority: High
 	- Opened: 20261016-130058
 	- Opened by: JC
@@ -104,10 +105,33 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- 20261019: Files the 1.2 and 2.0 adapters wrote were kept as 2 new shared cases before the adapters went. The fuzz now writes half its documents in the old syntax, and masks the time 3.0 stamps on a line it comments out, which had made one case differ by a second.
 		- 20261019: Left for part 2: Open upgrading an old file in memory with the first Write backing up the original, and test cases from real files each program wrote. Moving Tallowbase, Mossrealm, and Lenscart is 2026101512024167's.
 		- 20261019: 2 tests of the 1.2 and 2.0 info block text are commented out, since that text is gone.
-	- Branch: floor3
-	- Commit: 3754832, 326ccf9
+		- 20261019: Part 2 is done. Open upgrades an old file in memory in Go, Rust, and C, and writes nothing. The first Write over the file backs up the original with UpgradeFile's code, and later ones don't. `UpgradedFrom` and `BackupName` say what happened. The calls on Lines, Diags, Text, Parse, and Rewrites are in design.md's Decisions.
+		- 20261019: Real files from all 9 programs are shared cases 038 to 046. Quillroute's and Mossrealm's come from their tests, and Folderkite's from its own old-format writer built against 2.0. Tallowbase's 1.2 sample reads two ways with no Format line, so Open refuses it and the program converts it with `from` 2.
+		- 20261019: The real files show the upgrade keeps a 2.x backslash escape as typed, which 3.0 reads as text. Filed as 2026101910455900.
+		- 20261019: Waiting on signoff for one call users will notice. Open takes a file with no Format line that has errors on 3.0 as 2.x, as `Upgrade` with `from` 0 does. So a 3.0 file with a typo is upgraded, or refused when 2.0 has errors on it too, where it used to open with its errors in Diags. Files saved after `StampFormat` or `InfoBlock` are never taken as 2.x, and README says so.
+		- 20261019: 3 tests opened an unstamped file with an error, which Open now refuses. Each one's old input is commented out, and the same input with a Format 3 line takes its place: Go's TestSaveRefusedOverFile, Rust's save_refused_over_file, and the strict open in C's test_errors.
+	- Branch: floor3, openup
+	- Commit: 3754832, 326ccf9, 6b18859, ba5d92e, b5e2128
 	- Test case: tests/cases/034-upgrade-1x-written and 035-upgrade-2x-written, from files the old adapters wrote. 034 fails when the upgrade skips a format 1 file. Every existing 3.0 case and API test still passes.
+		- Part 2: tests/cases/036-open-upgrade and 037-open-refused, the real files in 038 to 046, and the Open tests in Go's files_test.go, Rust's tests/files.rs, and C's test_open_upgrade. They fail in all 3 languages with the upgrade in Open turned off, and again with the backup in Write turned off. The fuzz opens the file and saves over it in a quarter of its scripts.
 	- Swept: Go, Rust, and C for the helpers only 1.2 and 2.0 used (the step-count edit check, the path splitter for `Each`, the 1.2 save, the 1.2 and 2.0 info block text, and the Format line reader), all removed. Comments, cicd, `c_cases.py`, `fuzz.py`, design.md, and README for 1.2 and 2.0 mentions.
+		- Part 2: Open, OpenWith, Write, and Rewrites in all 3 languages, the 3 ops runners, the `Doc` interface, the `ShclDoc` and `Lib` traits, Go's docMethods list, `fuzz.py`, and every test that opens an unstamped file with an error.
+
+- The upgrade keeps a 2.x backslash escape as typed, and 3.0 reads it as text
+	- ID: 2026101910455900
+	- Type: Bug
+	- Status: Queued
+	- Severity: High
+	- Opened: 20261019-104559
+	- Opened by: JC
+	- Related IDs: 2026101613005800, 2026101513330010
+	- Steps to reproduce:
+		- Open or upgrade a 2.x file holding `email: C:\\new`, as Quillroute wrote it, or Folderkite's `exec: \\\\server\\share\\term.exe`.
+	- Incorrect behavior: Each backslash pair 2.x read as one reads as 2, and a `\t` 2.x read as a tab reads as a backslash and a t. The upgrade says nothing is unsure.
+	- Expected behavior: The upgraded file reads the values 2.x read.
+	- Reproduced: 20261019, in shared cases 039-quillroute and 045-folderkite, in Go, Rust, and C. The `path` line in 034-upgrade-1x-written does it too.
+	- Possible cause: 3.0 reads a backslash as text everywhere, and shcl's migrate leaves a pair 2.x resolved as it was written, by its own comment. Quillroute's own tests expect `C:\new` after its conversion.
+	- Note: A fix rewrites those values in the upgrade. A backslash a person typed in a 2.x file by hand, like `C:\temp`, read as a tab then too.
 
 - Layered loading
 	- ID: 2026101512024156

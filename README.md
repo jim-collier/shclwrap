@@ -56,7 +56,7 @@ If your program uses one shcl version and doesn't plan to move, you don't need t
 
 - A file written for a newer format is refused with a clear error.
 
-- Format upgrades with a backup of the original.
+- Old files are upgraded as they're opened, in memory. The first save keeps the original beside it, and a program that only reads never writes.
 
 - A text script of edits and reads, which is also what the tests run in every language, so the languages can't drift apart.
 
@@ -85,7 +85,9 @@ if err := doc.Put("server.port", 9090); err != nil {
 return doc.Write("app.shcl")
 ~~~
 
-`shclw3` matches shcl 3.0. A program still on 1.2 or 2.0 moves to 3.0 along with the wrapper, and `Upgrade` brings its old files forward.
+`shclw3` matches shcl 3.0. A program still on 1.2 or 2.0 moves to 3.0 along with the wrapper, and `Open` brings its old files forward. It upgrades one in memory and `UpgradedFrom` says so. The first `Write` over the file keeps the original beside it, and `BackupName` says where. `UpgradeFile` converts a file ahead of time instead.
+
+A file with no Format line that has errors is taken for an old one. Saving after `StampFormat()` or `InfoBlock(true)` makes a file name its format, so it never is.
 
 ### Rust
 
