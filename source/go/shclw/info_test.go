@@ -27,6 +27,13 @@ var oldBlocks = []string{
 	s3.GenBanner,
 }
 
+// Off since 3.0 is the floor: InfoText was the 1.2 and 2.0 block, and is gone.
+// func TestInfoTextIsGenBanner(t *testing.T) {
+// 	if got := shclw.InfoText(s3.FormatMajor, "v3.0.0-beta1"); got != s3.GenBanner {
+// 		t.Errorf("InfoText(3) =\n%s\nshcl's GenBanner is\n%s", got, s3.GenBanner)
+// 	}
+// }
+
 // infoOn is text with InfoBlock(true), and the block it ends with taken
 // off, so the versions compare.
 func infoOn(t *testing.T, n int, lib shclw.Lib, text string) string {

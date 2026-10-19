@@ -297,6 +297,15 @@ const OLD_BLOCKS: [&str; 6] = [
 	"##\n## This config file format is SHCL.\n## \"Simple Hierarchical Config Language\"\n##    Format   {n}\n##    Home     https://github.com/yottacore/shcl\n##    Syntax   https://github.com/yottacore/shcl/blob/v3.0.0/project/spec.md\n##    Legal    SHCL is Copyright © 2026 Jim Collier [ID: 2უNაɘ«҂թȹɤξπ๙¿ձϖ]. License: MIT. No warranty.\n##\n",
 ];
 
+// Off since 3.0 is the floor: info_text was the 1.2 and 2.0 block, and is gone.
+// #[test]
+// fn info_text_is_gen_banner() {
+// 	assert_eq!(
+// 		shclw::info_text(shclw::v3::FORMAT_MAJOR, "v3.0.0-beta1"),
+// 		shclw::v3::shcl::GEN_BANNER
+// 	);
+// }
+
 /// Each old spelling, and the current one, above the first field, between
 /// two, and at the end, becomes one block at the end, and every version
 /// leaves the same text.

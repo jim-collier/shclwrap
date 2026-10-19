@@ -102,7 +102,8 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Progress log:
 		- 20261019: Part 1 is done. The 1.2 and 2.0 adapters are gone in Go, Rust, and C, with their tests, want files, the `SHCLW_SHCL` pick, and the cicd and fuzz paths that ran them. shcl 2.0 stays built in for the upgrade's check in all 3. design.md and README say 3.0 is the floor.
 		- 20261019: Files the 1.2 and 2.0 adapters wrote were kept as 2 new shared cases before the adapters went. The fuzz now writes half its documents in the old syntax, and masks the time 3.0 stamps on a line it comments out, which had made one case differ by a second.
-		- 20261019: Left for part 2: test cases from real files each program wrote, and moving Tallowbase, Mossrealm, and Lenscart onto the wrapper at 3.0. Open upgrading an old file in memory isn't built yet either.
+		- 20261019: Left for part 2: Open upgrading an old file in memory with the first Write backing up the original, and test cases from real files each program wrote. Moving Tallowbase, Mossrealm, and Lenscart is 2026101512024167's.
+		- 20261019: 2 tests of the 1.2 and 2.0 info block text are commented out, since that text is gone.
 	- Branch: floor3
 	- Commit: 3754832, 326ccf9
 	- Test case: tests/cases/034-upgrade-1x-written and 035-upgrade-2x-written, from files the old adapters wrote. 034 fails when the upgrade skips a format 1 file. Every existing 3.0 case and API test still passes.
@@ -528,21 +529,6 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 				- `ResourceWarning` shows only in dev mode or with `-W`. A plain run hides it.
 				- Without `PYTHONMALLOC=malloc`, ASan can't see inside pymalloc's pools.
 	- Note: The Rust crate has no `unsafe` and no FFI, and only `tests/files.rs` starts threads. The Go module has no cgo, and only one test in `files_test.go` starts a goroutine. The only Python is `cicd/c_cases.py` and `cicd/fuzz.py`, since the Python wrapper isn't started. clippy already runs with `-D warnings` and `clippy::pedantic`, and go vet, staticcheck, and ruff run on every gate. No advisory scan runs yet. cicd runs its tools on the host today, checked against `cicd/tool-pins.env`.
-
-- Write into a folder that doesn't exist says IO on 1.2 and 2.0, and NotFound on 3.0
-	- ID: 2026101518385490
-	- Type: Bug
-	- Status: Queued
-	- Severity: Low
-	- Opened: 20261015-183854
-	- Opened by: JC
-	- Related IDs: 2026101516111070
-	- Steps to reproduce:
-		- Write a document to `no/such/dir/x.shcl`.
-	- Incorrect behavior: `ErrIO` on 1.2 and 2.0, and `ErrNotFound` on 3.0.
-	- Expected behavior: The same kind on every version.
-	- Reproduced: 20261015, in C on all 3 versions. In Go and Rust, read only: their 1.2 and 2.0 saves give every failure as `ErrIO`, and 3.0's turns shcl's not-found status into `ErrNotFound`.
-	- Note: C follows Go and Rust on each version for now, so the 3 languages agree. `test_errors` in `source/c/tests/api_test.c` pins it.
 
 - Commit and publish from cicd
 	- ID: 2026101512024171
@@ -1539,6 +1525,25 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- 20261016, JC: without 2.0, an upgrade of a 2.x file is refused. A program that needs it builds 2.0 in.
 	- Note: Moot since the upgrade is part of every build (2026101613005800), so every C build has 2.0.
 	- Closed: 20261016-132000
+
+- Write into a folder that doesn't exist says IO on 1.2 and 2.0, and NotFound on 3.0
+	- ID: 2026101518385490
+	- Type: Bug
+	- Status: Moot
+	- Severity: Low
+	- Opened: 20261015-183854
+	- Opened by: JC
+	- Related IDs: 2026101516111070
+	- Steps to reproduce:
+		- Write a document to `no/such/dir/x.shcl`.
+	- Incorrect behavior: `ErrIO` on 1.2 and 2.0, and `ErrNotFound` on 3.0.
+	- Expected behavior: The same kind on every version.
+	- Reproduced: 20261015, in C on all 3 versions. In Go and Rust, read only: their 1.2 and 2.0 saves give every failure as `ErrIO`, and 3.0's turns shcl's not-found status into `ErrNotFound`.
+	- Note: C follows Go and Rust on each version for now, so the 3 languages agree. `test_errors` in `source/c/tests/api_test.c` pins it.
+	- Progress log:
+		- 20261019: Moot, since 2026101613005800 took out 1.2 and 2.0. 3.0 gives `ErrNotFound` in every language.
+	- Test case: `test_errors` in `source/c/tests/api_test.c` pins `ErrNotFound` on 3.0.
+	- Closed: 20261019-104500
 
 ## Template
 
