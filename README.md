@@ -167,8 +167,9 @@ The full list of calls, and what the wrapper does differently from each shcl ver
 Go 1.21 or newer, Rust 1.88 or newer, and a C11 compiler. The C lint also wants gcc-15, clang-format, and clang-tidy. The pipeline pins Rust 1.96 in `source/rust/rust-toolchain.toml`.
 
 ~~~bash
-cicd/cicd.bash           # format, lint, tests, and fuzzing
-cicd/cicd.bash --gate    # the same without fuzzing, as the pre-push hook runs it
+cicd/cicd.bash           # everything: format, lint, tests, leak checks, and fuzzing
+cicd/cicd.bash --ci      # format check, lint, and tests, as the pre-push hook runs it
+cicd/cicd.bash --quick   # the fast checks only, about a minute, no network
 ~~~
 
 ## Support

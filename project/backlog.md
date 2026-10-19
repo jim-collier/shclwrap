@@ -57,8 +57,7 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 - Implement leak and static checks of the C code run as part of CI/CD
 	- ID: 2026101619042485
 	- Type: Feature
-	- Status: Waiting for testing
-	- Needs local test suite run?: Yes. Run `cicd/cicd.bash --gate` on the merged tree.
+	- Status: Done
 	- Priority: Avg
 	- Opened: 20261016-190424
 	- Opened by: JC
@@ -84,16 +83,19 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 			- With `-Werror`, analyzer findings print as `error: ... [-Werror=analyzer-*]`, not `warning:`. A parser that only looks for warnings counts 0.
 			- heaptrack and ASan can't share a build. The soak test uses a plain build.
 			- ASan's allocator hides the heap from glibc's own stats, such as `mallinfo2`. A test that reads them should exit as skipped under ASan, not pass.
-	- Note: Pinned C lint, sanitizer, and shared tests pass on shcl 1-3. The slow leakcheck passes CodeQL, CTU, all three failure probes, and heaptrack soak. The merged-tree `cicd/cicd.bash --gate` remains pending.
+	- Note: Pinned C lint, sanitizer, and shared tests pass on shcl 1-3. The slow leakcheck passes CodeQL, CTU, all three failure probes, and heaptrack soak. The merged tree passed `--gate` in the push hook on 2026-10-18.
+		- 2026-10-19: the slow checks now run by default, per 2026101816214270. `--leakcheck` adds them to `--ci` or `--quick`.
 	- Branch: c-leaks
 	- Commit: 90b409c, dbc9f62
 	- Test case: C API tests and 33 shared cases with 345 operations, over shcl 1-3.
 	- Verified: `cicd/cicd.bash --gate --no-sync -y` passed locally and in the push hook. The pinned slow gate passed CodeQL, CTU, the leak, null, and heap-growth probes, and heaptrack soak on all 3 versions.
+	- Closed: 20261019-060000
+	- Acceptance signoff: Self-closed: each gate was watched to fail on a planted fault, and the merged tree passed.
 
 - Updates to CICD script flags
 	- ID: 2026101816214270
 	- Type: Enhancement
-	- Status: Queued
+	- Status: Waiting on signoff
 	- Priority: High
 	- Opened: 2026-10-18
 	- Opened by: JC
@@ -107,6 +109,12 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- The other existing flags can stay.
 	- Notes:
 		- Pre-next-cut. Do next.
+		- There's no cross-compile in this project yet, so nothing to trim there. No stage uses an external test host either.
+		- `--quick` drops the remote sync, the C analyzers and sanitizers, the leak checks, and Go's fuzzer, and fuzzes Go against Rust for 10s. C still gets a gcc-15 pass and its plain API tests and shared cases on all 3 versions. It runs in about 50s.
+		- It doesn't fetch anything. If a pinned `shcl.h` isn't cached, C is skipped with a warning.
+		- No flags now runs the leak checks too. `--no-leakcheck` skips them, and `--leakcheck` adds them to `--ci` or `--quick`.
+	- Branch: ci-flags
+	- Test case: None. Each flag mix was checked by hand, plus `--quick` with a header missing from the cache.
 
 - C wrapper
 	- ID: 2026101512024159

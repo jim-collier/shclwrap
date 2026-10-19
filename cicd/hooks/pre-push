@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-##	Purpose: Runs the cicd gate (format check, lint, tests) before a push, so
+##	Purpose: Runs the cicd checks (format check, lint, tests) before a push, so
 ##		nothing reaches dev or main unverified. Turned on per clone with
 ##		'git config core.hooksPath cicd/hooks'.
 ##	Copyright © 2026 Jim Collier [ID: 2უNაɘ«҂թȹɤξπ๙¿ձϖ]
@@ -14,4 +14,4 @@ root="$(git rev-parse --show-toplevel)"
 ## this repo's internals.
 for gitVar in $(git rev-parse --local-env-vars); do unset "${gitVar}"; done
 
-exec "${root}/cicd/cicd.bash" --gate --quiet --no-sync
+exec "${root}/cicd/cicd.bash" --ci --quiet --no-sync

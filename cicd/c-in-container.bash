@@ -36,6 +36,9 @@ for header in "${shcl1Dir}/shcl.h" "${shcl2Dir}/shcl.h" "${shcl3Dir}/shcl.h"; do
 	[[ -f "${header}" ]] || { echo "missing pinned C header: ${header}" >&2; exit 1; }
 done
 
+## Half the cores, as in cicd.bash. Only builds get it; parallel lint output is a mess to read.
+jobs=$(( $(nproc) / 2 )); if ((jobs < 1)); then jobs=1; fi
+
 make_c(){
 	make -s -C "${root}/source/c" \
 		SHCLW_SHCL="${version}" SHCL_DIR="${shclDir}" SHCL2_DIR="${shcl2Dir}" \
@@ -53,10 +56,17 @@ case "${mode}" in
 		make_c lint strict analyze format-check
 		;;
 	test)
-		make_c test drive
+		make_c -j "${jobs}" test drive
 		LSAN_OPTIONS="suppressions=${root}/source/c/lsan.supp:print_suppressions=1" \
 		ASAN_OPTIONS="detect_leaks=1:halt_on_error=1" \
 		python3 "${here}/c_cases.py" --drive "/work/c${version}/shclw-drive" \
+			--version "${version}" --cases "${root}/tests/cases"
+		;;
+	quick)
+		## No sanitizers and no analyzers, which are most of the time.
+		make_c -j "${jobs}" strict drive-plain "/work/c${version}/api-test-plain"
+		"/work/c${version}/api-test-plain"
+		python3 "${here}/c_cases.py" --drive "/work/c${version}/shclw-drive-plain" \
 			--version "${version}" --cases "${root}/tests/cases"
 		;;
 	leakcheck)
@@ -215,7 +225,7 @@ PY
 		done
 fi
 
-if [[ "${mode}" != pick && "${mode}" != lint && "${mode}" != test && "${mode}" != leakcheck && "${mode}" != leakcheck-resume ]]; then
+if [[ "${mode}" != pick && "${mode}" != lint && "${mode}" != test && "${mode}" != quick && "${mode}" != leakcheck && "${mode}" != leakcheck-resume ]]; then
 	echo "unknown mode: ${mode}" >&2
 	exit 2
 fi
