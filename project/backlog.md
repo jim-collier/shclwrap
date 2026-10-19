@@ -207,26 +207,48 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 - Tell a 2.x file from a current one by its banner
 	- ID: 2026101513330010
 	- Type: Feature
-	- Status: Queued
+	- Status: Waiting for answers
+	- Needs local test suite run?: The full `cicd/cicd.bash`, with the leak checks.
 	- Priority: Avg
 	- Opened: 20261015-133300
 	- Opened by: JC
 	- Requirements:
 		- With `from` 0, a file with no Format line but with the 2.x banner is taken as 2.x.
-	- Related IDs: 2026101910455900
+	- Related IDs: 2026101910455900, 2026101513330011
 	- Note: Since 2026101910455900, Open reads such a file's 2.x escapes wrong until this is done. 039-quillroute shows it. The risk is a 3.0 program that saved over a 2.x file without the wrapper, which keeps the block, and a backslash it wrote would then be read the 2.x way.
 	- Note: Quillroute looks for the banner. Cobblevale, Folderkite, Mossrealm, and Wovenshell take any file with no Format line as old, which is wrong for a new file with no banner.
+	- Progress log:
+		- 20261019: Built as asked in Go, Rust, and C. `Upgrade` with `from` 0, and so `Open`, take a file with no Format line as 2.x when it has 2.x's `#` block as comments. A block's text in a raw body doesn't count. 039-quillroute now reads `C:\new` through Open, as 2.x did.
+		- 20261019: The risk in the note is real through the wrapper itself. `Parse` of a 2.x file, a `Put` of `C:\temp`, and a `Write` keep the `#` block and add no Format line. The next `Open` takes the file as 2.x and reads a tab, at exit 0. Before this change it read `C:\temp`. 050-banner-2x shows it. No program on 3.0 is known to save over a 2.x file without upgrading it.
+		- 20261019: Question: Should `Write` swap 2.x's block for the current one, with its Format line, whenever it saves? Then nothing the wrapper writes can be misread this way, and only programs off the wrapper keep the risk. The other choices are to take the risk as it is, or to drop the rule.
+	- Decisions:
+		- Recorded in design.md's Decisions as waiting on the question above.
+	- Branch: banner
+	- Commit: 765f524
+	- Test case: tests/cases/050-banner-2x, and the corrected want file of 039-quillroute. Both fail without the change in Go, Rust, and C, and pass with it.
+	- Swept: `Upgrade` in Go, Rust, and C, which `Open` and `UpgradeFile` go through, and the doc comments on all 3. design.md's Open, Format and upgrade, and Decisions, and README's note on old files. The ops runners, `fuzz.py`, and `c_cases.py` only compare outputs.
+	- Verified: `cicd/cicd.bash --ci --no-sync` passes, with the C clang-tidy, analyzers, and sanitized cases. The full run with the leak checks hasn't run.
 
 - Upgrade swaps the 2.x banner for the current one
 	- ID: 2026101513330011
 	- Type: Feature
-	- Status: Queued
+	- Status: Waiting for testing
+	- Needs local test suite run?: The full `cicd/cicd.bash`, with the leak checks.
 	- Priority: Avg
 	- Opened: 20261015-133300
 	- Opened by: JC
+	- Related IDs: 2026101513330010
 	- Requirements:
 		- Replace the old banner block in place, keeping the file's line endings.
 	- Note: shcl leaves the old banner and adds a Format line at the end. Quillroute replaces the block itself.
+	- Progress log:
+		- 20261019: Done in Go, Rust, and C. A file taken as 2.x with no Format line gets the current block where 2.x's `#` block was, at the top, the middle, or the end. Before, shcl left a clean file's block alone and moved the block of a file it wrote out again to the end. The finder is `InfoBlock`'s, so a block's text in a raw body stays.
+		- 20261019: A CRLF file shcl writes out again with LF gets its CRLF back, unless that changes a value, whether it had a block or not. A file shcl leaves alone keeps its own lines.
+	- Branch: banner
+	- Commit: 566cef5, 12beb27
+	- Test case: tests/cases/051-banner-swap (a block at the top of a CRLF file shcl leaves alone, one in the middle of a CRLF file shcl writes out again, a CRLF file with no block, and a file with a line like the swap's own mark). It fails without the change in Go, Rust, and C, and passes with it. In Go it also fails with the in-place step or the CRLF step turned off.
+	- Swept: `Upgrade` in Go, Rust, and C, which `Open` and `UpgradeFile` go through. The swap reuses `InfoBlock`'s block finder in `shclw/info.go`, `src/info.rs`, and `info.c`. Files with a BOM, no final newline, 2 blocks, an indented block, a Format 3 line, and 2.0 errors gave the same output from all 3 drivers.
+	- Verified: `cicd/cicd.bash --quick` and `cicd/cicd.bash --ci --no-sync` pass, with the C clang-tidy, analyzers, and sanitized cases. The full run with the leak checks hasn't run.
 
 - Upgrade lists the lines it changed
 	- ID: 2026101513330012
