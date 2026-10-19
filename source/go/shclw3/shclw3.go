@@ -118,10 +118,10 @@ func ParseWith(text string, s Strictness) (*Doc, error) {
 // Open reads and parses a file. A missing file is ErrNotFound, and a file
 // written for a newer format is ErrTooNew. An older file is upgraded in
 // memory, as Upgrade with from 0 does, and UpgradedFrom says so. Nothing is
-// written until Write, and the first Write over the file backs it up. A file
-// that reads two ways is ErrAmbiguous, and one shcl 2.0 reports errors on, or
-// that can't be made to read as 2.0 read it, is ErrRefused, with the lines in
-// Diags. On an error the document is empty.
+// written until Write, and the first Write over the file backs it up. A 2.x
+// file that reads two ways is ErrAmbiguous, and one shcl 2.0 reports errors
+// on, or that can't be made to read as 2.0 read it, is ErrRefused, with the
+// lines in Diags. On an error the document is empty.
 func Open(path string) (*Doc, error) { return OpenWith(path, shclw.Standard) }
 
 // OpenWith is Open at a given strictness, which applies to the upgraded text.
@@ -167,9 +167,11 @@ func FormatOf(text string) int {
 }
 
 // Upgrade converts a file written for an older format. With from 0 the
-// file's Format line decides, and a file with none is taken as current. Pass
-// from 2 for a file known to be from shcl 2.x or older. A file that reads two ways is ErrAmbiguous,
-// and one shcl 2.0 reports errors on is ErrRefused, with those errors in
+// file's Format line decides. A file with none is taken as 2.x when it has
+// 2.x's info block, or errors on 3.0 that shcl 2.0 doesn't have, and
+// otherwise as current. Pass from 2 for a file known to be from shcl 2.x or
+// older. A 2.x file that reads two ways is ErrAmbiguous, and one shcl 2.0
+// reports errors on is ErrRefused, with those errors in
 // Diags. A 2.x file comes out reading what 2.0 read, backslash escapes
 // included, and one that can't is ErrRefused too. 2.x's block is swapped for
 // the current one where it sits, and the lines end as the file's did.
@@ -178,9 +180,14 @@ func Upgrade(text string, from int) (Upgraded, error) {
 		return Upgraded{Text: text, From: f}, tooNew("", f)
 	}
 	// The new block goes where 2.x's sat, so a mark shcl leaves be stands in.
+	// A file with no Format line that has 2.x's block is 2.x (design.md,
+	// Decisions).
 	in, banner := text, false
 	if FormatOf(text) == 0 {
 		in, banner = shclw.OldBlock(text, infoEdit)
+		if banner && from == 0 {
+			from = 2
+		}
 	}
 	fromV2 := from > 0 && from < FormatMajor
 	u := shcl.Upgrade(in, fromV2)
@@ -189,16 +196,22 @@ func Upgrade(text string, from int) (Upgraded, error) {
 	if u.Current && !fromV2 && FormatOf(text) == 0 {
 		out.From = FormatMajor
 	}
-	if u.Ambiguous > 0 {
-		out.Text = text
-		return out, &shclw.Error{Kind: shclw.ErrAmbiguous, Msg: fmt.Sprintf("%d lines read two ways", u.Ambiguous)}
-	}
 	// Only a file taken as 2.x is read the 2.x way.
 	if u.Current && !(fromV2 && u.Format < FormatMajor) {
 		out.Text = text
 		return out, nil
 	}
+	// Nothing in this file says it's 2.x, only its errors on 3.0. With errors
+	// on 2.0 too, it's a current file with a typo (design.md, Decisions).
 	old := shcl2.Parse(text)
+	guessed := !fromV2 && FormatOf(text) == 0
+	if guessed && oldErrors(old) != nil {
+		return Upgraded{Text: text, From: FormatMajor}, nil
+	}
+	if u.Ambiguous > 0 {
+		out.Text = text
+		return out, &shclw.Error{Kind: shclw.ErrAmbiguous, Msg: fmt.Sprintf("%d lines read two ways", u.Ambiguous)}
+	}
 	if err := oldErrors(old); err != nil {
 		return Upgraded{Text: text, From: u.Format}, err
 	}
@@ -441,17 +454,33 @@ func (d *Doc) lines() string {
 // StampFormat asked. When an edit since made that impossible, it's the text
 // without them, and Write says why.
 func (d *Doc) finish(text string) string {
-	if out, err := shclw.FinishInfo(text, d.info, d.stamp, infoEdit); err == nil {
+	if out, err := saved(text, d.info, d.stamp); err == nil {
 		return out
 	}
 	return text
+}
+
+// saved is text as a save writes it. Where that has no Format line, 2.x's
+// block is swapped for the current one where it sits, as the upgrade does,
+// so the next Open doesn't take the file as 2.x (2026101513330010).
+func saved(text string, info shclw.Info, stamp bool) (string, error) {
+	out, err := shclw.FinishInfo(text, info, stamp, infoEdit)
+	if err != nil || FormatOf(out) != 0 {
+		return out, err
+	}
+	marked, found := shclw.OldBlock(out, infoEdit)
+	if !found {
+		return out, nil
+	}
+	return shclw.PlaceBlock(marked, marked != out, infoEdit)
 }
 
 // Write saves Text atomically. It refuses with ErrRefused when the load
 // dropped lines the save would lose, the same check shcl's
 // SaveFileKeepLines makes, and writes nothing when the info block or the
 // Format line can't go in, since an edit made after InfoBlock or
-// StampFormat.
+// StampFormat. A save with no Format line has 2.x's info block swapped for
+// the current one where it sat.
 //
 // The first Write over a file Open upgraded backs up the original first, as
 // UpgradeFile does, and BackupName names the copy. A file that changed since
@@ -465,7 +494,7 @@ func (d *Doc) Write(path string) error {
 	if !kept {
 		text = d.d.ToCanonical()
 	}
-	text, err := shclw.FinishInfo(text, d.info, d.stamp, infoEdit)
+	text, err := saved(text, d.info, d.stamp)
 	if err != nil {
 		err.(*shclw.Error).Path = path
 		return err

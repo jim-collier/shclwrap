@@ -347,16 +347,14 @@ fn save_refused_over_file() {
 	let path = dir.join("c.shcl");
 	let p = s(&path);
 
-	// Open now takes an unstamped file with an error as 2.x, and 2.0 refuses this one.
-	// fs::write(&path, "a: 1\na(5): 2\n").unwrap();
-	let text = "a: 1\na(5): 2\n##    Format   3\n";
-	fs::write(&path, text).unwrap();
-	let mut d = shclw::v3::open(&p).expect("open");
-	d.remove("a");
-	assert_eq!(d.write(&p).err().map(|e| e.kind), Some(ErrKind::Refused), "v3");
-	// assert_eq!(read(&path), "a: 1\na(5): 2\n", "v3");
-	assert_eq!(read(&path), text, "v3");
-	assert_eq!(names(dir), ["c.shcl"]);
+	for text in ["a: 1\na(5): 2\n", "a: 1\na(5): 2\n##    Format   3\n"] {
+		fs::write(&path, text).unwrap();
+		let mut d = shclw::v3::open(&p).expect("open");
+		d.remove("a");
+		assert_eq!(d.write(&p).err().map(|e| e.kind), Some(ErrKind::Refused), "{text:?}");
+		assert_eq!(read(&path), text, "{text:?}");
+		assert_eq!(names(dir), ["c.shcl"]);
+	}
 }
 
 /// `open` upgrades a 2.x file in memory and writes nothing. The first write
@@ -440,4 +438,79 @@ fn open_upgrade_backup_taken() {
 		return;
 	}
 	panic!("the clock ticked on every try");
+}
+
+const BLOCK_2X: &str = "#\r\n# This config file format is SHCL.\r\n# \"Simple Hierarchical Config Language\"\r\n#    Home     https://github.com/jim-collier/shcl\r\n#\r\n";
+
+/// A save of a file with 2.x's block and no Format line puts the current
+/// block where it sat, with its Format line, so the next `open` reads what
+/// was put rather than take the file as 2.x (2026101513330010).
+#[test]
+fn write_swaps_old_block() {
+	let scratch = Scratch::new("write-swap");
+	let path = scratch.path().join("c.shcl");
+	let p = s(&path);
+	let text = format!("# app\r\nname: demo\r\n\r\n{BLOCK_2X}\r\nport: 80\r\n");
+	let mut d = shclw::v3::parse(&text);
+	d.put("dir", r"C:\temp").expect("put");
+	d.write(&p).expect("write");
+	let got = read(&path);
+	assert_eq!(got, d.text());
+	let at = got.find("##\r\n## This config file format is SHCL.").expect("block");
+	assert!(at < got.find("port:").unwrap(), "{got:?}");
+	assert_eq!(shclw::v3::format_of(&got), 3, "{got:?}");
+	assert!(!got.contains("# This config file format is SHCL.\r\n# "), "{got:?}");
+	assert_eq!(got.matches('\n').count(), got.matches("\r\n").count(), "{got:?}");
+	let again = shclw::v3::open(&p).expect("reopen");
+	assert_eq!(again.upgraded_from(), 0);
+	assert_eq!(again.str("dir", ""), r"C:\temp");
+
+	// A block's text in a raw body is the body's.
+	let raw = format!("tmpl:\n\t~~~\n{}\t~~~\n", BLOCK_2X.replace("\r\n", "\n"));
+	shclw::v3::parse(&raw).write(&p).expect("raw body");
+	assert_eq!(read(&path), raw);
+	// A Format line already says what the file is.
+	let stamped = format!("{}##    Format   3\n", BLOCK_2X.replace("\r\n", "\n"));
+	shclw::v3::parse(&stamped).write(&p).expect("stamped");
+	assert_eq!(read(&path), stamped);
+}
+
+/// A file with no Format line or 2.x block that has errors on 3.0 and 2.0
+/// alike is current, with 3.0's errors in `diags`. One marked as 2.x is
+/// still refused (2026101613005800).
+#[test]
+fn open_fails_both() {
+	const BOTH: &str = "a: 1\nb: ```\nraw line\nc: 2\n";
+	let scratch = Scratch::new("fails-both");
+	let dir = scratch.path();
+	let path = dir.join("c.shcl");
+	let p = s(&path);
+	fs::write(&path, BOTH).unwrap();
+	let d = shclw::v3::open(&p).expect("open");
+	assert_eq!(d.upgraded_from(), 0);
+	assert!(!d.rewrites());
+	assert_eq!(d.int("a", 0), 1);
+	assert_eq!(d.diags(), shclw::v3::parse(BOTH).diags());
+	assert!(!d.diags().is_empty());
+	let strict = shclw::v3::open_with(&p, shclw::Strictness::Strict);
+	assert_eq!(strict.err().map(|e| e.kind), Some(ErrKind::Strict));
+	let u = shclw::v3::upgrade(BOTH, 0).expect("upgrade 0");
+	assert!(!u.changed && u.from == 3 && u.text == BOTH, "{u:?}");
+	let u = shclw::v3::upgrade_file(&p, 0).expect("upgrade file");
+	assert!(!u.changed, "{u:?}");
+	assert_eq!(names(dir), ["c.shcl"]);
+	let block = BLOCK_2X.replace("\r\n", "\n");
+	for (name, text, from) in [
+		("from 2", BOTH.to_owned(), 2),
+		("2.x block", format!("{block}{BOTH}"), 0),
+		("Format 2", format!("##    Format   2\n{BOTH}"), 0),
+	] {
+		let got = shclw::v3::upgrade(&text, from).err().map(|e| e.kind);
+		assert_eq!(got, Some(ErrKind::Refused), "{name}: upgrade");
+		if from == 0 {
+			fs::write(&path, &text).unwrap();
+			let got = shclw::v3::open(&p).err().map(|e| e.kind);
+			assert_eq!(got, Some(ErrKind::Refused), "{name}: open");
+		}
+	}
 }

@@ -3,6 +3,9 @@
 > get	str	x
 Good	1	[ab]
 > upgrade
-error ambiguous
+from 3 changed false unsure 0
+| x: [ab]
+| y: 1
+| z: [ab] c
 > upgrade	2
 error refused

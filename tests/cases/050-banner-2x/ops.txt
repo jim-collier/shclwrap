@@ -1,0 +1,27 @@
+# A file with no Format line that has 2.x's info block is 2.x, even one that
+# loads clean on 3.0, so its `\\` reads as one backslash, as 2.x read it.
+format
+upgrade
+open	doc.shcl
+upgraded
+rewrites
+get	str	path
+write	doc.shcl
+upgraded
+# The saved file names format 3, so the next Open leaves it alone.
+open	doc.shcl
+upgraded
+get	str	path
+# The block's text in a raw body is the body's, so this file is current.
+open	raw.shcl
+upgraded
+get	str	path
+get	raw	tmpl
+# Saving over it with no Open swaps 2.x's block for the current one, so the
+# next Open reads the backslash put in by 3.0's rules as it was put.
+parse
+put	str	dir	C:\\temp
+write	doc.shcl
+open	doc.shcl
+upgraded
+get	str	dir

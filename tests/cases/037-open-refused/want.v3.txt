@@ -1,17 +1,33 @@
-> open	doc.shcl
+> open	marked.shcl
 error refused
-2	error	E005	unterminated raw block
+8	error	E005	unterminated raw block
 > get	int	a
 NotFound	0	0
 > files
 ambiguous.shcl
 doc.shcl
+format2.shcl
+marked.shcl
 newer.shcl
 old.shcl
 ops.txt
 stamped.shcl
-> open	ambiguous.shcl
+twoways.shcl
+> open	format2.shcl
+error refused
+3	error	E005	unterminated raw block
+> open	doc.shcl
+ok
+> upgraded
+from 0 backup none
+> get	int	a
+Good	1	1
+> open	twoways.shcl
 error ambiguous
+> open	ambiguous.shcl
+ok
+> upgraded
+from 0 backup none
 > open	stamped.shcl
 ok
 > upgraded

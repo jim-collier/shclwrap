@@ -1,0 +1,10 @@
+#
+# This config file format is SHCL.
+# "Simple Hierarchical Config Language"
+#    Home     https://github.com/jim-collier/shcl
+#
+
+a: 1
+b: ```
+raw line
+c: 2

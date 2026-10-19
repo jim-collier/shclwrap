@@ -16,7 +16,9 @@ mode="$1"
 version="$2"
 work="$(realpath "$3")"
 artifacts="${root}/cicd/artifacts/leakcheck"
-mkdir -p "${artifacts}"
+## Kept between runs, so CodeQL's compiled queries are too (about 40 min cold).
+home="${root}/cicd/cache/c-home"
+mkdir -p "${artifacts}" "${home}"
 tag="shclwrap-c-tools:${PIN_GCC15_PACKAGE}_${PIN_CLANG_PACKAGE//:/_}"
 
 docker build --quiet --file "${here}/C.Dockerfile" \
@@ -30,6 +32,8 @@ network=none
 if [[ "${mode}" == leakcheck ]]; then network=bridge; fi
 
 exec docker run --rm --user "$(id -u):$(id -g)" --network="${network}" \
+	--env HOME=/home/ci \
+	--mount "type=bind,src=${home},dst=/home/ci" \
 	--mount "type=bind,src=${root},dst=/src,readonly" \
 	--mount "type=bind,src=${work},dst=/work" \
 	--mount "type=bind,src=${artifacts},dst=/artifacts" \

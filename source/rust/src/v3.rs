@@ -134,7 +134,7 @@ fn doc(d: shcl::Document) -> Doc {
 /// written for a newer format is `TooNew`. An older file is upgraded in
 /// memory, as `upgrade` with `from` 0 does, and `upgraded_from` says so.
 /// Nothing is written until `write`, and the first write over the file backs
-/// it up. A file that reads two ways is `Ambiguous`, and one shcl 2.0
+/// it up. A 2.x file that reads two ways is `Ambiguous`, and one shcl 2.0
 /// reports errors on, or that can't be made to read as 2.0 read it, is
 /// `Refused`, with the lines in `diags`.
 pub fn open(path: &str) -> Result<Doc, Error> {
@@ -173,9 +173,11 @@ pub fn format_of(text: &str) -> u32 {
 }
 
 /// Converts a file written for an older format. With `from` 0 the file's
-/// Format line decides, and a file with none is taken as current. Pass 2 for
-/// a file known to be from shcl 2.x or older. A file that reads two ways is `Ambiguous`, and one
-/// shcl 2.0 reports errors on is `Refused`, with those errors in `diags`. A
+/// Format line decides. A file with none is taken as 2.x when it has 2.x's
+/// info block, or errors on 3.0 that shcl 2.0 doesn't have, and otherwise as
+/// current. Pass 2 for a file known to be from shcl 2.x or older. A 2.x file
+/// that reads two ways is `Ambiguous`, and one shcl 2.0 reports errors on is
+/// `Refused`, with those errors in `diags`. A
 /// 2.x file comes out reading what 2.0 read, backslash escapes included, and
 /// one that can't is `Refused` too. 2.x's block is swapped for the current
 /// one where it sits, and the lines end as the file's did.
@@ -191,15 +193,16 @@ pub fn upgrade(text: &str, from: u32) -> Result<Upgraded, Error> {
 	} else {
 		(text.to_owned(), false)
 	};
+	// A file with no Format line that has 2.x's block is 2.x (design.md,
+	// Decisions).
+	let from = if banner && from == 0 { 2 } else { from };
 	let from_v2 = from > 0 && from < FORMAT_MAJOR;
 	let u = shcl::upgrade(&input, from_v2);
-	if u.ambiguous > 0 {
-		return Err(Error::new(ErrKind::Ambiguous).msg(format!("{} lines read two ways", u.ambiguous)));
-	}
 	// shcl says 2 for a file with no Format line, even one it leaves alone.
 	let taken_as_current = u.current && !from_v2 && format_of(text) == 0;
 	// Only a file taken as 2.x is read the 2.x way.
 	let old = !u.current || (from_v2 && u.format < FORMAT_MAJOR);
+	let ambiguous = u.ambiguous;
 	let mut out = upgraded(u);
 	if taken_as_current {
 		out.from = FORMAT_MAJOR;
@@ -208,8 +211,21 @@ pub fn upgrade(text: &str, from: u32) -> Result<Upgraded, Error> {
 		text.clone_into(&mut out.text);
 		return Ok(out);
 	}
+	// Nothing in this file says it's 2.x, only its errors on 3.0. With errors
+	// on 2.0 too, it's a current file with a typo (design.md, Decisions).
 	let old = shcl2::Document::parse(text);
-	if let Some(e) = old_errors(&old) {
+	let errors = old_errors(&old);
+	if errors.is_some() && !from_v2 && format_of(text) == 0 {
+		return Ok(Upgraded {
+			text: text.to_owned(),
+			from: FORMAT_MAJOR,
+			..Upgraded::default()
+		});
+	}
+	if ambiguous > 0 {
+		return Err(Error::new(ErrKind::Ambiguous).msg(format!("{ambiguous} lines read two ways")));
+	}
+	if let Some(e) = errors {
 		return Err(e);
 	}
 	let fixed = carry_reads(&old, &out.text, format_of(text) == 1)?;
@@ -441,6 +457,22 @@ fn upgraded(u: shcl::Upgrade) -> Upgraded {
 	}
 }
 
+/// `text` as a save writes it. Where that has no Format line, 2.x's block is
+/// swapped for the current one where it sits, as the upgrade does, so the
+/// next `open` doesn't take the file as 2.x (2026101513330010).
+fn saved(text: &str, info: crate::Info, stamp: bool) -> Result<String, Error> {
+	let e = info_edit();
+	let out = crate::finish_info(text, info, stamp, &e)?;
+	if format_of(&out) != 0 {
+		return Ok(out);
+	}
+	let (marked, found) = crate::info::old_block(&out, &e);
+	if !found {
+		return Ok(out);
+	}
+	crate::info::place_block(&marked, marked != out, &e)
+}
+
 fn info_edit() -> crate::InfoEdit<'static> {
 	crate::InfoEdit {
 		block: shcl::GEN_BANNER,
@@ -482,7 +514,7 @@ impl Doc {
 	/// `stamp_format` asked, or as it is when an edit since made them
 	/// impossible, which `write` reports.
 	fn finish(&self, text: String) -> String {
-		crate::finish_info(&text, self.info, self.stamp, &info_edit()).unwrap_or(text)
+		saved(&text, self.info, self.stamp).unwrap_or(text)
 	}
 
 	/// The shcl document underneath, for calls shclw doesn't cover.
@@ -535,8 +567,10 @@ impl ShclDoc for Doc {
 	/// Refuses when the load dropped lines the save would lose, the same
 	/// check shcl's `save_file_keep_lines` makes, and writes nothing when the
 	/// info block or the Format line can't go in, since an edit made after
-	/// `info_block` or `stamp_format`. A file that changed since `open` read
-	/// it is left alone with `Io`, when the write would back it up.
+	/// `info_block` or `stamp_format`. A save with no Format line has 2.x's
+	/// info block swapped for the current one where it sat. A file that
+	/// changed since `open` read it is left alone with `Io`, when the write
+	/// would back it up.
 	fn write(&mut self, path: &str) -> Result<(), Error> {
 		let (text, kept) = self.d.to_text_keep_lines();
 		let lost = self.d.lost_count();
@@ -546,7 +580,7 @@ impl ShclDoc for Doc {
 				.msg(format!("{lost} lines would be lost")));
 		}
 		let text = if kept { text } else { self.d.to_canonical() };
-		let text = crate::finish_info(&text, self.info, self.stamp, &info_edit()).map_err(|e| e.path(path))?;
+		let text = saved(&text, self.info, self.stamp).map_err(|e| e.path(path))?;
 		match &mut self.up {
 			Some(up) if up.backup.is_empty() && up.over(path) => {
 				let name = crate::replace_read(

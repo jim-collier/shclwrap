@@ -1,0 +1,41 @@
+> diags
+2	error	E003	no instance 5 of 'a'
+3	error	E019	malformed array, no closing ']' on the line; quote the value if it is text
+> upgrade
+from 3 changed false unsure 0
+| a: 1
+| a(5): 2
+| b: [x, y
+> upgrade	2
+error refused
+> open	doc.shcl
+ok
+> upgraded
+from 0 backup none
+> rewrites
+false
+> diags
+2	error	E003	no instance 5 of 'a'
+3	error	E019	malformed array, no closing ']' on the line; quote the value if it is text
+> get	int	a
+Good	1	1
+> open	doc.shcl	strict
+error strict
+2	error	E003	no instance 5 of 'a'
+3	error	E019	malformed array, no closing ']' on the line; quote the value if it is text
+> open	doc.shcl
+ok
+> put	int	n	1
+ok
+> write	doc.shcl
+ok
+| a: 1
+| a(5): 2
+| b: [x, y
+| 
+| n: 1
+> upgraded
+from 0 backup none
+> files
+doc.shcl
+ops.txt
