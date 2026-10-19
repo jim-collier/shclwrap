@@ -505,7 +505,7 @@ size_t *shclw_lines(shclw_doc *d, const char *path, size_t *n) {
 	shclw_node *nodes = shclw_each(d, path, &count);
 	if (!nodes || count == 0) {
 		free(nodes);
-		return nodes ? (size_t *)shclw_i_alloc(0) : NULL;
+		return nodes ? (size_t *)shclw_i_alloc(sizeof(size_t)) : NULL;
 	}
 	const shclw_node **order = (const shclw_node **)malloc(count * sizeof(shclw_node *));
 	size_t *out = (size_t *)malloc(count * sizeof(size_t));
