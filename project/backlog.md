@@ -28,8 +28,8 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 - The full run's CodeQL step can't make its cache dir, since the C checks run as the caller
 	- ID: 2026101914200000
 	- Type: Bug
-	- Status: Waiting for testing
-	- Needs local test suite run?: The full `cicd/cicd.bash`, with the leak checks.
+	- Status: Done
+	- Needs local test suite run?: N. Ran 2026-10-19 on `oldmark` at `9ae45eb`, see Verified.
 	- Severity: High
 	- Opened: 20261019-142000
 	- Opened by: JC
@@ -43,6 +43,10 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Branch: oldmark
 	- Test case: None. The full run is the test, and it failed before the fix.
 	- Swept: `c-checks.bash` is the only `docker run` in cicd.
+	- Verified: The full `cicd/cicd.bash` passed on `oldmark` at `9ae45eb`, with CodeQL, clang CTU, the heaptrack soak, and the fuzz.
+	- Note: The run also had 2 new CodeQL findings in `shclw3.c`, from 2026101910455900: a loop counter changed in the loop body, and a long function with few comments. Both are fixed in `9ae45eb`.
+	- Acceptance signoff: Self-closed: reproduced, and the full run that stopped there passes now. A second run with the cache kept compiled no queries, 6 minutes for `--quick --leakcheck` against about 45 minutes of compiling cold.
+	- Closed: 20261019-162344
 
 - Updates to CICD script flags
 	- ID: 2026101816214270
@@ -71,8 +75,8 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 - The upgrade keeps a 2.x backslash escape as typed, and 3.0 reads it as text
 	- ID: 2026101910455900
 	- Type: Bug
-	- Status: Waiting for testing
-	- Needs local test suite run?: Yes, the full run with the C leak checks.
+	- Status: Done
+	- Needs local test suite run?: N. Ran 2026-10-19 on `oldmark` at `9ae45eb`, see Verified.
 	- Severity: High
 	- Opened: 20261019-104559
 	- Opened by: JC
@@ -98,13 +102,15 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Commit: 2ca2f67, 11d80f4
 	- Test case: tests/cases/047-upgrade-escapes (a tab escape, a doubled pair, a lone backslash before a letter, quoted and bare values, an array, a repeated key, a raw body), 048-upgrade-escaped-name, 049-upgrade-1x-name, and the corrected want files of 034, 035, 039, and 045. All 7 fail in Go, Rust, and C without the fix and pass with it. With the sets turned off, the read-back against 2.0 refuses 045 and 047 in all 3.
 	- Swept: Upgrade, UpgradeFile, and Open in Go, Rust, and C, which all go through Upgrade. Values, array elements, repeated keys, names, and raw bodies. InfoBlock and StampFormat change no values. The ops runners, `fuzz.py`, and `c_cases.py` only compare outputs.
-	- Verified: `cicd/cicd.bash --quick` and `cicd/cicd.bash --ci --no-sync` pass, with the C clang-tidy, analyzers, and sanitized cases. The full run with the leak checks hasn't run.
+	- Verified: `cicd/cicd.bash --quick` and `cicd/cicd.bash --ci --no-sync` pass, with the C clang-tidy, analyzers, and sanitized cases. The full `cicd/cicd.bash` passed on `oldmark` at `9ae45eb`, with CodeQL, clang CTU, the heaptrack soak, and the fuzz.
+	- Acceptance signoff: Self-closed: its tests failed before the fix and pass after, and the full run passes. Its 2 CodeQL findings are fixed, see 2026101914200000.
+	- Closed: 20261019-162344
 
 - Upgrade swaps the 2.x banner for the current one
 	- ID: 2026101513330011
 	- Type: Feature
-	- Status: Waiting for testing
-	- Needs local test suite run?: The full `cicd/cicd.bash`, with the leak checks.
+	- Status: Done
+	- Needs local test suite run?: N. Ran 2026-10-19 on `oldmark` at `9ae45eb`, see Verified.
 	- Priority: Avg
 	- Opened: 20261015-133300
 	- Opened by: JC
@@ -119,7 +125,9 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Commit: 566cef5, 12beb27
 	- Test case: tests/cases/051-banner-swap (a block at the top of a CRLF file shcl leaves alone, one in the middle of a CRLF file shcl writes out again, a CRLF file with no block, and a file with a line like the swap's own mark). It fails without the change in Go, Rust, and C, and passes with it. In Go it also fails with the in-place step or the CRLF step turned off.
 	- Swept: `Upgrade` in Go, Rust, and C, which `Open` and `UpgradeFile` go through. The swap reuses `InfoBlock`'s block finder in `shclw/info.go`, `src/info.rs`, and `info.c`. Files with a BOM, no final newline, 2 blocks, an indented block, a Format 3 line, and 2.0 errors gave the same output from all 3 drivers.
-	- Verified: `cicd/cicd.bash --quick` and `cicd/cicd.bash --ci --no-sync` pass, with the C clang-tidy, analyzers, and sanitized cases. The full run with the leak checks hasn't run.
+	- Verified: `cicd/cicd.bash --quick` and `cicd/cicd.bash --ci --no-sync` pass, with the C clang-tidy, analyzers, and sanitized cases. The full `cicd/cicd.bash` passed on `oldmark` at `9ae45eb`, with CodeQL, clang CTU, the heaptrack soak, and the fuzz.
+	- Acceptance signoff: Self-closed: it does what the item asked, its test failed before the change and passes after, and the full run passes.
+	- Closed: 20261019-162344
 
 - shcl 4 adapters
 	- ID: 2026101512024163
@@ -153,8 +161,8 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 - Make shcl 3.0 the floor
 	- ID: 2026101613005800
 	- Type: Feature
-	- Status: Waiting for testing
-	- Needs local test suite run?: The full `cicd/cicd.bash`, with the leak checks.
+	- Status: Done
+	- Needs local test suite run?: N. Ran 2026-10-19 on `oldmark` at `9ae45eb`, see Verified.
 	- Priority: High
 	- Opened: 20261016-130058
 	- Opened by: JC
@@ -194,13 +202,15 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Swept: Go, Rust, and C for the helpers only 1.2 and 2.0 used (the step-count edit check, the path splitter for `Each`, the 1.2 save, the 1.2 and 2.0 info block text, and the Format line reader), all removed. Comments, cicd, `c_cases.py`, `fuzz.py`, design.md, and README for 1.2 and 2.0 mentions.
 		- Part 2: Open, OpenWith, Write, and Rewrites in all 3 languages, the 3 ops runners, the `Doc` interface, the `ShclDoc` and `Lib` traits, Go's docMethods list, `fuzz.py`, and every test that opens an unstamped file with an error.
 		- Errors on both: `Upgrade` in all 3, which `Open` and `UpgradeFile` go through, and its doc comments. Every test and case that opens or upgrades an unstamped file with an error, or expects `ErrAmbiguous`. design.md's Open, Format and upgrade, the evens-out table, and Decisions, and README's note on old files.
-	- Verified: On 5a800e6, `cicd/cicd.bash --quick` and `--ci` pass, with the C clang-tidy, analyzers, and sanitized cases. The full run with the leak checks hasn't run on it.
+	- Verified: On 5a800e6, `cicd/cicd.bash --quick` and `--ci` pass, with the C clang-tidy, analyzers, and sanitized cases. The full `cicd/cicd.bash` passed on `oldmark` at `9ae45eb`, with CodeQL, clang CTU, the heaptrack soak, and the fuzz.
+	- Acceptance signoff: Self-closed: the signoff question has its answer in Decisions, every test passes, and the full run passes. The 3.0 beta pin is 2026101512024165's, and moving the 3 programs is 2026101512024167's.
+	- Closed: 20261019-162344
 
 - Tell a 2.x file from a current one by its banner
 	- ID: 2026101513330010
 	- Type: Feature
-	- Status: Waiting for testing
-	- Needs local test suite run?: The full `cicd/cicd.bash`, with the leak checks.
+	- Status: Done
+	- Needs local test suite run?: N. Ran 2026-10-19 on `oldmark` at `9ae45eb`, see Verified.
 	- Priority: Avg
 	- Opened: 20261015-133300
 	- Opened by: JC
@@ -223,7 +233,9 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- The save's swap: 050's last `Open`, and Go's TestWriteSwapsOldBlock, Rust's write_swaps_old_block, and C's test_write_swaps_old_block (a CRLF file with the block in the middle, a block's text in a raw body, and a block with a Format line). They fail in all 3 with the swap turned off, and pass with it.
 	- Swept: `Upgrade` in Go, Rust, and C, which `Open` and `UpgradeFile` go through, and the doc comments on all 3. design.md's Open, Format and upgrade, and Decisions, and README's note on old files. The ops runners, `fuzz.py`, and `c_cases.py` only compare outputs.
 		- The swap: `Write`, `Text`, and `Canonical` in all 3, which share one save step, and the `Write` doc comments. design.md's Loading and saving, the evens-out table, and Decisions, and README.
-	- Verified: On 5a800e6, `cicd/cicd.bash --quick` and `--ci` pass, with the C clang-tidy, analyzers, and sanitized cases. The full run with the leak checks hasn't run on it.
+	- Verified: On 5a800e6, `cicd/cicd.bash --quick` and `--ci` pass, with the C clang-tidy, analyzers, and sanitized cases. The full `cicd/cicd.bash` passed on `oldmark` at `9ae45eb`, with CodeQL, clang CTU, the heaptrack soak, and the fuzz.
+	- Acceptance signoff: Self-closed: built as asked with the Write swap from Decisions, its tests failed without each part and pass with it, and the full run passes.
+	- Closed: 20261019-162344
 
 - Layered loading
 	- ID: 2026101512024156
