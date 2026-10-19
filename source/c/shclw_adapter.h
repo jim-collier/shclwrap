@@ -114,6 +114,24 @@ typedef struct {
 shclw_kind shclw_i_finish_info(const char *text, size_t len, shclw_i_info info, bool stamp, const shclw_i_info_edit *e,
                                const char *path, char **out, size_t *out_len, shclw_error *err);
 
+// Go's OldBlock: whether text has 2.x's `#` info block as comments, in
+// *found, and in *marked text with the first one swapped for a mark
+// shclw_i_place_block finds, which the caller frees. *marked is NULL where
+// text already has a line like the mark. False when memory ran out.
+bool shclw_i_old_block(const char *text, size_t len, const shclw_i_info_edit *e, bool *found, char **marked,
+                       size_t *marked_len);
+
+// Go's PlaceBlock: text, an upgrade of the marked text, with every old block
+// off and the info block where the mark is, or at the end with no mark, in
+// *out, which the caller frees.
+shclw_kind shclw_i_place_block(const char *text, size_t len, bool marked, const shclw_i_info_edit *e, const char *path,
+                               char **out, size_t *out_len, shclw_error *err);
+
+// Go's SameEnds: text, an upgrade of orig, with orig's line ends where shcl
+// wrote it out with LF only. malloc'd, or NULL when memory ran out.
+char *shclw_i_same_ends(const char *orig, size_t orig_len, const char *text, size_t len, const shclw_i_info_edit *e,
+                        size_t *out_len);
+
 // Go's ReplaceRead: writes data over path, where was is the text last read
 // from it. A file that has changed since is left alone, checked before the
 // backup and again before the write. backup, when not NULL, keeps was first

@@ -1083,6 +1083,36 @@ static shclw_kind carry_reads(shclw_i_v2_doc *old, const char *up, size_t up_len
 	return oom || bad->oom ? SHCLW_ERR_NO_MEMORY : SHCLW_OK;
 }
 
+// The result of an upgrade of text to up, with text's line ends, and with the
+// info block put where the mark is when banner. *k is set on a failure.
+static shclw_upgraded *upgraded_ends(const char *text, size_t len, const char *up, size_t up_len, bool banner,
+                                     bool marked, int64_t was, const shcl_upgraded *u, const char *path, shclw_kind *k,
+                                     shclw_error *err) {
+	size_t ends_n = 0, t_len = 0;
+	char *ends = shclw_i_same_ends(text, len, up, up_len, &info_edit, &ends_n);
+	char *t = NULL;
+	if (!ends) {
+		*k = shclw_i_fail(err, SHCLW_ERR_NO_MEMORY, path, NULL, 0);
+		return NULL;
+	}
+	if (!banner) {
+		shclw_upgraded *r = shclw_i_upgraded(ends, ends_n, was, true, u->lost, NULL, NULL, 0);
+		free(ends);
+		return r;
+	}
+	*k = shclw_i_place_block(ends, ends_n, marked, &info_edit, path, &t, &t_len, err);
+	free(ends);
+	shclw_upgraded *r = NULL;
+	if (*k == SHCLW_OK) {
+		bool changed = t_len != len || memcmp(t, text, len) != 0;
+		r = shclw_i_upgraded(t, t_len, was, changed, u->lost, NULL, NULL, 0);
+	} else {
+		r = shclw_i_upgraded(text, len, u->format, false, 0, NULL, NULL, 0);
+	}
+	free(t);
+	return r;
+}
+
 // Go's Upgrade, with path for the error when a file is behind it.
 static shclw_kind upgrade(const char *text, size_t len, int64_t from, const char *path, shclw_upgraded **out,
                           shclw_error *err) {
@@ -1097,10 +1127,21 @@ static shclw_kind upgrade(const char *text, size_t len, int64_t from, const char
 		*out = shclw_i_upgraded(text, len, f, false, 0, NULL, NULL, 0);
 		return *out ? too_new(err, path, f) : shclw_i_fail(err, SHCLW_ERR_NO_MEMORY, path, NULL, 0);
 	}
+	// The new block goes where 2.x's sat, so a mark shcl leaves be stands in.
+	bool banner = false;
+	char *marked = NULL;
+	size_t marked_len = 0;
+	if (named == 0) {
+		if (!shclw_i_old_block(text, len, &info_edit, &banner, &marked, &marked_len)) {
+			return shclw_i_fail(err, SHCLW_ERR_NO_MEMORY, path, NULL, 0);
+		}
+	}
 	bool from_v2 = from > 0 && from < SHCLW_FORMAT_MAJOR;
-	shcl_upgraded u = shcl_upgrade(text, len, from_v2 ? 1 : 0);
+	shcl_upgraded u =
+		marked ? shcl_upgrade(marked, marked_len, from_v2 ? 1 : 0) : shcl_upgrade(text, len, from_v2 ? 1 : 0);
 	if (!u.text) {
 		shcl_upgraded_free(&u);
+		free(marked);
 		return shclw_i_fail(err, SHCLW_ERR_NO_MEMORY, path, NULL, 0);
 	}
 	int64_t was = u.format;
@@ -1110,12 +1151,12 @@ static shclw_kind upgrade(const char *text, size_t len, int64_t from, const char
 	}
 	shclw_kind k = SHCLW_OK;
 	if (u.ambiguous > 0) {
-		*out = shclw_i_upgraded(u.text, u.len, was, !u.current, u.lost, NULL, NULL, 0);
+		*out = shclw_i_upgraded(text, len, was, !u.current, u.lost, NULL, NULL, 0);
 		char why[64];
 		(void)snprintf(why, sizeof why, "%zu lines read two ways", u.ambiguous);
 		k = shclw_i_fail(err, SHCLW_ERR_AMBIGUOUS, path, why, 0);
 	} else if (u.current && !(from_v2 && u.format < SHCLW_FORMAT_MAJOR)) {
-		*out = shclw_i_upgraded(u.text, u.len, was, false, u.lost, NULL, NULL, 0);
+		*out = shclw_i_upgraded(text, len, was, false, u.lost, NULL, NULL, 0);
 	} else {
 		// A file taken as 2.x that 2.0 reports errors on. The old program
 		// read those lines as it repaired them, or not at all, and an open raw
@@ -1147,10 +1188,13 @@ static shclw_kind upgrade(const char *text, size_t len, int64_t from, const char
 				               lines_in(&l));
 			}
 			k = shclw_i_fail(err, SHCLW_ERR_REFUSED, path, why, 0);
+		} else if (banner || (!u.current && !fixed)) {
+			*out = upgraded_ends(text, len, fixed ? fixed : u.text, fixed ? fixed_len : u.len, banner, marked != NULL,
+			                     was, &u, path, &k, err);
 		} else if (!fixed) {
-			*out = shclw_i_upgraded(u.text, u.len, was, !u.current, u.lost, NULL, NULL, 0);
+			*out = shclw_i_upgraded(u.text, u.len, was, false, u.lost, NULL, NULL, 0);
 		} else if (!u.current) {
-			*out = shclw_i_upgraded(fixed, fixed_len, was, true, u.lost, NULL, NULL, 0);
+			*out = upgraded_ends(text, len, fixed, fixed_len, false, false, was, &u, path, &k, err);
 		} else {
 			// shcl left this one as it was, so it has no Format line yet, and
 			// the next upgrade would read the escapes a second time.
@@ -1165,6 +1209,7 @@ static shclw_kind upgrade(const char *text, size_t len, int64_t from, const char
 		free_old(&l);
 	}
 	shcl_upgraded_free(&u);
+	free(marked);
 	if (!*out) {
 		return shclw_i_fail(err, SHCLW_ERR_NO_MEMORY, path, NULL, 0);
 	}

@@ -101,6 +101,102 @@ pub fn finish_info(text: &str, info: Info, stamp: bool, e: &InfoEdit<'_>) -> Res
 	Ok(format!("{bom}{out}"))
 }
 
+/// Stands in for 2.x's block while shcl upgrades the text, so the new block
+/// can go where the old one was.
+const INFO_MARK: &str = "# shclw: the info block goes here";
+
+/// Whether `text` has 2.x's `#` info block as comments, and `text` with the
+/// first one swapped for a mark `place_block` finds. Where `text` already has
+/// a line like the mark, the text comes back as it was.
+pub(crate) fn old_block(text: &str, e: &InfoEdit<'_>) -> (String, bool) {
+	let body = text.strip_prefix('\u{feff}').unwrap_or(text);
+	let mut f = InfoLines::split(body);
+	let base = (e.values)(body);
+	let n = f.lines.len();
+	let title = format!("#{INFO_TITLE}");
+	for (start, end) in info_runs(&f) {
+		if f.trimmed(start) != title && (start + 1 == end || f.trimmed(start + 1) != title) {
+			continue;
+		}
+		let mut run = span(n, start, end);
+		let mut last = start;
+		for (i, r) in run.iter_mut().enumerate().take(end).skip(start) {
+			*r = !f.trimmed(i).starts_with(SCHEMA_HEAD);
+			if *r {
+				last = i;
+			}
+		}
+		if (e.values)(&f.join_without(Some(&run))) != base {
+			continue;
+		}
+		if (0..n).any(|i| f.trimmed(i) == INFO_MARK) {
+			return (text.to_owned(), true);
+		}
+		INFO_MARK.clone_into(&mut f.lines[last]);
+		run[last] = false;
+		return (
+			format!("{}{}", &text[..text.len() - body.len()], f.join_without(Some(&run))),
+			true,
+		);
+	}
+	(text.to_owned(), false)
+}
+
+/// `text`, an upgrade of `old_block`'s marked text, with every old block off
+/// and the info block where the mark is. With no mark it goes at the end, as
+/// `info_block` puts it.
+pub(crate) fn place_block(text: &str, marked: bool, e: &InfoEdit<'_>) -> Result<String, Error> {
+	let off = finish_info(text, Info::Off, false, e)?;
+	let body = off.strip_prefix('\u{feff}').unwrap_or(&off);
+	let bom = &off[..off.len() - body.len()];
+	let f = InfoLines::split(body);
+	let marks: Vec<bool> = (0..f.lines.len()).map(|i| f.trimmed(i) == INFO_MARK).collect();
+	let at = marks.iter().position(|&m| m);
+	let Some(at) = at.filter(|_| marked && body.matches(INFO_MARK).count() == 1) else {
+		let off = if marked {
+			format!("{bom}{}", f.join_without(Some(&marks)))
+		} else {
+			off.clone()
+		};
+		return finish_info(&off, Info::On, false, e);
+	};
+	let mut g = InfoLines {
+		lines: Vec::with_capacity(f.lines.len() + 8),
+		ends: Vec::with_capacity(f.lines.len() + 8),
+		eol: f.eol,
+	};
+	for (i, l) in f.lines.iter().enumerate() {
+		if i != at {
+			g.lines.push(l.clone());
+			g.ends.push(f.ends[i]);
+			continue;
+		}
+		let block: Vec<&str> = e.block.trim_end_matches('\n').split('\n').collect();
+		for (k, b) in block.iter().enumerate() {
+			g.lines.push((*b).to_owned());
+			g.ends.push(if k + 1 == block.len() { f.ends[i] } else { f.eol });
+		}
+	}
+	let out = g.join_without(None);
+	if (e.values)(&out) != (e.values)(body) {
+		return Err(Error::new(ErrKind::Refused).msg("the file ends in a raw block that never closes"));
+	}
+	Ok(format!("{bom}{out}"))
+}
+
+/// `text`, an upgrade of `orig`, with `orig`'s line ends, where shcl wrote it
+/// out again with LF only.
+pub(crate) fn same_ends(orig: &str, text: &str, e: &InfoEdit<'_>) -> String {
+	if InfoLines::split(orig).eol != "\r\n" || text.contains('\r') {
+		return text.to_owned();
+	}
+	let crlf = text.replace('\n', "\r\n");
+	if (e.values)(&crlf) != (e.values)(text) {
+		return text.to_owned();
+	}
+	crlf
+}
+
 /// The number on each Format line that counts, in order. A line counts when
 /// taking it out leaves the values at `base`, so one in a raw body doesn't.
 fn formats_named(f: &InfoLines, e: &InfoEdit<'_>, base: &str) -> Vec<u32> {

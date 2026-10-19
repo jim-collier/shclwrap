@@ -1,0 +1,47 @@
+> upgrade	2
+from 2 changed true unsure 0
+| ##\r
+| ## This config file format is SHCL.\r
+| ## "Simple Hierarchical Config Language"\r
+| ##    Format   3\r
+| ##    Home     https://github.com/yottacore/shcl\r
+| ##    Syntax   https://github.com/yottacore/shcl/blob/v3.0.0-beta1/project/spec.md\r
+| ##    Legal    SHCL is Copyright © 2026 Jim Collier [ID: 2უNაɘ«҂թȹɤξπ๙¿ձϖ]. License: MIT. No warranty.\r
+| ##\r
+| \r
+| # my settings\r
+| port: 8080\r
+| name: "two words"\r
+> open	middle.shcl
+ok
+> upgraded
+from 2 backup none
+> text
+| port: 8080\r
+| ##\r
+| ## This config file format is SHCL.\r
+| ## "Simple Hierarchical Config Language"\r
+| ##    Format   3\r
+| ##    Home     https://github.com/yottacore/shcl\r
+| ##    Syntax   https://github.com/yottacore/shcl/blob/v3.0.0-beta1/project/spec.md\r
+| ##    Legal    SHCL is Copyright © 2026 Jim Collier [ID: 2უNაɘ«҂թȹɤξπ๙¿ձϖ]. License: MIT. No warranty.\r
+| ##\r
+| hosts: [alpha, beta]\r
+| name: "two words"\r
+> get	strs	hosts
+Good	10	2	alpha	beta
+> open	mark.shcl
+ok
+> text
+| hosts: [alpha, beta]
+| # shclw: the info block goes here
+| name: x
+| 
+| ##
+| ## This config file format is SHCL.
+| ## "Simple Hierarchical Config Language"
+| ##    Format   3
+| ##    Home     https://github.com/yottacore/shcl
+| ##    Syntax   https://github.com/yottacore/shcl/blob/v3.0.0-beta1/project/spec.md
+| ##    Legal    SHCL is Copyright © 2026 Jim Collier [ID: 2უNაɘ«҂թȹɤξπ๙¿ձϖ]. License: MIT. No warranty.
+| ##
