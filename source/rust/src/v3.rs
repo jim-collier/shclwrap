@@ -135,7 +135,8 @@ fn doc(d: shcl::Document) -> Doc {
 /// memory, as `upgrade` with `from` 0 does, and `upgraded_from` says so.
 /// Nothing is written until `write`, and the first write over the file backs
 /// it up. A file that reads two ways is `Ambiguous`, and one shcl 2.0
-/// reports errors on is `Refused`, with those errors in `diags`.
+/// reports errors on, or that can't be made to read as 2.0 read it, is
+/// `Refused`, with the lines in `diags`.
 pub fn open(path: &str) -> Result<Doc, Error> {
 	open_with(path, Strictness::Standard)
 }
@@ -175,7 +176,9 @@ pub fn format_of(text: &str) -> u32 {
 /// Format line decides, and a file with none is taken as current. Pass 2
 /// for a file known to be from shcl 2.x or older; it can't tell those apart
 /// by itself. A file that reads two ways is `Ambiguous`, and one shcl 2.0
-/// reports errors on is `Refused`, with those errors in `diags`.
+/// reports errors on is `Refused`, with those errors in `diags`. A 2.x file
+/// comes out reading what 2.0 read, backslash escapes included, and one that
+/// can't is `Refused` too.
 pub fn upgrade(text: &str, from: u32) -> Result<Upgraded, Error> {
 	let f = format_of(text).max(from);
 	if f > FORMAT_MAJOR {
@@ -186,15 +189,33 @@ pub fn upgrade(text: &str, from: u32) -> Result<Upgraded, Error> {
 	if u.ambiguous > 0 {
 		return Err(Error::new(ErrKind::Ambiguous).msg(format!("{} lines read two ways", u.ambiguous)));
 	}
-	if let Some(e) = old_errors(text, from_v2, &u) {
-		return Err(e);
-	}
 	// shcl says 2 for a file with no Format line, even one it leaves alone.
 	let taken_as_current = u.current && !from_v2 && format_of(text) == 0;
+	// Only a file taken as 2.x is read the 2.x way.
+	let old = !u.current || (from_v2 && u.format < FORMAT_MAJOR);
 	let mut out = upgraded(u);
 	if taken_as_current {
 		out.from = FORMAT_MAJOR;
 	}
+	if !old {
+		return Ok(out);
+	}
+	let old = shcl2::Document::parse(text);
+	if let Some(e) = old_errors(&old) {
+		return Err(e);
+	}
+	let fixed = carry_reads(&old, &out.text, format_of(text) == 1)?;
+	if fixed == out.text {
+		return Ok(out);
+	}
+	// shcl left this one as it was, so it has no Format line yet, and the
+	// next upgrade would read the escapes a second time.
+	out.text = if out.changed {
+		fixed
+	} else {
+		crate::finish_info(&fixed, crate::Info::On, false, &info_edit())?
+	};
+	out.changed = true;
 	Ok(out)
 }
 
@@ -254,11 +275,8 @@ fn write_atomic(path: &str, text: &str) -> Result<(), Error> {
 /// program read those lines as it repaired them, or not at all, and an open
 /// raw block took the rest of the file. The upgrade would turn that into a
 /// clean file that means something else (design.md, Format and upgrade).
-fn old_errors(text: &str, from_v2: bool, u: &shcl::Upgrade) -> Option<Error> {
-	if u.ambiguous > 0 || (u.current && !(from_v2 && u.format < FORMAT_MAJOR)) {
-		return None;
-	}
-	let errs: Vec<Diag> = shcl2::Document::parse(text)
+fn old_errors(old: &shcl2::Document) -> Option<Error> {
+	let errs: Vec<Diag> = old
 		.diagnostics()
 		.iter()
 		.filter(|d| matches!(d.severity, shcl2::Severity::Error))
@@ -281,6 +299,127 @@ fn old_errors(text: &str, from_v2: bool, u: &shcl::Upgrade) -> Option<Error> {
 	));
 	e.diags = errs;
 	Some(e)
+}
+
+/// Makes `up`, the upgraded text, read each value the way shcl 2.0 read it
+/// in `old`. shcl's migrate leaves a 2.x backslash escape as typed, and 3.0
+/// reads it as text, so `C:\\new` was `C:\new` and would now be `C:\\new`
+/// (2026101910455900). Each value with an escape in it is set again, then
+/// every path 2.0 reads one value at is read back against 2.0. A name 2.0 read
+/// with an escape resolved can't be renamed here, so it's refused, unless the
+/// file names format 1, since 1.2 read names as typed. So is a value that
+/// still reads differently.
+fn carry_reads(old: &shcl2::Document, up: &str, names_as_typed: bool) -> Result<String, Error> {
+	let mut d = shcl::Document::parse_keep_lines(up, shcl::Strictness::Standard).unwrap_or_else(|le| le.document);
+	let mut bad = Vec::new();
+	let mut sets: Vec<(String, Vec<String>)> = Vec::new();
+	for f in d.fields() {
+		if !names_as_typed && v2_escapes(&f.name) != f.name {
+			bad.push(carry_diag(
+				old.line(&f.path),
+				"shcl 2.0 read this name with its backslash escapes resolved, and 3.0 reads it as typed; rename it and upgrade again",
+			));
+			continue;
+		}
+		if d.read_raw(&f.path).status == shcl::Status::Good {
+			continue;
+		}
+		let arr = d.read_string_array(&f.path);
+		if arr.status != shcl::Status::Good {
+			continue;
+		}
+		let want: Vec<String> = arr.value.iter().map(|v| v2_escapes(v)).collect();
+		if want == arr.value {
+			continue;
+		}
+		let s = d.read_string(&f.path);
+		let st = if want.len() == 1 && s.status == shcl::Status::Good && s.value == arr.value[0] {
+			d.set_string(&f.path, &want[0])
+		} else {
+			let refs: Vec<&str> = want.iter().map(String::as_str).collect();
+			d.set_string_array(&f.path, &refs)
+		};
+		if st != shcl::SetStatus::Ok {
+			bad.push(carry_diag(
+				old.line(&f.path),
+				"the upgraded file can't hold this value as shcl 2.0 read it",
+			));
+			continue;
+		}
+		sets.push((f.path, want));
+	}
+	let text = if sets.is_empty() {
+		up.to_owned()
+	} else {
+		d.to_text_keep_lines().0
+	};
+	let now = shcl::Document::parse(&text);
+	for (path, want) in &sets {
+		let got = now.read_string_array(path);
+		if got.status != shcl::Status::Good || got.value != *want {
+			bad.push(carry_diag(
+				old.line(path),
+				"the upgraded file doesn't read this value as shcl 2.0 read it",
+			));
+		}
+	}
+	for p in old.paths() {
+		if old.count(&p) != 1 {
+			continue;
+		}
+		let (was, is) = (old.read_string_array(&p), now.read_string_array(&p));
+		if was.status == shcl2::Status::Good && is.status == shcl::Status::Good && was.value != is.value {
+			bad.push(carry_diag(
+				old.line(&p),
+				"the upgraded file doesn't read this value as shcl 2.0 read it",
+			));
+		}
+	}
+	if bad.is_empty() {
+		return Ok(text);
+	}
+	let mut lines: Vec<usize> = bad.iter().map(|d| d.line).collect();
+	lines.sort_unstable();
+	lines.dedup();
+	let mut e = Error::new(ErrKind::Refused).msg(format!(
+		"{} lines don't read as shcl 2.0 read them; fix them and upgrade again",
+		lines.len()
+	));
+	e.diags = bad;
+	Err(e)
+}
+
+fn carry_diag(line: usize, message: &str) -> Diag {
+	Diag {
+		line,
+		severity: Severity::Error,
+		code: "W002",
+		message: message.to_owned(),
+	}
+}
+
+/// `s` as shcl 1.2 and 2.0 read it: `\t`, `\n`, `\\`, `\"`, and `\'` are
+/// escapes, and any other backslash is itself.
+fn v2_escapes(s: &str) -> String {
+	let mut out = String::with_capacity(s.len());
+	let mut chars = s.chars();
+	while let Some(c) = chars.next() {
+		if c != '\\' {
+			out.push(c);
+			continue;
+		}
+		match chars.next() {
+			None => out.push('\\'),
+			Some('t') => out.push('\t'),
+			Some('n') => out.push('\n'),
+			Some(e @ ('\\' | '"' | '\'')) => out.push(e),
+			Some(other) => {
+				out.push('\\');
+				out.push(other);
+			}
+		}
+	}
+	out
 }
 
 fn upgraded(u: shcl::Upgrade) -> Upgraded {

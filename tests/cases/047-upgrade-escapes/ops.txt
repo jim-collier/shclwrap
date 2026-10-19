@@ -1,0 +1,25 @@
+# 2.x read \t, \n, \\, \", and \' in a value as escapes, bare or quoted, and
+# left any other backslash as typed. The upgraded file reads the same, and a
+# raw body keeps its text (2026101910455900). The comma list doesn't load
+# clean on 3.0, so Open takes the file as 2.x.
+open	doc.shcl
+upgraded
+get	str	tab
+get	str	pair
+get	str	lone
+get	str	quoted
+get	str	qtab
+get	str	say
+get	str	lines
+get	str	end
+get	strs	list
+first	str	rep
+last	str	rep
+get	raw	raw
+text
+open	doc.shcl
+write	doc.shcl
+open	doc.shcl
+upgraded
+get	str	tab
+get	str	pair

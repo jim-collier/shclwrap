@@ -1,0 +1,4 @@
+paths:
+	"C:\\tools": viewer
+	"C:\dir": other
+	plain: a, b

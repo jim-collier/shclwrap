@@ -1,0 +1,91 @@
+> open	doc.shcl
+ok
+> upgraded
+from 2 backup none
+> get	str	tab
+Good	2	C:\temp
+> get	str	pair
+Good	3	C:\\new
+> get	str	lone
+Good	4	C:\\dir\\file
+> get	str	quoted
+Good	5	C:\\Program Files\\app
+> get	str	qtab
+Good	6	col1\tcol2
+> get	str	say
+Good	7	say "hi"
+> get	str	lines
+Good	8	one\ntwo
+> get	str	end
+Good	9	tail\\
+> get	strs	list
+Good	10	3	one\\two	p\tq	C:\\dir
+> first	str	rep
+Good	11	a\tb
+> last	str	rep
+Good	12	plain
+> get	raw	raw
+Good	13	keep \\t as typed
+> text
+| # Backslashes as 2.x read them, typed by hand and as its setters wrote them
+| tab: "C:◉TAB◉emp"
+| pair: "C:\\new"
+| lone: "C:\\dir\\file"
+| quoted: "C:\\Program Files\\app"
+| qtab: "col1◉TAB◉col2"
+| say: 'say "hi"'
+| lines: "one◉NEWLINE◉two"
+| end: tail\\
+| list: [one\\two, "p◉TAB◉q", "C:\\dir"]
+| rep: "a◉TAB◉b"
+| rep: plain
+| raw:
+| \t~~~
+| \tkeep \\t as typed
+| \t~~~
+| 
+| ##
+| ## This config file format is SHCL.
+| ## "Simple Hierarchical Config Language"
+| ##    Format   3
+| ##    Home     https://github.com/yottacore/shcl
+| ##    Syntax   https://github.com/yottacore/shcl/blob/v3.0.0-beta1/project/spec.md
+| ##    Legal    SHCL is Copyright © 2026 Jim Collier [ID: 2უNაɘ«҂թȹɤξπ๙¿ձϖ]. License: MIT. No warranty.
+| ##
+> open	doc.shcl
+ok
+> write	doc.shcl
+ok
+| # Backslashes as 2.x read them, typed by hand and as its setters wrote them
+| tab: "C:◉TAB◉emp"
+| pair: "C:\\new"
+| lone: "C:\\dir\\file"
+| quoted: "C:\\Program Files\\app"
+| qtab: "col1◉TAB◉col2"
+| say: 'say "hi"'
+| lines: "one◉NEWLINE◉two"
+| end: tail\\
+| list: [one\\two, "p◉TAB◉q", "C:\\dir"]
+| rep: "a◉TAB◉b"
+| rep: plain
+| raw:
+| \t~~~
+| \tkeep \\t as typed
+| \t~~~
+| 
+| ##
+| ## This config file format is SHCL.
+| ## "Simple Hierarchical Config Language"
+| ##    Format   3
+| ##    Home     https://github.com/yottacore/shcl
+| ##    Syntax   https://github.com/yottacore/shcl/blob/v3.0.0-beta1/project/spec.md
+| ##    Legal    SHCL is Copyright © 2026 Jim Collier [ID: 2უNაɘ«҂թȹɤξπ๙¿ձϖ]. License: MIT. No warranty.
+| ##
+> open	doc.shcl
+ok
+> upgraded
+from 0 backup none
+> get	str	tab
+Good	2	C:\temp
+> get	str	pair
+Good	3	C:\\new

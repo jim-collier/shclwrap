@@ -7,16 +7,17 @@ false
 > get	str	account.email
 Good	4	C:\\\\new
 > upgrade	2
-from 2 changed false unsure 0
+from 2 changed true unsure 0
 | # mine
 | account: w
 | \tname: Ada
-| \temail: C:\\\\new
+| \temail: "C:\\new"
 | 
-| #
-| # This config file format is SHCL.
-| # "Simple Hierarchical Config Language"
-| #    Home     https://github.com/jim-collier/shcl
-| #    Syntax   https://github.com/jim-collier/shcl/blob/main/project/spec.md
-| #    Legal    SHCL is Copyright © 2026 Jim Collier. License: MIT. No warranty.
-| #
+| ##
+| ## This config file format is SHCL.
+| ## "Simple Hierarchical Config Language"
+| ##    Format   3
+| ##    Home     https://github.com/yottacore/shcl
+| ##    Syntax   https://github.com/yottacore/shcl/blob/v3.0.0-beta1/project/spec.md
+| ##    Legal    SHCL is Copyright © 2026 Jim Collier [ID: 2უNაɘ«҂թȹɤξπ๙¿ձϖ]. License: MIT. No warranty.
+| ##

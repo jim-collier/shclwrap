@@ -183,9 +183,9 @@ shclw_kind shclw_parse_with(const char *text, size_t len, shclw_strictness level
 // memory, as shclw_upgrade with from 0 does, and shclw_upgraded_from says so.
 // Nothing is written until shclw_write, and the first save over the file
 // backs it up. A file that reads two ways is SHCLW_ERR_AMBIGUOUS, and one shcl
-// 2.0 reports errors on SHCLW_ERR_REFUSED, with those errors in the empty
-// document's shclw_diags. On a failure *doc is an empty document, so reads
-// give their fallbacks. Free it either way.
+// 2.0 reports errors on, or that can't be made to read as 2.0 read it,
+// SHCLW_ERR_REFUSED, with the lines in the empty document's shclw_diags. On a failure *doc is an empty document, so
+// reads give their fallbacks. Free it either way.
 shclw_kind shclw_open(const char *path, shclw_doc **doc, shclw_error *err);
 // level applies to the upgraded text.
 shclw_kind shclw_open_with(const char *path, shclw_strictness level, shclw_doc **doc, shclw_error *err);
@@ -255,7 +255,9 @@ typedef struct {
 // line decides, and a file with none is taken as current. Pass from 2 for a
 // file known to be from shcl 2.x or older; it can't tell those apart by
 // itself. A file that reads two ways is SHCLW_ERR_AMBIGUOUS, and one shcl 2.0
-// reports errors on is SHCLW_ERR_REFUSED. *out is set on a failure too, and is
+// reports errors on is SHCLW_ERR_REFUSED, with them in its diags. A 2.x file
+// comes out reading what 2.0 read, backslash escapes included, and one that
+// can't is SHCLW_ERR_REFUSED too. *out is set on a failure too, and is
 // NULL only when memory ran out.
 shclw_kind shclw_upgrade(const char *text, size_t len, int64_t from, shclw_upgraded **out, shclw_error *err);
 // shclw_upgrade on a file. When it changes the file it first copies the

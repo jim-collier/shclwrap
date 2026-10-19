@@ -1,0 +1,5 @@
+> open	doc.shcl
+error refused
+2	error	W002	shcl 2.0 read this name with its backslash escapes resolved, and 3.0 reads it as typed; rename it and upgrade again
+> upgrade	2
+error refused
