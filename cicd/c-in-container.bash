@@ -8,13 +8,14 @@ root="$(cd "${here}/.." && pwd)"
 source "${here}/../source/c/shcl-pins.env"
 source "${here}/tool-pins.env"
 
-if (($# != 2)); then
-	echo "usage: c-in-container.bash MODE VERSION" >&2
+if (($# < 2)); then
+	echo "usage: c-in-container.bash MODE VERSION [FUZZ ARGS...]" >&2
 	exit 2
 fi
 
 mode="$1"
 version="$2"
+shift 2
 
 [[ "$(gcc-15 -dumpfullversion)" == "${PIN_GCC15_CONTAINER}" ]] || { echo "gcc-15 is not ${PIN_GCC15_CONTAINER}" >&2; exit 1; }
 [[ "$(clang-22 --version | sed -n 1p)" == *"${PIN_CLANG_TIDY}"* ]] || { echo "clang-22 is not ${PIN_CLANG_TIDY}" >&2; exit 1; }
@@ -30,8 +31,10 @@ case "${version}" in
 	1) shclDir="${shcl1Dir}" ;;
 	2) shclDir="${shcl2Dir}" ;;
 	3) shclDir="${shcl3Dir}" ;;
+	all) [[ "${mode}" == fuzz ]] || { echo "only fuzz takes all" >&2; exit 2; } ;;
 	*) echo "version must be 1, 2, or 3" >&2; exit 2 ;;
 esac
+shclDirs=([1]="${shcl1Dir}" [2]="${shcl2Dir}" [3]="${shcl3Dir}")
 for header in "${shcl1Dir}/shcl.h" "${shcl2Dir}/shcl.h" "${shcl3Dir}/shcl.h"; do
 	[[ -f "${header}" ]] || { echo "missing pinned C header: ${header}" >&2; exit 1; }
 done
@@ -68,6 +71,18 @@ case "${mode}" in
 		"/work/c${version}/api-test-plain"
 		python3 "${here}/c_cases.py" --drive "/work/c${version}/shclw-drive-plain" \
 			--version "${version}" --cases "${root}/tests/cases"
+		;;
+	fuzz)
+		## DRIVE is shclw-drive, or shclw-drive-plain under --quick. The test stage made them, so make only checks.
+		drive="$1"; shift
+		for version in 1 2 3; do
+			shclDir="${shclDirs[${version}]}"
+			make_c -j "${jobs}" "/work/c${version}/${drive}"
+		done
+		LSAN_OPTIONS="suppressions=${root}/source/c/lsan.supp" \
+		ASAN_OPTIONS="detect_leaks=1:halt_on_error=1" \
+		python3 "${here}/fuzz.py" --go /work/bin/go-drive --rust /work/bin/rust-drive --c "/work/c{v}/${drive}" \
+			--cases "${root}/tests/cases" --work /work/fuzz --out /work/fuzz-fail "$@"
 		;;
 	leakcheck)
 		;;
@@ -225,7 +240,7 @@ PY
 		done
 fi
 
-if [[ "${mode}" != pick && "${mode}" != lint && "${mode}" != test && "${mode}" != quick && "${mode}" != leakcheck && "${mode}" != leakcheck-resume ]]; then
+if [[ "${mode}" != pick && "${mode}" != lint && "${mode}" != test && "${mode}" != quick && "${mode}" != fuzz && "${mode}" != leakcheck && "${mode}" != leakcheck-resume ]]; then
 	echo "unknown mode: ${mode}" >&2
 	exit 2
 fi

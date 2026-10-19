@@ -7,8 +7,8 @@ here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 root="$(cd "${here}/.." && pwd)"
 source "${here}/tool-pins.env"
 
-if (($# != 3)); then
-	echo "usage: c-checks.bash MODE VERSION WORKDIR" >&2
+if (($# < 3)); then
+	echo "usage: c-checks.bash MODE VERSION WORKDIR [FUZZ ARGS...]" >&2
 	exit 2
 fi
 
@@ -34,4 +34,4 @@ exec docker run --rm --user "$(id -u):$(id -g)" --network="${network}" \
 	--mount "type=bind,src=${work},dst=/work" \
 	--mount "type=bind,src=${artifacts},dst=/artifacts" \
 	--workdir /src \
-	"${tag}" bash /src/cicd/c-in-container.bash "${mode}" "${version}"
+	"${tag}" bash /src/cicd/c-in-container.bash "${mode}" "${version}" "${@:4}"

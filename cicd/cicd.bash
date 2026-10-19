@@ -10,7 +10,7 @@
 ##	   2. lint (go vet, staticcheck, clippy, clang-tidy, gcc-15, shellcheck, ruff)
 ##	   3. tests (shared cases against every shcl version, in every language)
 ##	   4. leak checks (CodeQL, CTU analysis, and the heaptrack soak, for C)
-##	   5. fuzz (Go against Rust from generated cases, plus Go's own fuzzer)
+##	   5. fuzz (Rust and C against Go from generated cases, plus Go's own fuzzer)
 ##	- Syntax:
 ##	  cicd/cicd.bash [options]
 ##	  With no options it runs every stage.
@@ -28,7 +28,7 @@
 ##	   --no-fuzz       skip the fuzz stage
 ##	   -h, --help      show this help
 ##	- Fuzz budgets, in seconds: SHCLW_FUZZ_SECONDS (default 60, 10 with --quick)
-##	  for Go against Rust, and SHCLW_GOFUZZ_SECONDS (default 30, 0 with --quick)
+##	  for Rust and C against Go, and SHCLW_GOFUZZ_SECONDS (default 30, 0 with --quick)
 ##	  for Go's fuzzer. Failing fuzz cases go to cicd/artifacts/fuzz/.
 ##	- Test scratch goes under $TMPDIR, in a folder the run makes and removes.
 ##	- C builds against each shcl.h pinned in source/c/shcl-pins.env, fetched by
@@ -141,7 +141,7 @@ if ((! doQuiet)); then
 	fEcho_Clean "Mode .........: ${mode}"
 	fEcho_Clean "Remote sync ..: $( ((doSync)) && echo 'fast-forward when behind; abort when diverged' || echo '(skipped)')"
 	fEcho_Clean "Leak checks ..: $( ((doLeakcheck)) && echo 'CodeQL, CTU, heaptrack soak' || echo '(skipped)')"
-	fEcho_Clean "Fuzz .........: $( ((doFuzz)) && echo "${fuzzSecs}s Go against Rust, ${goFuzzSecs}s Go fuzzer" || echo '(skipped)')"
+	fEcho_Clean "Fuzz .........: $( ((doFuzz)) && echo "${fuzzSecs}s Rust and C against Go, ${goFuzzSecs}s Go fuzzer" || echo '(skipped)')"
 	fEcho_Clean "CPU cap ......: ${cpuCap}"
 	fEcho_Clean "Scratch ......: ${work}"
 	if ((! assumeYes)); then read -r -p "Proceed? (Ctrl+C aborts, Enter continues) " _; fi
@@ -262,7 +262,14 @@ if ((doFuzz)); then
 	(cd "${root}/source/rust" && cargo build --quiet -j "${cpuCap}" --release --all-features --bin shclw-drive)
 	cp "${root}/source/rust/target/release/shclw-drive" "${work}/bin/rust-drive"
 	failDir="${root}/cicd/artifacts/fuzz/${stamp}"
-	if ((fuzzSecs > 0)); then
+	if ((fuzzSecs > 0 && doC)); then
+		## In the container, where the C drivers were built. Go's and Rust's run there too.
+		cDrive=shclw-drive; if ((doQuick)); then cDrive=shclw-drive-plain; fi
+		bash "${here}/c-checks.bash" fuzz all "${work}" "${cDrive}" --seconds "${fuzzSecs}" || {
+			if [[ -d "${work}/fuzz-fail" ]]; then mkdir -p "${failDir%/*}"; cp -r "${work}/fuzz-fail" "${failDir}"; fi
+			fDie "fuzz found failures; cases are in ${failDir}"
+		}
+	elif ((fuzzSecs > 0)); then
 		python3 "${here}/fuzz.py" --go "${work}/bin/go-drive" --rust "${work}/bin/rust-drive" --seconds "${fuzzSecs}" \
 			--cases "${root}/tests/cases" --work "${work}/fuzz" --out "${failDir}" || fDie "fuzz found failures; cases are in ${failDir}"
 	fi
@@ -284,3 +291,4 @@ fEcho_Clean
 ##		- 2026-10-15 JC: The C 3.0 build fetches shcl 2.0's shcl.h too, for the upgrade check.
 ##		- 2026-10-15 JC: C over shcl 1.2 and 2.0 too, each linted, tested, and run on the shared cases, plus the SHCLW_SHCL pick check.
 ##		- 2026-10-19 JC: --gate is now --ci. --quick runs only the fast checks, and no options runs everything, leak checks included.
+##		- 2026-10-19 JC: The fuzz runs C too, on all 3 shcl versions.
