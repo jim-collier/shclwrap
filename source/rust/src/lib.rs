@@ -301,11 +301,19 @@ pub trait ShclDoc {
 	fn text(&self) -> String;
 	/// The document in canonical form.
 	fn canonical(&self) -> String;
-	/// Saves `text()` atomically.
-	fn write(&self, path: &str) -> Result<(), Error>;
+	/// Saves `text()` atomically. The first write over a file `open`
+	/// upgraded backs up the original first, as `upgrade_file` does.
+	fn write(&mut self, path: &str) -> Result<(), Error>;
 	/// Whether `write` puts the canonical form in place of the lines the
-	/// document was loaded from, so lines no edit touched can change.
+	/// document was loaded from, so lines no edit touched can change. A file
+	/// `open` upgraded is rewritten until the first write over it.
 	fn rewrites(&self) -> bool;
+	/// The format `open` upgraded the file from, or 0 when it didn't
+	/// upgrade it.
+	fn upgraded_from(&self) -> u32;
+	/// Where the first write over an upgraded file put the original, or ""
+	/// before then.
+	fn backup_name(&self) -> &str;
 	/// What the load found.
 	fn diags(&self) -> Vec<Diag>;
 	/// Counts error diagnostics.
@@ -398,6 +406,7 @@ pub trait Lib {
 	fn parse(text: &str) -> Self::Doc;
 	/// A load at `level`, with the document back even when it fails.
 	fn parse_keep(text: &str, level: Strictness) -> (Self::Doc, Option<Error>);
+	fn open_with(path: &str, level: Strictness) -> Result<Self::Doc, Error>;
 	fn format_of(text: &str) -> u32;
 	fn upgrade(text: &str, from: u32) -> Result<Upgraded, Error>;
 }
@@ -592,6 +601,26 @@ pub fn replace_read(
 		format!("{}; {note}", e.msg)
 	};
 	Err(e)
+}
+
+fn strictness_of(level: &str) -> Strictness {
+	match level {
+		"loose" => Strictness::Loose,
+		"strict" => Strictness::Strict,
+		_ => Strictness::Standard,
+	}
+}
+
+/// `name` with STAMP in place of the time in a backup's name.
+fn mask_stamp(name: &str) -> String {
+	let Some(at) = name.find("_backup_") else {
+		return name.to_owned();
+	};
+	let start = at + "_backup_".len();
+	match name[start..].find("_format-v") {
+		Some(end) => format!("{}STAMP{}", &name[..start], &name[start + end..]),
+		None => name.to_owned(),
+	}
 }
 
 /// Writes a float the same way in every wrapper language: the shortest
@@ -804,19 +833,68 @@ impl<L: Lib> Runner<'_, L> {
 			"format" => self.say(&L::format_of(self.input).to_string()),
 			"upgrade" => self.upgrade(arg(1)),
 			"write" => self.write(arg(1)),
+			"open" => self.open(arg(1), arg(2)),
+			"upgraded" => self.upgraded(),
+			"files" => self.files(),
 			_ => self.say("error unknownop"),
 		}
 	}
 
 	fn parse(&mut self, level: &str) {
-		let s = match level {
-			"loose" => Strictness::Loose,
-			"strict" => Strictness::Strict,
-			_ => Strictness::Standard,
-		};
-		let (doc, err) = L::parse_keep(self.input, s);
+		let (doc, err) = L::parse_keep(self.input, strictness_of(level));
 		self.doc = doc;
 		self.result(err);
+	}
+
+	/// An error's diagnostics go after it, and the document is then empty,
+	/// as in C, which has no list on its error.
+	fn open(&mut self, name: &str, level: &str) {
+		let Some(path) = self.file(name) else { return };
+		match L::open_with(&path.to_string_lossy(), strictness_of(level)) {
+			Ok(d) => {
+				self.doc = d;
+				self.say("ok");
+			}
+			Err(e) => {
+				self.say(&format!("error {}", e.kind));
+				self.diags(&e.diags);
+				self.doc = L::parse("");
+			}
+		}
+	}
+
+	fn upgraded(&mut self) {
+		let from = self.doc.upgraded_from();
+		let name = self.doc.backup_name().to_owned();
+		if name.is_empty() {
+			return self.say(&format!("from {from} backup none"));
+		}
+		let base = Path::new(&name)
+			.file_name()
+			.map(|b| b.to_string_lossy().into_owned())
+			.unwrap_or_default();
+		self.say(&format!("from {from} backup {}", esc(&mask_stamp(&base))));
+		match read_text(&name) {
+			Ok(t) => self.block(&t),
+			Err(e) => self.result(Some(e)),
+		}
+	}
+
+	fn files(&mut self) {
+		let Some(dir) = &self.opt.dir else {
+			return self.say("error unsupported");
+		};
+		let mut names: Vec<String> = match fs::read_dir(dir) {
+			Ok(rd) => rd
+				.filter_map(Result::ok)
+				.map(|e| e.file_name().to_string_lossy().into_owned())
+				.collect(),
+			Err(e) => return self.result(Some(Error::new(ErrKind::Io).msg(e.to_string()))),
+		};
+		names.sort();
+		for n in names {
+			self.say(&esc(&mask_stamp(&n)));
+		}
 	}
 
 	fn result(&mut self, err: Option<Error>) {

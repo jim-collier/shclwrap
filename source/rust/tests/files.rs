@@ -347,10 +347,97 @@ fn save_refused_over_file() {
 	let path = dir.join("c.shcl");
 	let p = s(&path);
 
-	fs::write(&path, "a: 1\na(5): 2\n").unwrap();
+	// Open now takes an unstamped file with an error as 2.x, and 2.0 refuses this one.
+	// fs::write(&path, "a: 1\na(5): 2\n").unwrap();
+	let text = "a: 1\na(5): 2\n##    Format   3\n";
+	fs::write(&path, text).unwrap();
 	let mut d = shclw::v3::open(&p).expect("open");
 	d.remove("a");
 	assert_eq!(d.write(&p).err().map(|e| e.kind), Some(ErrKind::Refused), "v3");
-	assert_eq!(read(&path), "a: 1\na(5): 2\n", "v3");
+	// assert_eq!(read(&path), "a: 1\na(5): 2\n", "v3");
+	assert_eq!(read(&path), text, "v3");
 	assert_eq!(names(dir), ["c.shcl"]);
+}
+
+/// `open` upgrades a 2.x file in memory and writes nothing. The first write
+/// over it, by any name for the same file, backs up the original, and later
+/// ones don't.
+#[test]
+fn open_upgrades_in_memory() {
+	let scratch = Scratch::new("open-upgrade");
+	let dir = scratch.path();
+	let path = dir.join("c.shcl");
+	let p = s(&path);
+	fs::write(&path, CLEAN_2X).unwrap();
+	#[cfg(unix)]
+	set_mode(&path, 0o600);
+	let mut d = shclw::v3::open(&p).expect("open");
+	assert_eq!((d.upgraded_from(), d.backup_name(), d.rewrites()), (2, "", true));
+	assert_eq!(d.strs("tags", &[]), ["a", "b"]);
+	assert_eq!(read(&path), CLEAN_2X);
+	assert_eq!(names(dir), ["c.shcl"]);
+
+	d.write(&s(&dir.join(".").join("c.shcl"))).expect("write");
+	let backup = PathBuf::from(d.backup_name());
+	assert_eq!(backup.parent(), Some(dir));
+	assert_eq!(read(&backup), CLEAN_2X);
+	#[cfg(unix)]
+	assert_eq!(mode(&backup), 0o600);
+	assert!(read(&path).starts_with(CLEAN_2TO));
+	assert_eq!(shclw::v3::format_of(&read(&path)), 3);
+	assert!(!d.rewrites());
+
+	d.put("n", 1).expect("put");
+	d.write(&p).expect("second write");
+	assert_eq!(names(dir).len(), 2);
+	assert_eq!(PathBuf::from(d.backup_name()), backup);
+	let again = shclw::v3::open(&p).expect("reopen");
+	assert_eq!((again.upgraded_from(), again.int("n", 0)), (0, 1));
+}
+
+/// A file that changed since `open` read it is left alone, with no backup.
+#[test]
+fn open_upgrade_edited_meanwhile() {
+	let scratch = Scratch::new("open-edited");
+	let dir = scratch.path();
+	let path = dir.join("c.shcl");
+	let p = s(&path);
+	fs::write(&path, CLEAN_2X).unwrap();
+	let mut d = shclw::v3::open(&p).expect("open");
+	fs::write(&path, "tags: x, y\n").unwrap();
+	assert_eq!(d.write(&p).err().map(|e| e.kind), Some(ErrKind::Io));
+	assert_eq!(read(&path), "tags: x, y\n");
+	assert_eq!(names(dir), ["c.shcl"]);
+	assert_eq!(d.backup_name(), "");
+}
+
+/// Something already at the backup's name is never written over. The save
+/// is `BackupTaken` and the file stays as it was.
+#[test]
+fn open_upgrade_backup_taken() {
+	let scratch = Scratch::new("open-taken");
+	let dir = scratch.path();
+	let path = dir.join("c.shcl");
+	let p = s(&path);
+	// The name has the time in it to the second. Go again on a tick.
+	for _ in 0..3 {
+		for n in names(dir) {
+			fs::remove_file(dir.join(n)).unwrap();
+		}
+		fs::write(&path, CLEAN_2X).unwrap();
+		let mut d = shclw::v3::open(&p).expect("open");
+		let name = shclw::v3::shcl::backup_file_name(&p, 2);
+		fs::write(&name, "mine\n").unwrap();
+		let got = d.write(&p);
+		if shclw::v3::shcl::backup_file_name(&p, 2) != name {
+			continue;
+		}
+		assert_eq!(got.err().map(|e| e.kind), Some(ErrKind::BackupTaken));
+		assert_eq!(d.backup_name(), "");
+		assert_eq!(read(&path), CLEAN_2X);
+		assert_eq!(read(Path::new(&name)), "mine\n");
+		assert_eq!(names(dir).len(), 2);
+		return;
+	}
+	panic!("the clock ticked on every try");
 }

@@ -25,6 +25,45 @@ pub struct Doc {
 	d: shcl::Document,
 	info: crate::Info,
 	stamp: bool,
+	up: Option<UpgradedFile>,
+}
+
+/// The file `open` upgraded, kept until the first write over it backs it up.
+#[derive(Debug)]
+struct UpgradedFile {
+	from: u32,
+	path: String,
+	id: Option<FileId>,
+	text: String,
+	backup: String,
+}
+
+#[cfg(unix)]
+type FileId = (u64, u64);
+#[cfg(not(unix))]
+type FileId = std::path::PathBuf;
+
+#[cfg(unix)]
+fn file_id(path: &str) -> Option<FileId> {
+	use std::os::unix::fs::MetadataExt;
+	std::fs::metadata(path).ok().map(|m| (m.dev(), m.ino()))
+}
+
+#[cfg(not(unix))]
+fn file_id(path: &str) -> Option<FileId> {
+	std::fs::canonicalize(path).ok()
+}
+
+impl UpgradedFile {
+	/// Whether `path` names the file `open` read: the same path, or the same
+	/// file by another name.
+	fn over(&self, path: &str) -> bool {
+		let same = |a: &str, b: &str| match (std::path::absolute(a), std::path::absolute(b)) {
+			(Ok(a), Ok(b)) => a == b,
+			_ => false,
+		};
+		same(path, &self.path) || (self.id.is_some() && file_id(path) == self.id)
+	}
 }
 
 /// This module's calls as a [`crate::Lib`].
@@ -40,6 +79,9 @@ impl crate::Lib for Version {
 	}
 	fn parse_keep(text: &str, level: Strictness) -> (Doc, Option<Error>) {
 		parse_keep(text, level)
+	}
+	fn open_with(path: &str, level: Strictness) -> Result<Doc, Error> {
+		open_with(path, level)
 	}
 	fn format_of(text: &str) -> u32 {
 		format_of(text)
@@ -84,23 +126,44 @@ fn doc(d: shcl::Document) -> Doc {
 		d,
 		info: crate::Info::AsIs,
 		stamp: false,
+		up: None,
 	}
 }
 
 /// Reads and parses a file. A missing file is `NotFound`, and a file
-/// written for a newer format is `TooNew`.
+/// written for a newer format is `TooNew`. An older file is upgraded in
+/// memory, as `upgrade` with `from` 0 does, and `upgraded_from` says so.
+/// Nothing is written until `write`, and the first write over the file backs
+/// it up. A file that reads two ways is `Ambiguous`, and one shcl 2.0
+/// reports errors on is `Refused`, with those errors in `diags`.
 pub fn open(path: &str) -> Result<Doc, Error> {
 	open_with(path, Strictness::Standard)
 }
 
-/// `open` at a given strictness.
+/// `open` at a given strictness, which applies to the upgraded text.
 pub fn open_with(path: &str, level: Strictness) -> Result<Doc, Error> {
 	let text = crate::read_text(path)?;
 	let f = format_of(&text);
 	if f > FORMAT_MAJOR {
 		return Err(too_new(f).path(path));
 	}
-	parse_with(&text, level).map_err(|e| e.path(path))
+	// A file naming this format is current, so it skips the upgrade's parse.
+	if f == FORMAT_MAJOR {
+		return parse_with(&text, level).map_err(|e| e.path(path));
+	}
+	let u = upgrade(&text, 0).map_err(|e| e.path(path))?;
+	if !u.changed {
+		return parse_with(&text, level).map_err(|e| e.path(path));
+	}
+	let mut d = parse_with(&u.text, level).map_err(|e| e.path(path))?;
+	d.up = Some(UpgradedFile {
+		from: u.from,
+		path: path.to_owned(),
+		id: file_id(path),
+		text,
+		backup: String::new(),
+	});
+	Ok(d)
 }
 
 /// The format a file's Format line names, or 0 with none.
@@ -155,22 +218,36 @@ pub fn upgrade_file(path: &str, from: u32) -> Result<Upgraded, Error> {
 	if !u.changed {
 		return Ok(u);
 	}
-	let backup = || {
-		shcl::write_backup(path, &text, u.from).map_err(|e| {
-			let kind = match &e {
-				shcl::UpgradeError::BackupTaken(_) => ErrKind::BackupTaken,
-				shcl::UpgradeError::NotFound(_) | shcl::UpgradeError::Ambiguous { .. } | shcl::UpgradeError::Io(_) => {
-					ErrKind::Io
-				}
-			};
-			Error::new(kind).path(path).msg(e.to_string())
-		})
-	};
 	let write = |path: &str, data: &str| {
 		shcl::write_file_atomic(path, data).map_err(|e| Error::new(ErrKind::Io).path(path).msg(e.to_string()))
 	};
-	u.backup = crate::replace_read(path, &text, &u.text, backup, write)?;
+	u.backup = crate::replace_read(path, &text, &u.text, || keep_original(path, &text, u.from), write)?;
 	Ok(u)
+}
+
+/// Copies `text`, what `path` held when it was read, beside it under shcl's
+/// backup name for format `from`.
+fn keep_original(path: &str, text: &str, from: u32) -> Result<String, Error> {
+	shcl::write_backup(path, text, from).map_err(|e| {
+		let kind = match &e {
+			shcl::UpgradeError::BackupTaken(_) => ErrKind::BackupTaken,
+			shcl::UpgradeError::NotFound(_) | shcl::UpgradeError::Ambiguous { .. } | shcl::UpgradeError::Io(_) => {
+				ErrKind::Io
+			}
+		};
+		Error::new(kind).path(path).msg(e.to_string())
+	})
+}
+
+fn write_atomic(path: &str, text: &str) -> Result<(), Error> {
+	shcl::write_file_atomic(path, text).map_err(|w| {
+		let kind = if w.status == shcl::WriteStatus::NotFound {
+			ErrKind::NotFound
+		} else {
+			ErrKind::Io
+		};
+		Error::new(kind).path(path).msg(w.message)
+	})
 }
 
 /// Refuses a file taken as 2.x that shcl 2.0 reports errors on. The old
@@ -310,8 +387,9 @@ impl ShclDoc for Doc {
 	/// Refuses when the load dropped lines the save would lose, the same
 	/// check shcl's `save_file_keep_lines` makes, and writes nothing when the
 	/// info block or the Format line can't go in, since an edit made after
-	/// `info_block` or `stamp_format`.
-	fn write(&self, path: &str) -> Result<(), Error> {
+	/// `info_block` or `stamp_format`. A file that changed since `open` read
+	/// it is left alone with `Io`, when the write would back it up.
+	fn write(&mut self, path: &str) -> Result<(), Error> {
 		let (text, kept) = self.d.to_text_keep_lines();
 		let lost = self.d.lost_count();
 		if !kept && lost > 0 {
@@ -321,14 +399,21 @@ impl ShclDoc for Doc {
 		}
 		let text = if kept { text } else { self.d.to_canonical() };
 		let text = crate::finish_info(&text, self.info, self.stamp, &info_edit()).map_err(|e| e.path(path))?;
-		shcl::write_file_atomic(path, &text).map_err(|w| {
-			let kind = if w.status == shcl::WriteStatus::NotFound {
-				ErrKind::NotFound
-			} else {
-				ErrKind::Io
-			};
-			Error::new(kind).path(path).msg(w.message)
-		})
+		match &mut self.up {
+			Some(up) if up.backup.is_empty() && up.over(path) => {
+				let name = crate::replace_read(
+					path,
+					&up.text,
+					&text,
+					|| keep_original(path, &up.text, up.from),
+					write_atomic,
+				)?;
+				up.backup = name;
+				up.text = String::new();
+				Ok(())
+			}
+			_ => write_atomic(path, &text),
+		}
 	}
 
 	/// 3.0 writes the canonical form when it can't keep the lines with the
@@ -337,7 +422,19 @@ impl ShclDoc for Doc {
 	/// `info_block` and `stamp_format` change only their own lines, so they
 	/// don't change the answer.
 	fn rewrites(&self) -> bool {
+		if self.up.as_ref().is_some_and(|u| u.backup.is_empty()) {
+			return true;
+		}
 		!self.d.to_text_keep_lines().1
+	}
+
+	/// Reads, `lines`, `diags`, and `text` are all of the upgraded text.
+	fn upgraded_from(&self) -> u32 {
+		self.up.as_ref().map_or(0, |u| u.from)
+	}
+
+	fn backup_name(&self) -> &str {
+		self.up.as_ref().map_or("", |u| u.backup.as_str())
 	}
 
 	fn diags(&self) -> Vec<Diag> {
