@@ -78,6 +78,46 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- shcl's Go module path is still `.../v2`, and Go won't take a v3 tag on it. Go stays on a commit until that changes.
 		- Quillroute plans to have its release refuse a commit pin. The same check would fit here.
 
+- Builds clean up stale artifacts and side-effects
+	- ID: 2026101916500100
+	- Type: Enhancement
+	- Status: Queued
+	- Priority: High
+	- Opened: 2026-10-19
+	- Opened by: JC
+	- Requirements:
+		- Verify or ensure that builds clean up *stale* artifacts and side-effects after they're done: caches, container cruft, tmp files, etc.
+	- Notes:
+		- Pre-next-cut.
+
+- CICD `--leakcheck` and `--no-leakcheck`
+	- ID: 2026101916500101
+	- Type: Enhancement
+	- Status: Queued
+	- Priority: High
+	- Opened: 2026-10-19
+	- Opened by: JC
+	- Related IDs: 2026101816214270
+	- Requirements:
+		- CICD should have both `--leakcheck` (e.g. useful to add back in for `--quick`), and `--no-leakcheck` (e.g. to exclude from default or with `--quiet`).
+	- Notes:
+		- Pre-next-cut.
+		- Both flags are already in the CICD flags item above. Check it against this before closing either.
+
+- Leak tests and all tests cover third-party and vendored code
+	- ID: 2026101916500102
+	- Type: Enhancement
+	- Status: Queued
+	- Priority: High
+	- Opened: 2026-10-19
+	- Opened by: JC
+	- Requirements:
+		- Make sure CICD leak tests, and all tests, include third-party and vendored code. But only code that gets run by end users.
+		- Anything wrong goes on the backlog for a fix.
+	- Notes:
+		- Pre-next-cut.
+		- This may only affect what's already written in the backlog, and/or done.
+
 - Layered loading
 	- ID: 2026101512024156
 	- Type: Feature

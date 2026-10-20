@@ -38,7 +38,7 @@ One small, steady API over every version of [shcl](https://github.com/yottacore/
 
 ## Why
 
-shcl is moving fast. 1.2, 2.0, and 3.0 came out within a few months of each other, 3.0 changes the file format a little, and 4 is set to change the API a lot. A program that calls shcl directly has to follow every one of those changes, and each program ends up with its own fixes for the same quirks.
+[shcl](https://github.com/yottacore/shcl) is moving fast. 1.2, 2.0, and 3.0 came out within a few months of each other, 3.0 changes the file format a little, and 4 is set to change the API a lot. A program that calls shcl directly has to follow every one of those changes, and each program ends up with its own fixes for the same quirks.
 
 This wraps the basics, loading, reading, walking, writing, saving, and upgrading, in one API that stays put. A program picks its shcl version in one place. When shcl changes, the wrapper changes, once, with tests, and every program using it gets the fix.
 
