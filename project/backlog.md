@@ -162,16 +162,29 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 - Layered loading
 	- ID: 2026101512024156
 	- Type: Feature
-	- Status: Queued
+	- Status: Waiting on signoff
 	- Priority: Avg
 	- Opened: 2026-10-15
 	- Opened by: JC
-	- Related IDs: 2026101513330030
+	- Related IDs: 2026101513330030, 2026102114101028
 	- Requirements:
 		- Defaults, then site, then user file, as one document.
 	- Notes:
 		- Cobblevale uses shcl's merge. Mossrealm does it by hand.
 		- Mossrealm's layers are defaults, then a system file, then the user file, then the command line.
+	- Progress log:
+		- 2026-10-21: `OpenLayers` in Go, Rust, and C, plus a `layers` op. Reads are the merge, edits and saves go to the last file layer, and `Diag` has a `Layer`. design.md has the API and the Decisions. README has a feature line.
+		- Verified: Go tests, vet; Rust tests, clippy pedantic; C API tests plain, sanitized, and as C++, clang-tidy, gcc-15 at C17, and the shared cases plain and sanitized; `cicd.bash --quick`.
+		- Swept: every edit and save call on the 3.0 adapter in all 3 languages goes to the edit layer, every C put through `put`, and every `Diag` literal has the new field.
+		- Left open in 2026102114101028: a read's line doesn't say which layer it's in, and `DropDeclared` loses `Layer`.
+	- Decisions:
+		- shcl's own merge, not one of the wrapper's. Cobblevale already uses it.
+		- Edits and saves go to the last file layer only. Text layers after it, like a command line, win reads and are never saved.
+		- A missing file is skipped. Any other error stops the load, as `Open` does.
+		- `Diag.Layer` is the layer's place in the list, from 1, not a name.
+	- Commit: 21cc72c
+	- Test case: shared case `053-layers`, in all 3 languages.
+	- Acceptance signoff: waits on JC, for the README line and the calls in Decisions.
 
 - Python wrapper
 	- ID: 2026101512024161
@@ -557,6 +570,18 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 				- `ResourceWarning` shows only in dev mode or with `-W`. A plain run hides it.
 				- Without `PYTHONMALLOC=malloc`, ASan can't see inside pymalloc's pools.
 	- Note: The Rust crate has no `unsafe` and no FFI, and only `tests/files.rs` starts threads. The Go module has no cgo, and only one test in `files_test.go` starts a goroutine. The only Python is `cicd/c_cases.py` and `cicd/fuzz.py`, since the Python wrapper isn't started. clippy already runs with `-D warnings` and `clippy::pedantic`, and go vet, staticcheck, and ruff run on every gate. No advisory scan runs yet. cicd runs its tools on the host today, checked against `cicd/tool-pins.env`.
+
+- Say which layer a read came from
+	- ID: 2026102114101028
+	- Type: Enhancement
+	- Status: Queued
+	- Priority: Low
+	- Opened: 2026-10-21
+	- Opened by: JC
+	- Related IDs: 2026101512024156
+	- Notes:
+		- On a layered document, `Got.Line` and `Lines` give a line in some layer, with nothing to say which one, so a warning about a bad value can't name the file.
+		- `DropDeclared` on a layered document's `Diags` gives them back with `Layer` 0 in Go and Rust. C's drops hints from the merge's own list, which `shclw_diags` doesn't show for a layered document.
 
 - Commit and publish from cicd
 	- ID: 2026101512024171
