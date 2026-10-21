@@ -30,6 +30,7 @@ One small, steady API over every version of [shcl](https://github.com/yottacore/
 	- [Go](#go)
 	- [Rust](#rust)
 	- [C](#c)
+	- [Python](#python)
 - [Building from source](#building-from-source)
 - [Support](#support)
 - [Copyright and license](#copyright-and-license)
@@ -154,11 +155,30 @@ shclw_free(doc);
 
 What a call hands back is the caller's to `free()`, and a document goes to `shclw_free`. Strings come back with their length and a NUL after it. A value can hold a NUL, so go by the length. `shclw.h` has the rest.
 
+### Python
+
+Copy `shclw.py` and `_shclw_shcl2.py` from `source/python`. The second is shcl 2.0's own `shcl.py` under another name, for the upgrade's check.
+
+shcl 3.0 is found when the module loads: a `shcl.py` copied beside `shclw.py` first, so a program that has nothing installed can bring its own, and then the installed one. Anything older than 3.0 stops the import with a message saying which `shcl` it found. A copy beside the wrapper loads under its own name, so a program that still imports an older `shcl` elsewhere keeps it.
+
+~~~python
+import shclw
+
+doc = shclw.open("app.shcl")
+port = doc.int_or("server.port", 8080)
+for t in doc.each("table"):
+	print(doc.str_or(doc.child(t.path, "name"), ""))
+doc.put("server.port", 9090)
+doc.write("app.shcl")
+~~~
+
+Errors are `shclw.Error`, with `kind` to tell them apart. Reads with a fallback end in `_or`, and the `get_` reads give the status and line too.
+
 The full list of calls, and what the wrapper does differently from each shcl version, is in [design.md](project/design.md).
 
 ## Building from source
 
-Go 1.21 or newer, Rust 1.88 or newer, and a C11 compiler. The C lint also wants gcc-15, clang-format, and clang-tidy. The pipeline pins Rust 1.96 in `source/rust/rust-toolchain.toml`.
+Go 1.21 or newer, Rust 1.88 or newer, Python 3.11 or newer, and a C11 compiler. The C lint also wants gcc-15, clang-format, and clang-tidy. The pipeline pins Rust 1.96 in `source/rust/rust-toolchain.toml`.
 
 ~~~bash
 cicd/cicd.bash           # everything: format, lint, tests, leak checks, and fuzzing

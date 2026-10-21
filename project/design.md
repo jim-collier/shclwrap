@@ -6,7 +6,7 @@
 <!-- TOC ignore:true -->
 # Design
 
-Status: draft, 2026-10-15. Go, Rust, and C are built over shcl 3.0, with 2.0 built in for the upgrade's check. 3.0 is the floor. Python and shcl 4 are in the backlog.
+Status: draft, 2026-10-15. Go, Rust, C, and Python are built over shcl 3.0, with 2.0 built in for the upgrade's check. 3.0 is the floor. shcl 4 is in the backlog.
 
 <!-- TOC ignore:true -->
 ## Table of contents
@@ -94,6 +94,7 @@ Status: draft, 2026-10-15. Go, Rust, and C are built over shcl 3.0, with 2.0 bui
 | Go       | `source/go/shclw`, plus `shclw3`       | import path: `.../source/go/shclw3`
 | Rust     | `source/rust`, crate `shclw`           | feature `shcl3`, then module `shclw::v3`
 | C        | `source/c`, `shclw.h`, plus `shclw3.c` | the `shcl.h` the build includes, which has to be 3.0
+| Python   | `source/python`, module `shclw`        | the `shcl.py` found when it loads, which has to be 3.0
 
 - Go can't import one package or another by condition inside one file, so each shcl version gets its own small package. They have the same calls, checked by the compiler against the `shclw.Doc` interface. The shared types and the ops runner are in `shclw`.
 
@@ -107,7 +108,7 @@ Status: draft, 2026-10-15. Go, Rust, and C are built over shcl 3.0, with 2.0 bui
 
 ## API
 
-Go names are listed. Rust uses the same words in snake case, and `ShclDoc` has them as methods. C uses snake case with a `shclw_` prefix, and takes the document first: `shclw_int(d, "port", 8080)`, `shclw_get_str(d, path)`.
+Go names are listed. Rust uses the same words in snake case, and `ShclDoc` has them as methods. Python uses Rust's words, except that a read with a fallback ends in `_or`, as in `int_or("port", 8080)`, so no method takes a builtin's name. `Upgraded.From` is `from_`, and Python raises `shclw.Error` where Go returns one. C uses snake case with a `shclw_` prefix, and takes the document first: `shclw_int(d, "port", 8080)`, `shclw_get_str(d, path)`.
 
 ### Loading and saving
 
@@ -242,6 +243,7 @@ Go names are listed. Rust uses the same words in snake case, and `ShclDoc` has t
 	- 1.2 read values the same way, but read names as typed, as 3.0 does. A name 2.0 read with an escape resolved can't be renamed, so it's refused, unless the file's Format line names 1.
 	- A value that still reads differently, or such a name, is `ErrRefused`, with the lines in `Diags`. Nothing is written.
 	- That check needs shcl 2.0, so the 3.0 adapter builds it in too. In Rust the `shcl3` feature turns on the `shcl2` dependency.
+	- In Python, 2.0's `shcl.py` is kept beside the wrapper as `_shclw_shcl2.py` and loads under that name, since both are `shcl`.
 	- In C, 2.0's `shcl.h` and 3.0's declare the same names, so 2.0's goes in 2 files of its own with each call renamed. The C upgrade gives 2.0's errors in its result, `shclw_upgraded`, since C's error has no list.
 	- 2.x's `#` info block is swapped for the current one where it sits, in a file with no Format line. shcl leaves a clean file's block alone, and puts the new block at the end of a file it writes out again.
 	- When shcl writes a CRLF file out again with LF only, the upgrade puts the CRLF back, unless that would change a value.
@@ -267,7 +269,7 @@ Go names are listed. Rust uses the same words in snake case, and `ShclDoc` has t
 
 ### Errors
 
-- One error type, `*shclw.Error` in Go and `shclw::Error` in Rust, with a kind a program can act on: `NotFound`, `IO`, `Strict`, `Refused`, `BadPath`, `BadValue`, `TooNew`, `Unsupported`, `Ambiguous`, `BackupTaken`, and `NoReadBack`.
+- One error type, `*shclw.Error` in Go, `shclw::Error` in Rust, and `shclw.Error` in Python, with a kind a program can act on: `NotFound`, `IO`, `Strict`, `Refused`, `BadPath`, `BadValue`, `TooNew`, `Unsupported`, `Ambiguous`, `BackupTaken`, and `NoReadBack`.
 
 - `Refused` is a save that would drop lines the load couldn't use, which 3.0 refuses. It's also an upgrade of a 2.x file that shcl 2.0 reports errors on.
 
@@ -362,14 +364,14 @@ An ops script is one op per line, with fields split by tabs. `\t`, `\n`, `\r`, a
 
 - Every feature and every fix gets a case, or a line in an existing one.
 
-- C runs the same cases through its driver with `cicd/c_cases.py`, op by op against the same want files.
+- C runs the same cases through its driver with `cicd/c_cases.py`, op by op against the same want files. Python runs them the same way, with `--lang Python` and its driver, `source/python/shclw_drive.py`.
 
 ### Fuzzing
 
 - `cicd/fuzz.py` makes a document and an ops script from each seed, with a generator that knows each format's syntax. Half of the generated documents are in the 1.2 and 2.0 syntax, as old programs wrote them, so the upgrade sees them. A quarter of the documents are mutated copies of the case documents instead.
 	- Each driver gets the document as `doc.shcl` in its own folder. A quarter of the scripts `open` it first and end by saving over it twice, so an old one is upgraded in memory and backed up.
 
-- Each case runs through the Go, Rust, and C drivers on the same shcl version. Rust's and C's outputs must match Go's byte for byte, apart from the time 3.0 stamps on a line it comments out. None may crash, and a put that says ok must read back the same. A float read that says `Good` must not give infinity or NaN. A `first` or `last` read must not say `Multiple`, and has to be on the first or last line `lines` gave for that path. An edit that says ok must have found one instance at every step of its path that exists, counted just before it. The text right after an `info on` that says ok ends with the block naming the version's format, holds one block where the document had no block text in a raw body, and a second `info on` doesn't change it.
+- Each case runs through the Go, Rust, C, and Python drivers on the same shcl version. Rust's, C's, and Python's outputs must match Go's byte for byte, apart from the time 3.0 stamps on a line it comments out. None may crash, and a put that says ok must read back the same. A float read that says `Good` must not give infinity or NaN. A `first` or `last` read must not say `Multiple`, and has to be on the first or last line `lines` gave for that path. An edit that says ok must have found one instance at every step of its path that exists, counted just before it. The text right after an `info on` that says ok ends with the block naming the version's format, holds one block where the document had no block text in a raw body, and a second `info on` doesn't change it.
 
 - It runs for a wall-clock budget, and a failing seed is saved with its document, script, and each driver's output. If too few reads find a value, the run fails, since a generator that stopped making readable documents would pass forever.
 
@@ -388,6 +390,8 @@ An ops script is one op per line, with fields split by tabs. `\t`, `\n`, `\r`, a
 - Rust: a git dependency on this repo with one feature on, or a copy of `source/rust/src`.
 
 - C: a copy of `shclw.h`, `shclw_adapter.h`, `shclw.c`, `info.c`, and `shclw3.c`, plus `run.c` for ops scripts. The program builds `shcl.h`'s own implementation once, as shcl asks. It also takes the `shclw3_v2` files and shcl 2.0's `shcl.h`.
+
+- Python: a copy of `shclw.py` and `_shclw_shcl2.py`, which is shcl 2.0's `shcl.py` kept byte for byte and checked against its pin. shcl 3.0 is a `shcl.py` beside them, or the installed one, in that order. Anything older is refused when the module loads, by `FORMAT_MAJOR`, which no binding had before 3.0.
 
 - A fix made in a copy goes back here, with a case, so every program gets it.
 

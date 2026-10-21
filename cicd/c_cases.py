@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-## Purpose: Runs the shared cases through the C driver and compares with the
-##	want files Go writes, op by op. Every op has to match.
+## Purpose: Runs the shared cases through the C driver, or Python's, and
+##	compares with the want files Go writes, op by op. Every op has to match.
 ## Copyright © 2026 Jim Collier [ID: 2უNაɘ«҂թȹɤξπ๙¿ձϖ]
 ## SPDX-License-Identifier: MIT
 
@@ -61,15 +61,16 @@ def blocks(lines: list[str], echoes: list[str]) -> list[list[str]] | None:
 
 
 def main() -> int:
-	ap = argparse.ArgumentParser(description="Runs the shared cases through the C driver.")
-	ap.add_argument("--drive", required=True, help="the C shclw-drive")
+	ap = argparse.ArgumentParser(description="Runs the shared cases through the C or Python driver.")
+	ap.add_argument("--drive", required=True, nargs="+", help="the driver command, such as the C shclw-drive")
+	ap.add_argument("--lang", default="C", help="the driver's language, for the summary")
 	ap.add_argument("--version", type=int, required=True, help="the shcl version it was built for")
 	ap.add_argument("--cases", required=True, type=Path)
 	args = ap.parse_args()
 
 	failures: list[str] = []
 	ran = full = 0
-	with tempfile.TemporaryDirectory(prefix="shclw-c-cases-") as tmp:
+	with tempfile.TemporaryDirectory(prefix="shclw-cases-") as tmp:
 		for case in sorted(p for p in args.cases.iterdir() if p.is_dir()):
 			label = f"{case.name}/v{args.version}"
 			work = Path(tmp) / case.name
@@ -82,7 +83,7 @@ def main() -> int:
 				continue
 			with open(work / "ops.txt", "rb") as script:
 				proc = subprocess.run(
-					[args.drive, str(args.version), str(work / "doc.shcl"), str(work)],
+					[*args.drive, str(args.version), str(work / "doc.shcl"), str(work)],
 					stdin=script,
 					capture_output=True,
 					timeout=60,
@@ -105,7 +106,7 @@ def main() -> int:
 			ran += len(echoes)
 			full += wrong == 0
 
-	print(f"C cases: {full} whole, {ran} ops compared")
+	print(f"{args.lang} cases: {full} whole, {ran} ops compared")
 	if ran == 0:
 		failures.append("no op was compared")
 	for f in failures:

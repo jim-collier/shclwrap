@@ -189,15 +189,27 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 - Python wrapper
 	- ID: 2026101512024161
 	- Type: Feature
-	- Status: Queued
+	- Status: Waiting for answers
+		- Waits on the question in questions.md about how 2.0 comes along.
 	- Priority: Avg
 	- Opened: 2026-10-15
 	- Opened by: JC
+	- Related IDs: 2026101513330050, 2026101711245585
 	- Requirements:
 		- One module. It finds which shcl is installed at run time.
 		- Its own driver, run against the shared cases and in the fuzzer.
 	- Notes:
 		- Used by Lenscart, on 1.2.
+	- Progress log:
+		- 2026-10-21: `source/python/shclw.py`, the 3.0 wrapper with the same calls as Go and Rust, `OpenLayers` and the ops runner included. It takes the shcl it finds when it loads and refuses anything but 3.0, by `FORMAT_MAJOR`. `shclw_drive.py` runs the shared cases through `cicd/c_cases.py --lang Python` and joins the fuzz on the host and in the C container. cicd fetches the pinned 3.0 `shcl.py` into `cicd/cache/shcl-py/` and checks it and the 2.0 copy by sha256. README has a Python section, and design.md has the layout, names, and sharing rows.
+		- Verified: the 53 shared cases whole, 564 ops; 12 unit tests; ruff on `source/python` and `cicd`; 1,113 fuzz cases against Go and Rust with none failing; `cicd.bash --quick`, whose fuzz ran Python beside Go, Rust, and C in the container. An injected upgrade fault turned the shared cases red.
+		- Swept: `c_cases.py`, `fuzz.py`, `c-in-container.bash`, and `cicd.bash` are every place a driver is named. Every Go `Doc` and `Lib` call has a Python twin.
+	- Decisions:
+		- shcl 2.0 for the upgrade check is its own `shcl.py`, kept as `_shclw_shcl2.py` and loaded under that name. It's the Python twin of C's renamed 2.0 and Rust's `shcl2` dependency. Asked in questions.md.
+		- Reads with a fallback are `int_or` and the rest, not `int`, so no method takes a builtin's name.
+		- `put` takes a list or tuple. An empty one writes an empty array, which reads back the same for every type.
+		- No pip install anywhere. Tests point `PYTHONPATH` at the cached `shcl.py`.
+	- Test case: shared cases, all 53, through the Python driver; `source/python/tests/test_shclw.py`; the fuzz.
 
 - Move the other projects onto the wrapper
 	- ID: 2026101512024167
@@ -736,12 +748,18 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 - Python: run from a copied file
 	- ID: 2026101513330050
 	- Type: Feature
-	- Status: Queued
+	- Status: Waiting on signoff
 	- Priority: Low
 	- Opened: 20261015-133300
 	- Opened by: JC
 	- Parent ID: 2026101512024161
 	- Note: Lenscart bundles shcl's wheel in its packages. Folderkite parses shcl by hand in its Python tools, since nothing is installed there.
+	- Progress log:
+		- 2026-10-21: A `shcl.py` copied beside `shclw.py` is used first, then the installed one. The copy loads under its own name, so a program that still imports an older `shcl` keeps it. README says so.
+		- Verified: `test_copied` runs the wrapper from a package with 3.0 copied beside it and 1.2 on the path, and fails with the copy lookup taken out. `test_none` checks the message with nothing found.
+	- Decisions:
+		- The copy beside the wrapper wins over the installed one, since bundling it is a choice. Waits on JC with the parent's question.
+	- Test case: `source/python/tests/test_shclw.py`, `test_copied` and `test_none`.
 
 - Rename the project shclwrap
 	- ID: 2026101513524769

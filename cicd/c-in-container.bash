@@ -6,6 +6,7 @@ set -Eeuo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 root="$(cd "${here}/.." && pwd)"
 source "${here}/../source/c/shcl-pins.env"
+source "${here}/../source/python/shcl-pins.env"
 source "${here}/tool-pins.env"
 
 if (($# < 2)); then
@@ -61,9 +62,15 @@ case "${mode}" in
 		## DRIVE is shclw-drive, or shclw-drive-plain under --quick. The test stage made them, so make only checks.
 		drive="$1"; shift
 		make_c -j "${jobs}" "/work/c${version}/${drive}"
+		## Python too, when cicd.bash had its pinned shcl.py.
+		pyDir="${root}/cicd/cache/shcl-py/${SHCL3_PY_REV}"
+		pyArgs=()
+		if [[ -f "${pyDir}/shcl.py" && "$(sha256sum "${pyDir}/shcl.py" | cut -d' ' -f1)" == "${SHCL3_PY_SHA256}" ]]; then
+			pyArgs=(--python "${root}/source/python/shclw_drive.py" --python-path "${pyDir}")
+		fi
 		LSAN_OPTIONS="suppressions=${root}/source/c/lsan.supp" \
 		ASAN_OPTIONS="detect_leaks=1:halt_on_error=1" \
-		python3 "${here}/fuzz.py" --go /work/bin/go-drive --rust /work/bin/rust-drive --c "/work/c{v}/${drive}" \
+		PYTHONPYCACHEPREFIX=/work/pycache python3 "${here}/fuzz.py" --go /work/bin/go-drive --rust /work/bin/rust-drive --c "/work/c{v}/${drive}" "${pyArgs[@]}" \
 			--cases "${root}/tests/cases" --work /work/fuzz --out /work/fuzz-fail "$@"
 		;;
 	leakcheck)
