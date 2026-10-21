@@ -77,6 +77,8 @@ if [[ "${mode}" == leakcheck || "${mode}" == leakcheck-resume ]]; then
 		artifact_dir="/artifacts/c-leakcheck-v${version}"
 		mkdir -p "${artifact_dir}" /work/ctu
 		if [[ "${mode}" == leakcheck ]]; then
+		# A fresh run's reports replace the last run's, including names it no longer writes.
+		find "${artifact_dir}" -mindepth 1 -maxdepth 1 -type f -delete
 		codeql_zip="/work/codeql-${PIN_CODEQL}.zip"
 		curl -fsSL "https://github.com/github/codeql-cli-binaries/releases/download/v${PIN_CODEQL}/codeql-linux64.zip" -o "${codeql_zip}"
 		echo "${PIN_CODEQL_SHA256}  ${codeql_zip}" | sha256sum -c -

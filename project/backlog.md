@@ -81,7 +81,8 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 - Builds clean up stale artifacts and side-effects
 	- ID: 2026101916500100
 	- Type: Enhancement
-	- Status: Queued
+	- Status: Waiting for testing
+	- Needs local test suite run?: Yes. A full run, or `--quick --leakcheck`, to see the old leak reports cleared and the lint, sanitized test and leak modes pass under the container's init.
 	- Priority: High
 	- Opened: 2026-10-19
 	- Opened by: JC
@@ -89,11 +90,22 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- Verify or ensure that builds clean up *stale* artifacts and side-effects after they're done: caches, container cruft, tmp files, etc.
 	- Notes:
 		- Pre-next-cut.
+	- Progress log:
+		- 2026-10-21: A run already removed its own scratch folder, and the C container is `--rm`. Left over were a cached `shcl.h` for a rev no pin names, and leak reports for shcl 1.2 and 2.0 from before the 3.0 floor.
+		- Also left: a 57 MB scratch folder in `/tmp` from 2026-10-17, written into by the C container when it still ran as root. It needs root to remove. The `--user` fix stops it happening again.
+		- Ctrl+C left the C container running, since bash as PID 1 ignores it. The container now runs under an init that passes it to the whole tree.
+		- Added: dropping cached headers no pin names, keeping the newest 10 fuzz failure sets, clearing the leak reports when a fresh leak run starts, and removing an older C image no container uses. `docker builder prune` runs only after a real rebuild. Every build gets a new image ID, even a fully cached one, so it compares layers.
+	- Decisions:
+		- Kept, since the next run reuses them: `cicd/cache/c-home` with CodeQL's compiled queries, the pinned headers, the C image, Go's and cargo's caches, and the rotated run logs.
+	- Verified: `--quick` passed twice with the changes, and left no scratch folder, no container, and one C image. The unpinned header was dropped and the 2 pinned kept. On a stand-in tree, 12 marked fuzz sets went to 10, and an unmarked set, an unpinned folder holding another file, and a non-rev folder were left. Ctrl+C stopped the container with the init, and not without it.
+	- Swept: `c-checks.bash` has the only `docker build` and `docker run`. `cicd.bash` is the only writer of `cicd/artifacts/fuzz` and `cicd/cache/shcl-c`, and `c-in-container.bash` of the leak reports.
+	- Branch: round-1021
+	- Test case: None. It cleans up host state, checked by the runs under Verified.
 
 - CICD `--leakcheck` and `--no-leakcheck`
 	- ID: 2026101916500101
 	- Type: Enhancement
-	- Status: Queued
+	- Status: Done
 	- Priority: High
 	- Opened: 2026-10-19
 	- Opened by: JC
@@ -103,6 +115,15 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Notes:
 		- Pre-next-cut.
 		- Both flags are already in the CICD flags item above. Check it against this before closing either.
+	- Progress log:
+		- 2026-10-21: Both flags were already in, from 2026101816214270, and match this. No flags runs the leak checks, `--no-leakcheck` drops them from any mix, `--quiet` included, and `--leakcheck` adds them to `--ci` or `--quick`. The later of the two wins.
+		- `--quick --leakcheck` now fetches a missing pinned header. It skipped C before, and the leak stage would then fail in the container. The leak checks need the network anyway.
+		- Added `--dry-run`, which shows the stages a mix of flags picks and stops.
+	- Verified: `cicd/flags-test.bash` passes on 14 flag mixes, and fails with either flag broken. `--quick --leakcheck` fetched a missing header, and `--quick` alone still skipped it.
+	- Branch: round-1021
+	- Test case: vFKCk, `cicd/flags-test.bash`, run in the tests stage.
+	- Acceptance signoff: Self-closed: the flags were in, and now have a regression test.
+	- Closed: 2026-10-21
 
 - Leak tests and all tests cover third-party and vendored code
 	- ID: 2026101916500102
