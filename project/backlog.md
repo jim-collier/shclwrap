@@ -215,7 +215,7 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 - Move the other projects onto the wrapper
 	- ID: 2026101512024167
 	- Type: Task
-	- Status: Queued
+	- Status: Waiting for answers
 	- Priority: Avg
 	- Opened: 2026-10-15
 	- Opened by: JC
@@ -228,6 +228,7 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- Cobblevale and Folderkite wait on the C wrapper, and Lenscart on the Python one.
 		- The wrapper already covers some of their workarounds, which can go as each one moves: Tallowbase's path cursor and index walks, Quillroute's name dedupe, quoting names made of digits, refusing a set on a repeated key, reading every put back, and failing a load on any error.
 		- Each project's other workarounds have their own items, with the project named in the item.
+		- 2026-10-21: waits on a go-ahead to edit the other repos, and which one goes first. Asked in the round's questions file.
 
 - Report blocks that shcl merged because they share a name
 	- ID: 2026101513330009
