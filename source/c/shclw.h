@@ -80,6 +80,7 @@ typedef enum {
 	SHCLW_ERR_AMBIGUOUS,
 	SHCLW_ERR_BACKUP_TAKEN,
 	SHCLW_ERR_NO_READ_BACK,
+	SHCLW_ERR_CHANGED,
 	SHCLW_ERR_NO_MEMORY
 } shclw_kind;
 
@@ -206,8 +207,9 @@ shclw_doc *shclw_new(void);
 shclw_doc *shclw_parse(const char *text, size_t len);
 // Fails only at SHCLW_STRICT, with SHCLW_ERR_STRICT. *doc is set either way.
 shclw_kind shclw_parse_with(const char *text, size_t len, shclw_strictness level, shclw_doc **doc, shclw_error *err);
-// Reads and parses a file. A missing file is SHCLW_ERR_NOT_FOUND, and one
-// written for a newer format SHCLW_ERR_TOO_NEW. An older file is upgraded in
+// Reads and parses a file. A missing file is SHCLW_ERR_NOT_FOUND. One written
+// for a newer format is read as this shcl reads it, and is read-only:
+// shclw_write on it is SHCLW_ERR_TOO_NEW. An older file is upgraded in
 // memory, as shclw_upgrade with from 0 does, and shclw_upgraded_from says so.
 // Nothing is written until shclw_write, and the first save over the file
 // backs it up. A 2.x file that reads two ways is SHCLW_ERR_AMBIGUOUS, and one shcl
@@ -245,10 +247,23 @@ char *shclw_canonical(shclw_doc *d, size_t *len);
 // Format line can't go in, since an edit made after shclw_info_block or
 // shclw_stamp_format. After a good save it gives back the memory earlier
 // edits left behind. The first save over a file shclw_open upgraded backs up
-// the original first, as shclw_upgrade_file does, and leaves a file that
-// changed since it was read alone with SHCLW_ERR_IO. A save with no Format
-// line has 2.x's info block swapped for the current one where it sat.
+// the original first, as shclw_upgrade_file does. A save over the file
+// shclw_open read leaves it alone with SHCLW_ERR_CHANGED when it changed on
+// disk since, and a document read from a newer format is SHCLW_ERR_TOO_NEW.
+// A save with no Format line has 2.x's info block swapped for the current one
+// where it sat.
 shclw_kind shclw_write(shclw_doc *d, const char *path, shclw_error *err);
+// What a save does. Zeroed is a plain shclw_write. force writes over the file
+// shclw_open read even when it changed on disk since. It doesn't write over a
+// file in a newer format.
+typedef struct {
+	bool force;
+} shclw_write_opts;
+// shclw_write with options, which may be NULL.
+shclw_kind shclw_write_with(shclw_doc *d, const char *path, const shclw_write_opts *opts, shclw_error *err);
+// Whether the document was read from a newer format, which shclw_write
+// refuses with SHCLW_ERR_TOO_NEW.
+bool shclw_read_only(shclw_doc *d);
 // Gives back what earlier edits left behind, as a good shclw_write does, for a
 // program that edits a lot between saves. C only, since Go and Rust free it
 // themselves.
@@ -314,7 +329,7 @@ typedef struct {
 shclw_kind shclw_upgrade(const char *text, size_t len, int64_t from, shclw_upgraded **out, shclw_error *err);
 // shclw_upgrade on a file. When it changes the file it first copies the
 // original beside it. A file that changed after it was read is left alone with
-// SHCLW_ERR_IO, and a failed write leaves the original in place.
+// SHCLW_ERR_CHANGED, and a failed write leaves the original in place.
 shclw_kind shclw_upgrade_file(const char *path, int64_t from, shclw_upgraded **out, shclw_error *err);
 
 // Puts the info block at the end of what the save writes, or with on false

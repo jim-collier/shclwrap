@@ -225,9 +225,11 @@ static void test_errors(void) {
 
 	const char newer[] = "k: 1\n##    Format   9\n";
 	put_file("newer.shcl", newer, sizeof newer - 1);
-	CHECK(shclw_open(in_scratch("newer.shcl"), &d, &err) == SHCLW_ERR_TOO_NEW);
+	// A newer file opens read-only.
+	CHECK(shclw_open(in_scratch("newer.shcl"), &d, &err) == SHCLW_OK && shclw_read_only(d));
+	CHECK(shclw_int(d, "k", 0) == 1);
+	CHECK(shclw_write(d, in_scratch("newer.shcl"), &err) == SHCLW_ERR_TOO_NEW);
 	CHECK(strstr(err.msg, "format 9") != NULL);
-	CHECK(shclw_int(d, "k", 0) == 0);
 	shclw_free(d);
 
 	const char good[] = "k: 1\n";
@@ -933,8 +935,8 @@ static void test_replace_read(void) {
 		bool ok = false;
 		switch (i) {
 		case 0: ok = k == SHCLW_OK && name && file_is(path, now) && file_is(name, was); break;
-		case 1: ok = k == SHCLW_ERR_IO && !t.backed_up && file_is(path, was) && count_dir(dir) == 1; break;
-		case 2: ok = k == SHCLW_ERR_IO && file_is(path, "a: 3\n") && count_dir(dir) == 1; break;
+		case 1: ok = k == SHCLW_ERR_CHANGED && !t.backed_up && file_is(path, was) && count_dir(dir) == 1; break;
+		case 2: ok = k == SHCLW_ERR_CHANGED && file_is(path, "a: 3\n") && count_dir(dir) == 1; break;
 		case 3: ok = k == SHCLW_ERR_BACKUP_TAKEN && file_is(path, was) && count_dir(dir) == 1; break;
 		case 4: ok = k == SHCLW_ERR_IO && strstr(err.msg, "boom") && file_is(path, was) && count_dir(dir) == 1; break;
 		case 5:
@@ -1113,7 +1115,7 @@ static void test_open_upgrade(void) {
 	write_mode(path, clean2x, 0644);
 	CHECK(shclw_open(path, &d, NULL) == SHCLW_OK);
 	write_mode(path, "tags: x, y\n", 0644);
-	CHECK(shclw_write(d, path, &err) == SHCLW_ERR_IO && file_is(path, "tags: x, y\n") && count_dir(dir) == 1);
+	CHECK(shclw_write(d, path, &err) == SHCLW_ERR_CHANGED && file_is(path, "tags: x, y\n") && count_dir(dir) == 1);
 	name = shclw_backup_name(d, NULL);
 	CHECK(name && name[0] == '\0');
 	free(name);

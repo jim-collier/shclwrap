@@ -108,7 +108,7 @@ func TestReplaceRead(t *testing.T) {
 		dir, path, _ := setup(t)
 		called := false
 		_, err := shclw.ReplaceRead(path, "a: 0\n", now, func() (string, error) { called = true; return "", nil }, plain)
-		if shclw.KindOf(err) != shclw.ErrIO || called || readFile(t, path) != was || len(names(t, dir)) != 1 {
+		if shclw.KindOf(err) != shclw.ErrChanged || called || readFile(t, path) != was || len(names(t, dir)) != 1 {
 			t.Errorf("got %v, backup called %v, file %q, %v", err, called, readFile(t, path), names(t, dir))
 		}
 	})
@@ -120,7 +120,7 @@ func TestReplaceRead(t *testing.T) {
 			return name, err
 		}
 		_, err := shclw.ReplaceRead(path, was, now, edit, plain)
-		if shclw.KindOf(err) != shclw.ErrIO || readFile(t, path) != "a: 3\n" || len(names(t, dir)) != 1 {
+		if shclw.KindOf(err) != shclw.ErrChanged || readFile(t, path) != "a: 3\n" || len(names(t, dir)) != 1 {
 			t.Errorf("got %v, file %q, %v", err, readFile(t, path), names(t, dir))
 		}
 	})
@@ -379,8 +379,8 @@ func TestOpenUpgradeEditedMeanwhile(t *testing.T) {
 		t.Fatal(err)
 	}
 	writeFile(t, path, "tags: x, y\n", 0o644)
-	if err := d.Write(path); shclw.KindOf(err) != shclw.ErrIO {
-		t.Errorf("got %v, want io", err)
+	if err := d.Write(path); shclw.KindOf(err) != shclw.ErrChanged {
+		t.Errorf("got %v, want changed", err)
 	}
 	if readFile(t, path) != "tags: x, y\n" || len(names(t, dir)) != 1 || d.BackupName() != "" {
 		t.Errorf("folder now holds %v", names(t, dir))
@@ -508,5 +508,30 @@ func TestOpenFailsBoth(t *testing.T) {
 		if _, err := shclw3.Open(path); shclw.KindOf(err) != shclw.ErrRefused {
 			t.Errorf("%s: open %v, want refused", c.name, err)
 		}
+	}
+}
+
+// A save through another name for the file Open read is checked too.
+func TestWriteChangedOtherName(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "c.shcl")
+	link := filepath.Join(dir, "link.shcl")
+	writeFile(t, path, "a: 1\n", 0o644)
+	if err := os.Symlink(path, link); err != nil {
+		t.Skip("no symlinks here:", err)
+	}
+	d, err := shclw3.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, path, "a: 2\n", 0o644)
+	if err := d.Put("b", 3); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.Write(link); shclw.KindOf(err) != shclw.ErrChanged || readFile(t, path) != "a: 2\n" {
+		t.Errorf("got %v, file %q", err, readFile(t, path))
+	}
+	if err := d.WriteWith(link, shclw.WriteOpts{Force: true}); err != nil {
+		t.Errorf("forced: %v", err)
 	}
 }

@@ -1,0 +1,36 @@
+# A Write over the file Open read refuses when it changed on disk since,
+# and leaves it as it is.
+open	doc.shcl
+put	int	a	5
+scribble	doc.shcl	a: 9\n
+write	doc.shcl
+get	int	a
+# A Write anywhere else doesn't check.
+write	copy.shcl
+# Force writes over it.
+write	doc.shcl	force
+# What a Write left is what the next one checks against.
+put	int	b	6
+write	doc.shcl
+scribble	doc.shcl	a: 1\nb: 6\nc: 7\n
+put	int	b	7
+write	doc.shcl
+# The same text back again counts as unchanged.
+scribble	doc.shcl	a: 5\nb: 6\n
+write	doc.shcl
+# A user file that wasn't there must still not be there.
+layers	=a: 1\n	new.shcl
+put	int	a	2
+scribble	new.shcl	a: 8\n
+write	new.shcl
+write	new.shcl	force
+# An upgraded file that changed is left alone, with no backup.
+open	old.shcl
+scribble	old.shcl	port: 9\n
+write	old.shcl
+upgraded
+files
+# Force still backs up the original Open read.
+write	old.shcl	force
+upgraded
+files

@@ -163,6 +163,7 @@ pub enum ErrKind {
 	Ambiguous,
 	BackupTaken,
 	NoReadBack,
+	Changed,
 }
 
 impl fmt::Display for ErrKind {
@@ -179,6 +180,7 @@ impl fmt::Display for ErrKind {
 			ErrKind::Ambiguous => "ambiguous",
 			ErrKind::BackupTaken => "backuptaken",
 			ErrKind::NoReadBack => "noreadback",
+			ErrKind::Changed => "changed",
 		})
 	}
 }
@@ -326,6 +328,14 @@ impl From<&[f64]> for Value {
 	}
 }
 
+/// What a write does. The default is a plain `write`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct WriteOpts {
+	/// Writes over the file `open` read even when it changed on disk since.
+	/// It doesn't write over a file in a newer format.
+	pub force: bool,
+}
+
 /// What every module's document does. Bring it into scope to call the
 /// methods: `use shclw::ShclDoc;`.
 pub trait ShclDoc {
@@ -334,8 +344,17 @@ pub trait ShclDoc {
 	/// The document in canonical form.
 	fn canonical(&self) -> String;
 	/// Saves `text()` atomically. The first write over a file `open`
-	/// upgraded backs up the original first, as `upgrade_file` does.
-	fn write(&mut self, path: &str) -> Result<(), Error>;
+	/// upgraded backs up the original first, as `upgrade_file` does. A write
+	/// over the file `open` read is `Changed` when it changed on disk since,
+	/// and a document read from a newer format is `TooNew`.
+	fn write(&mut self, path: &str) -> Result<(), Error> {
+		self.write_with(path, &WriteOpts::default())
+	}
+	/// `write` with options.
+	fn write_with(&mut self, path: &str, opts: &WriteOpts) -> Result<(), Error>;
+	/// Whether the document was read from a newer format, which `write`
+	/// refuses with `TooNew`.
+	fn read_only(&self) -> bool;
 	/// Whether `write` puts the canonical form in place of the lines the
 	/// document was loaded from, so lines no edit touched can change. A file
 	/// `open` upgraded is rewritten until the first write over it.
@@ -706,6 +725,13 @@ pub fn read_text(path: &str) -> Result<String, Error> {
 	}
 }
 
+/// The error for a file that changed on disk since it was read.
+pub fn changed(path: &str) -> Error {
+	Error::new(ErrKind::Changed)
+		.path(path)
+		.msg("changed since it was read; nothing written")
+}
+
 /// Whether `path` still holds `was`, byte for byte.
 pub fn unchanged(path: &str, was: &str) -> bool {
 	fs::read(path).is_ok_and(|b| b == was.as_bytes())
@@ -725,11 +751,7 @@ pub fn replace_read(
 	backup: impl FnOnce() -> Result<String, Error>,
 	write: impl FnOnce(&str, &str) -> Result<(), Error>,
 ) -> Result<String, Error> {
-	let changed = || {
-		Error::new(ErrKind::Io)
-			.path(path)
-			.msg("changed since it was read; nothing written")
-	};
+	let changed = || changed(path);
 	if !unchanged(path, was) {
 		return Err(changed());
 	}
@@ -920,6 +942,8 @@ impl<L: Lib> Runner<'_, L> {
 		self.out.push('\n');
 	}
 
+	// One arm per op in design.md's table, so it's as long as that is.
+	#[allow(clippy::too_many_lines)]
 	fn op(&mut self, f: &[String]) {
 		let arg = |i: usize| f.get(i).map_or("", String::as_str);
 		let rest = |i: usize| f.get(i..).unwrap_or(&[]).to_vec();
@@ -1013,7 +1037,9 @@ impl<L: Lib> Runner<'_, L> {
 			"check" => self.check(arg(1), arg(2)),
 			"format" => self.say(&L::format_of(self.input).to_string()),
 			"upgrade" => self.upgrade(arg(1)),
-			"write" => self.write(arg(1)),
+			"write" => self.write(arg(1), arg(2) == "force"),
+			"readonly" => self.say(&self.doc.read_only().to_string()),
+			"scribble" => self.scribble(arg(1), arg(2)),
 			"open" => self.open(arg(1), arg(2)),
 			"layers" => self.layers(&rest(1)),
 			"upgraded" => self.upgraded(),
@@ -1261,10 +1287,10 @@ impl<L: Lib> Runner<'_, L> {
 		}
 	}
 
-	fn write(&mut self, name: &str) {
+	fn write(&mut self, name: &str, force: bool) {
 		let Some(path) = self.file(name) else { return };
 		let path = path.to_string_lossy().into_owned();
-		if let Err(e) = self.doc.write(&path) {
+		if let Err(e) = self.doc.write_with(&path, &WriteOpts { force }) {
 			return self.result(Some(e));
 		}
 		match read_text(&path) {
@@ -1273,6 +1299,16 @@ impl<L: Lib> Runner<'_, L> {
 				self.block(&t);
 			}
 			Err(e) => self.result(Some(e)),
+		}
+	}
+
+	/// Writes `text` to a file as another program would, behind the
+	/// document's back.
+	fn scribble(&mut self, name: &str, text: &str) {
+		let Some(path) = self.file(name) else { return };
+		match fs::write(&path, text) {
+			Ok(()) => self.say("ok"),
+			Err(e) => self.result(Some(Error::new(ErrKind::Io).msg(e.to_string()))),
 		}
 	}
 

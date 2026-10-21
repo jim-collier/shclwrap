@@ -11,7 +11,9 @@
 /// The shcl crate underneath, so code using `inner()` can name its types.
 pub use shcl3 as shcl;
 
-use crate::{Diag, ErrKind, Error, Got, Layer, Merge, Node, Severity, ShclDoc, Status, Strictness, Upgraded, Value};
+use crate::{
+	Diag, ErrKind, Error, Got, Layer, Merge, Node, Severity, ShclDoc, Status, Strictness, Upgraded, Value, WriteOpts,
+};
 
 /// The shcl release this module wraps.
 pub const SHCL_VERSION: &str = "3.0.0-dev+ea0998fa";
@@ -26,9 +28,12 @@ pub struct Doc {
 	info: crate::Info,
 	stamp: bool,
 	up: Option<UpgradedFile>,
+	file: Option<ReadFile>,
 	lay: Option<Layers>,
 	// The text as loaded, for `merged`.
 	src: String,
+	// The newer format the text names, which makes it read-only.
+	newer: u32,
 }
 
 /// What `open_layers` read. `d` is then their merge, built again after each
@@ -40,14 +45,23 @@ struct Layers {
 	edit: usize,
 }
 
-/// The file `open` upgraded, kept until the first write over it backs it up.
+/// The format `open` upgraded the file from, and where the first write over
+/// it put the original.
 #[derive(Debug)]
 struct UpgradedFile {
 	from: u32,
+	backup: String,
+}
+
+/// The file `open` read, as it was then, so `write` can tell it changed
+/// since. After a write over it, it's what that write left.
+#[derive(Debug)]
+struct ReadFile {
 	path: String,
 	id: Option<FileId>,
 	text: String,
-	backup: String,
+	// An `open_layers` user file that wasn't there.
+	gone: bool,
 }
 
 #[cfg(unix)]
@@ -66,7 +80,7 @@ fn file_id(path: &str) -> Option<FileId> {
 	std::fs::canonicalize(path).ok()
 }
 
-impl UpgradedFile {
+impl ReadFile {
 	/// Whether `path` names the file `open` read: the same path, or the same
 	/// file by another name.
 	fn over(&self, path: &str) -> bool {
@@ -75,6 +89,33 @@ impl UpgradedFile {
 			_ => false,
 		};
 		same(path, &self.path) || (self.id.is_some() && file_id(path) == self.id)
+	}
+
+	/// Writes `text` over the file `open` read, unless it changed since.
+	/// Only the moment between the last check and the rename is left open
+	/// (design.md, Loading and saving).
+	fn replace(
+		&self,
+		path: &str,
+		text: &str,
+		backup: impl FnOnce() -> Result<String, Error>,
+		force: bool,
+	) -> Result<String, Error> {
+		let now;
+		let mut was = self.text.as_str();
+		if force {
+			let Ok(b) = std::fs::read_to_string(path) else {
+				return write_atomic(path, text).map(|()| String::new());
+			};
+			now = b;
+			was = &now;
+		} else if self.gone {
+			if std::fs::symlink_metadata(path).is_ok() {
+				return Err(crate::changed(path));
+			}
+			return write_atomic(path, text).map(|()| String::new());
+		}
+		crate::replace_read(path, was, text, backup, write_atomic)
 	}
 }
 
@@ -142,8 +183,10 @@ fn doc(d: shcl::Document, text: &str) -> Doc {
 		info: crate::Info::AsIs,
 		stamp: false,
 		up: None,
+		file: None,
 		lay: None,
 		src: text.to_owned(),
+		newer: Some(format_of(text)).filter(|&f| f > FORMAT_MAJOR).unwrap_or(0),
 	}
 }
 
@@ -171,7 +214,16 @@ pub fn open_layers(layers: &[Layer]) -> Result<Doc, Error> {
 			Layer::Text(text) => docs.push(Some(parse(text))),
 			Layer::File(path) => match open(path) {
 				Ok(d) => docs.push(Some(d)),
-				Err(e) if e.kind == ErrKind::NotFound => docs.push((i == edit).then(new)),
+				Err(e) if e.kind == ErrKind::NotFound => docs.push((i == edit).then(|| {
+					let mut d = new();
+					d.file = Some(ReadFile {
+						path: path.to_owned(),
+						id: None,
+						text: String::new(),
+						gone: true,
+					});
+					d
+				})),
 				Err(mut e) => {
 					for g in &mut e.diags {
 						g.layer = i + 1;
@@ -187,8 +239,9 @@ pub fn open_layers(layers: &[Layer]) -> Result<Doc, Error> {
 	Ok(d)
 }
 
-/// Reads and parses a file. A missing file is `NotFound`, and a file
-/// written for a newer format is `TooNew`. An older file is upgraded in
+/// Reads and parses a file. A missing file is `NotFound`. A file written for
+/// a newer format is read as this shcl reads it, and is read-only: `write`
+/// on it is `TooNew`. An older file is upgraded in
 /// memory, as `upgrade` with `from` 0 does, and `upgraded_from` says so.
 /// Nothing is written until `write`, and the first write over the file backs
 /// it up. A 2.x file that reads two ways is `Ambiguous`, and one shcl 2.0
@@ -201,25 +254,22 @@ pub fn open(path: &str) -> Result<Doc, Error> {
 /// `open` at a given strictness, which applies to the upgraded text.
 pub fn open_with(path: &str, level: Strictness) -> Result<Doc, Error> {
 	let text = crate::read_text(path)?;
-	let f = format_of(&text);
-	if f > FORMAT_MAJOR {
-		return Err(too_new(f).path(path));
-	}
-	// A file naming this format is current, so it skips the upgrade's parse.
-	if f == FORMAT_MAJOR {
-		return parse_with(&text, level).map_err(|e| e.path(path));
-	}
-	let u = upgrade(&text, 0).map_err(|e| e.path(path))?;
-	if !u.changed {
-		return parse_with(&text, level).map_err(|e| e.path(path));
-	}
-	let mut d = parse_with(&u.text, level).map_err(|e| e.path(path))?;
-	d.up = Some(UpgradedFile {
+	// A file naming this format or a newer one skips the upgrade's parse.
+	let u = if format_of(&text) < FORMAT_MAJOR {
+		Some(upgrade(&text, 0).map_err(|e| e.path(path))?).filter(|u| u.changed)
+	} else {
+		None
+	};
+	let mut d = parse_with(u.as_ref().map_or(&text, |u| &u.text), level).map_err(|e| e.path(path))?;
+	d.up = u.map(|u| UpgradedFile {
 		from: u.from,
+		backup: String::new(),
+	});
+	d.file = Some(ReadFile {
 		path: path.to_owned(),
 		id: file_id(path),
 		text,
-		backup: String::new(),
+		gone: false,
 	});
 	Ok(d)
 }
@@ -664,14 +714,17 @@ impl ShclDoc for Doc {
 	/// check shcl's `save_file_keep_lines` makes, and writes nothing when the
 	/// info block or the Format line can't go in, since an edit made after
 	/// `info_block` or `stamp_format`. A save with no Format line has 2.x's
-	/// info block swapped for the current one where it sat. A file that
-	/// changed since `open` read it is left alone with `Io`, when the write
-	/// would back it up.
-	fn write(&mut self, path: &str) -> Result<(), Error> {
+	/// info block swapped for the current one where it sat. A write over
+	/// the file `open` read leaves it alone with `Changed` when it changed
+	/// on disk since, unless `force`.
+	fn write_with(&mut self, path: &str, opts: &WriteOpts) -> Result<(), Error> {
 		if let Some(lay) = &mut self.lay {
 			if let Some(top) = &mut lay.docs[lay.edit] {
-				return top.write(path);
+				return top.write_with(path, opts);
 			}
+		}
+		if self.newer > 0 {
+			return Err(too_new(self.newer).path(path));
 		}
 		let (text, kept) = self.d.to_text_keep_lines();
 		let lost = self.d.lost_count();
@@ -682,21 +735,25 @@ impl ShclDoc for Doc {
 		}
 		let text = if kept { text } else { self.d.to_canonical() };
 		let text = saved(&text, self.info, self.stamp).map_err(|e| e.path(path))?;
-		match &mut self.up {
-			Some(up) if up.backup.is_empty() && up.over(path) => {
-				let name = crate::replace_read(
-					path,
-					&up.text,
-					&text,
-					|| keep_original(path, &up.text, up.from),
-					write_atomic,
-				)?;
-				up.backup = name;
-				up.text = String::new();
-				Ok(())
+		let Some(f) = self.file.as_mut().filter(|f| f.over(path)) else {
+			return write_atomic(path, &text);
+		};
+		match self.up.as_mut().filter(|u| u.backup.is_empty()) {
+			Some(up) => {
+				up.backup = f.replace(path, &text, || keep_original(path, &f.text, up.from), opts.force)?;
 			}
-			_ => write_atomic(path, &text),
+			None => {
+				f.replace(path, &text, || Ok(String::new()), opts.force)?;
+			}
 		}
+		f.text = text;
+		f.gone = false;
+		f.id = file_id(path);
+		Ok(())
+	}
+
+	fn read_only(&self) -> bool {
+		self.top().newer > 0
 	}
 
 	/// 3.0 writes the canonical form when it can't keep the lines with the

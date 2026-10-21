@@ -98,6 +98,9 @@ shclw_diag *shclw_i_copy_diags(const shclw_diag *diags, size_t n, size_t *count)
 shclw_upgraded *shclw_i_upgraded(const char *text, size_t len, int64_t from, bool changed, size_t unsure,
                                  const char *backup, const shclw_diag *diags, size_t n_diags);
 
+// Nothing at path, not even a dangling link.
+bool shclw_i_missing(const char *path);
+
 // Something at path that isn't a regular file, such as a FIFO or a device.
 bool shclw_i_irregular(const char *path);
 

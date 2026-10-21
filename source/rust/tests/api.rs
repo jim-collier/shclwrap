@@ -86,17 +86,14 @@ fn open() {
 	let missing = dir.join("missing.shcl");
 	let s = |p: &PathBuf| p.to_string_lossy().into_owned();
 	let kind = |r: Result<(), shclw::Error>| r.err().map(|e| e.kind);
+	// A newer file opens read-only, so it's the save that refuses.
+	let open_save = |p: &str| shclw::v3::open(p).and_then(|mut d| if d.read_only() { d.write(p) } else { Ok(()) });
 	for (path, want) in [
 		(&newer, ErrKind::TooNew),
 		(&binary, ErrKind::Io),
 		(&missing, ErrKind::NotFound),
 	] {
-		assert_eq!(
-			kind(shclw::v3::open(&s(path)).map(drop)),
-			Some(want),
-			"v3 {}",
-			path.display()
-		);
+		assert_eq!(kind(open_save(&s(path))), Some(want), "v3 {}", path.display());
 	}
 
 	// A Format line in a raw body is the body's. A real one after it still
@@ -106,7 +103,7 @@ fn open() {
 	fs::write(&in_raw, raw).unwrap();
 	let raw_then_real = dir.join("rawreal.shcl");
 	fs::write(&raw_then_real, format!("{raw}##    Format   9\n")).unwrap();
-	let open = |p: &PathBuf| kind(shclw::v3::open(&s(p)).map(drop));
+	let open = |p: &PathBuf| kind(open_save(&s(p)));
 	assert_eq!(open(&in_raw), None, "v3 raw.shcl");
 	assert_eq!(open(&raw_then_real), Some(ErrKind::TooNew), "v3 rawreal.shcl");
 }

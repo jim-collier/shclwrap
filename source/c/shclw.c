@@ -44,6 +44,7 @@ const char *shclw_kind_name(shclw_kind k) {
 	case SHCLW_ERR_AMBIGUOUS: return "ambiguous";
 	case SHCLW_ERR_BACKUP_TAKEN: return "backuptaken";
 	case SHCLW_ERR_NO_READ_BACK: return "noreadback";
+	case SHCLW_ERR_CHANGED: return "changed";
 	case SHCLW_ERR_NO_MEMORY: return "nomemory";
 	}
 	return "unknown";
@@ -819,8 +820,7 @@ static bool unchanged(const char *path, const char *was, size_t was_len) {
 	return fclose(f) == 0 && same;
 }
 
-// Nothing at path, not even a dangling link.
-static bool missing(const char *path) {
+bool shclw_i_missing(const char *path) {
 #ifdef _WIN32
 	struct _stat64 st;
 	return _stat64(path, &st) != 0 && errno == ENOENT;
@@ -853,7 +853,7 @@ shclw_kind shclw_i_replace_read(const char *path, const char *was, size_t was_le
 	static const char changed[] = "changed since it was read; nothing written";
 	*backup_name = NULL;
 	if (!unchanged(path, was, was_len)) {
-		return shclw_i_fail(err, SHCLW_ERR_IO, path, changed, 0);
+		return shclw_i_fail(err, SHCLW_ERR_CHANGED, path, changed, 0);
 	}
 	char *name = NULL;
 	if (how->backup) {
@@ -864,7 +864,7 @@ shclw_kind shclw_i_replace_read(const char *path, const char *was, size_t was_le
 	}
 	if (!unchanged(path, was, was_len)) {
 		drop_backup(name);
-		return shclw_i_fail(err, SHCLW_ERR_IO, path, changed, 0);
+		return shclw_i_fail(err, SHCLW_ERR_CHANGED, path, changed, 0);
 	}
 	shclw_kind k = how->write(how->ctx, path, data, len, err);
 	if (k == SHCLW_OK) {
@@ -879,7 +879,7 @@ shclw_kind shclw_i_replace_read(const char *path, const char *was, size_t was_le
 		return k;
 	}
 	// A replace that fails part way on Windows can leave nothing at path.
-	if (missing(path) && rename(name, path) == 0) {
+	if (shclw_i_missing(path) && rename(name, path) == 0) {
 		note(err, "the original was put back", NULL);
 	} else {
 		note(err, "the original is ", name);

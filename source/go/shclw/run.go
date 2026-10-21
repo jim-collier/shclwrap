@@ -148,7 +148,11 @@ func (r *runner) op(f []string) {
 	case "upgrade":
 		r.upgrade(arg(1))
 	case "write":
-		r.write(arg(1))
+		r.write(arg(1), arg(2) == "force")
+	case "readonly":
+		r.out(strconv.FormatBool(d.ReadOnly()))
+	case "scribble":
+		r.scribble(arg(1), arg(2))
 	case "open":
 		r.open(arg(1), arg(2))
 	case "layers":
@@ -428,12 +432,12 @@ func (r *runner) upgrade(from string) {
 	r.block(u.Text)
 }
 
-func (r *runner) write(name string) {
+func (r *runner) write(name string, force bool) {
 	path, ok := r.file(name)
 	if !ok {
 		return
 	}
-	if err := r.doc.Write(path); err != nil {
+	if err := r.doc.WriteWith(path, WriteOpts{Force: force}); err != nil {
 		r.result(err)
 		return
 	}
@@ -444,6 +448,20 @@ func (r *runner) write(name string) {
 	}
 	r.out("ok")
 	r.block(text)
+}
+
+// scribble writes text to a file as another program would, behind the
+// document's back.
+func (r *runner) scribble(name, text string) {
+	path, ok := r.file(name)
+	if !ok {
+		return
+	}
+	if err := os.WriteFile(path, []byte(text), 0o644); err != nil {
+		r.result(&Error{Kind: ErrIO, Path: path, Err: err})
+		return
+	}
+	r.out("ok")
 }
 
 // file keeps a script's file names inside RunOptions.Dir.

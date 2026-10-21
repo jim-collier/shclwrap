@@ -86,11 +86,19 @@ func TestOpen(t *testing.T) {
 	newer := write("newer.shcl", "a: 1\n##    Format   9\n")
 	binary := write("binary.shcl", "a: \xff\xfe\n")
 	missing := filepath.Join(dir, "missing.shcl")
+	// A newer file opens read-only, and a raw body's Format line isn't the
+	// file's.
 	opens := []struct {
 		n    int
 		open func(string) error
 	}{
-		{3, func(p string) error { _, err := shclw3.Open(p); return err }},
+		{3, func(p string) error {
+			d, err := shclw3.Open(p)
+			if err == nil && d.ReadOnly() {
+				return d.Write(p)
+			}
+			return err
+		}},
 	}
 	for _, o := range opens {
 		for path, want := range map[string]shclw.ErrKind{newer: shclw.ErrTooNew, binary: shclw.ErrIO, missing: shclw.ErrNotFound} {

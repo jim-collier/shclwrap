@@ -35,7 +35,9 @@ from 0 backup none
 > diags
 1	error	E026	a comma then a space or the end in a bare value; write an array in brackets, [a, b], or quote the text
 > open	newer.shcl
-error toonew
+ok
+> readonly
+true
 > open	missing.shcl
 error notfound
 > open	old.shcl	strict

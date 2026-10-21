@@ -55,7 +55,9 @@ If your program uses one shcl version and doesn't plan to move, you don't need t
 
 - Every write is read back. A value shcl stored differently than it was given comes back as an error.
 
-- A file written for a newer format is refused with a clear error.
+- A file written for a newer format still opens, read-only. Saving over it is refused with a clear error.
+
+- A save over a file another program changed since it was read is refused too, so that program's edit isn't lost. A program that means to replace it can force the save.
 
 - Old files are upgraded as they're opened, in memory. The first save keeps the original beside it, and a program that only reads never writes.
 

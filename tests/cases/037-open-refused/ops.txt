@@ -21,7 +21,9 @@ upgraded
 open	stamped.shcl
 upgraded
 diags
+# A newer file opens read-only, as 055 shows.
 open	newer.shcl
+readonly
 open	missing.shcl
 # Strictness applies to the upgraded text.
 open	old.shcl	strict

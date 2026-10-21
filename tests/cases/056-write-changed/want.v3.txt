@@ -1,0 +1,87 @@
+> open	doc.shcl
+ok
+> put	int	a	5
+ok
+> scribble	doc.shcl	a: 9\n
+ok
+> write	doc.shcl
+error changed
+> get	int	a
+Good	1	5
+> write	copy.shcl
+ok
+| a: 5
+| b: 2
+> write	doc.shcl	force
+ok
+| a: 5
+| b: 2
+> put	int	b	6
+ok
+> write	doc.shcl
+ok
+| a: 5
+| b: 6
+> scribble	doc.shcl	a: 1\nb: 6\nc: 7\n
+ok
+> put	int	b	7
+ok
+> write	doc.shcl
+error changed
+> scribble	doc.shcl	a: 5\nb: 6\n
+ok
+> write	doc.shcl
+ok
+| a: 5
+| b: 7
+> layers	=a: 1\n	new.shcl
+ok
+> put	int	a	2
+ok
+> scribble	new.shcl	a: 8\n
+ok
+> write	new.shcl
+error changed
+> write	new.shcl	force
+ok
+| a: 2
+> open	old.shcl
+ok
+> scribble	old.shcl	port: 9\n
+ok
+> write	old.shcl
+error changed
+> upgraded
+from 2 backup none
+> files
+copy.shcl
+doc.shcl
+new.shcl
+old.shcl
+ops.txt
+> write	old.shcl	force
+ok
+| # settings
+| port: 8080
+| hosts: [alpha, beta]
+| 
+| ##
+| ## This config file format is SHCL.
+| ## "Simple Hierarchical Config Language"
+| ##    Format   3
+| ##    Home     https://github.com/yottacore/shcl
+| ##    Syntax   https://github.com/yottacore/shcl/blob/v3.0.0-beta1/project/spec.md
+| ##    Legal    SHCL is Copyright © 2026 Jim Collier [ID: 2უNაɘ«҂թȹɤξπ๙¿ձϖ]. License: MIT. No warranty.
+| ##
+> upgraded
+from 2 backup old_backup_STAMP_format-v2.shcl
+| # settings
+| port: 8080
+| hosts: alpha, beta
+> files
+copy.shcl
+doc.shcl
+new.shcl
+old.shcl
+old_backup_STAMP_format-v2.shcl
+ops.txt

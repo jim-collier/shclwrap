@@ -152,6 +152,7 @@ const (
 	ErrAmbiguous
 	ErrBackupTaken
 	ErrNoReadBack
+	ErrChanged
 )
 
 func (k ErrKind) String() string {
@@ -178,6 +179,8 @@ func (k ErrKind) String() string {
 		return "backuptaken"
 	case ErrNoReadBack:
 		return "noreadback"
+	case ErrChanged:
+		return "changed"
 	}
 	return "unknown"
 }
@@ -227,12 +230,22 @@ type Upgraded struct {
 	Backup  string
 }
 
+// WriteOpts change what a Write does. The zero value is a plain Write.
+//
+// Force writes over the file Open read even when it changed on disk since.
+// It doesn't write over a file in a newer format.
+type WriteOpts struct {
+	Force bool
+}
+
 // Doc is what every adapter's document does. Programs use the adapter's
 // own *Doc; this interface is how shared code, like Run, drives any of them.
 type Doc interface {
 	Text() string
 	Canonical() string
 	Write(path string) error
+	WriteWith(path string, o WriteOpts) error
+	ReadOnly() bool
 	Rewrites() bool
 	Diags() []Diag
 	Errors() int
@@ -542,6 +555,11 @@ func ReadText(path string) (string, error) {
 	return "", &Error{Kind: ErrIO, Path: path, Err: err}
 }
 
+// Changed is the error for a file that changed on disk since it was read.
+func Changed(path string) error {
+	return &Error{Kind: ErrChanged, Path: path, Msg: "changed since it was read; nothing written"}
+}
+
 // Unchanged is whether path still holds was, byte for byte.
 func Unchanged(path, was string) bool {
 	b, err := os.ReadFile(path)
@@ -557,7 +575,7 @@ func Unchanged(path, was string) bool {
 // names it.
 func ReplaceRead(path, was, data string, backup func() (string, error), write func(path, data string) error) (string, error) {
 	changed := func() error {
-		return &Error{Kind: ErrIO, Path: path, Msg: "changed since it was read; nothing written"}
+		return Changed(path)
 	}
 	if !Unchanged(path, was) {
 		return "", changed()

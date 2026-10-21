@@ -38,9 +38,16 @@ layers	=a: 1\n	=a: 2\nc: 3\n
 put	int	a	4
 get	int	a
 text
-# A layer that won't open stops the load, as open does.
+# A newer user file reads, but can't be saved over.
 layers	site.shcl	toonew.shcl
 get	int	port
+get	int	a
+readonly
+write	toonew.shcl
+# A newer lower layer reads too, and the user file still saves.
+layers	toonew.shcl	nosite.shcl	new.shcl
+readonly
+get	int	a
 # A refused layer's lines say which layer they're in.
 layers	=a: 1\n	old.shcl	doc.shcl
 diags

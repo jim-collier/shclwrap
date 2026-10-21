@@ -64,8 +64,10 @@ type Doc struct {
 	info  shclw.Info
 	stamp bool
 	up    *upgradedFile
+	file  *readFile
 	lay   *layerSet
 	src   string // the text as loaded, for Merged
+	newer int    // the newer format the text names, which makes it read-only
 }
 
 // layerSet is what OpenLayers read. d is then their merge, rebuilt after
@@ -75,14 +77,20 @@ type layerSet struct {
 	edit int
 }
 
-// upgradedFile is the file Open upgraded, kept until the first Write over it
-// backs it up.
+// upgradedFile is the format Open upgraded the file from, and where the
+// first Write over it put the original.
 type upgradedFile struct {
 	from   int
-	path   string
-	st     os.FileInfo
-	text   string
 	backup string
+}
+
+// readFile is the file Open read, as it was then, so Write can tell it
+// changed since. After a Write over it, it's what that Write left.
+type readFile struct {
+	path string
+	st   os.FileInfo
+	text string
+	gone bool // an OpenLayers user file that wasn't there
 }
 
 var _ shclw.Doc = (*Doc)(nil)
@@ -117,19 +125,24 @@ func ParseWith(text string, s Strictness) (*Doc, error) {
 	if d == nil {
 		d = shcl.New()
 	}
+	out := &Doc{d: d, src: text}
+	if f := FormatOf(text); f > FormatMajor {
+		out.newer = f
+	}
 	if err == nil {
-		return &Doc{d: d, src: text}, nil
+		return out, nil
 	}
 	e := &shclw.Error{Kind: shclw.ErrStrict, Err: err}
 	var le *shcl.LoadError
 	if errors.As(err, &le) {
 		e.Diags = diags(le.Diagnostics)
 	}
-	return &Doc{d: d, src: text}, e
+	return out, e
 }
 
-// Open reads and parses a file. A missing file is ErrNotFound, and a file
-// written for a newer format is ErrTooNew. An older file is upgraded in
+// Open reads and parses a file. A missing file is ErrNotFound. A file
+// written for a newer format is read as this shcl reads it, and is
+// read-only: Write on it is ErrTooNew. An older file is upgraded in
 // memory, as Upgrade with from 0 does, and UpgradedFrom says so. Nothing is
 // written until Write, and the first Write over the file backs it up. A 2.x
 // file that reads two ways is ErrAmbiguous, and one shcl 2.0 reports errors
@@ -144,26 +157,24 @@ func OpenWith(path string, s Strictness) (*Doc, error) {
 		return New(), err
 	}
 	f := FormatOf(text)
-	if f > FormatMajor {
-		return New(), tooNew(path, f)
-	}
 	var up *upgradedFile
 	body := text
 	// A file naming this format is current, so it skips the upgrade's parse.
-	if f != FormatMajor {
+	if f < FormatMajor {
 		u, err := Upgrade(text, 0)
 		if err != nil {
 			err.(*shclw.Error).Path = path
 			return New(), err
 		}
 		if u.Changed {
-			up = &upgradedFile{from: u.From, path: path, text: text}
-			up.st, _ = os.Stat(path)
+			up = &upgradedFile{from: u.From}
 			body = u.Text
 		}
 	}
 	d, err := ParseWith(body, s)
 	d.up = up
+	d.file = &readFile{path: path, text: text}
+	d.file.st, _ = os.Stat(path)
 	if e, ok := err.(*shclw.Error); ok {
 		e.Path = path
 	}
@@ -201,6 +212,7 @@ func OpenLayers(layers ...Layer) (*Doc, error) {
 		case shclw.KindOf(err) == shclw.ErrNotFound:
 			if i == l.edit {
 				l.docs[i] = New()
+				l.docs[i].file = &readFile{path: ly.File, gone: true}
 			}
 		case err != nil:
 			if e, ok := err.(*shclw.Error); ok {
@@ -580,11 +592,19 @@ func saved(text string, info shclw.Info, stamp bool) (string, error) {
 // the current one where it sat.
 //
 // The first Write over a file Open upgraded backs up the original first, as
-// UpgradeFile does, and BackupName names the copy. A file that changed since
-// Open read it is left alone with ErrIO.
-func (d *Doc) Write(path string) error {
+// UpgradeFile does, and BackupName names the copy. A Write over the file
+// Open read leaves it alone with ErrChanged when it changed on disk since,
+// and a document read from a newer format is ErrTooNew.
+func (d *Doc) Write(path string) error { return d.WriteWith(path, shclw.WriteOpts{}) }
+
+// WriteWith is Write with options. Force writes over a file that changed
+// since it was read.
+func (d *Doc) WriteWith(path string, o shclw.WriteOpts) error {
 	if d.lay != nil {
-		return d.top().Write(path)
+		return d.top().WriteWith(path, o)
+	}
+	if d.newer > 0 {
+		return tooNew(path, d.newer)
 	}
 	text, kept := d.d.ToTextKeepLines()
 	if lost := d.d.LostCount(); !kept && lost > 0 {
@@ -599,15 +619,44 @@ func (d *Doc) Write(path string) error {
 		err.(*shclw.Error).Path = path
 		return err
 	}
-	if up := d.up; up != nil && up.backup == "" && up.over(path) {
-		name, err := shclw.ReplaceRead(path, up.text, text, keepOriginal(path, up.text, up.from), writeAtomic)
-		if err != nil {
-			return err
-		}
-		up.backup, up.text = name, ""
-		return nil
+	f := d.file
+	if f == nil || !f.over(path) {
+		return writeAtomic(path, text)
 	}
-	return writeAtomic(path, text)
+	var backup func() (string, error)
+	if d.up != nil && d.up.backup == "" {
+		backup = keepOriginal(path, f.text, d.up.from)
+	}
+	name, err := f.replace(path, text, backup, o.Force)
+	if err != nil {
+		return err
+	}
+	if backup != nil {
+		d.up.backup = name
+	}
+	f.text, f.gone = text, false
+	f.st, _ = os.Stat(path)
+	return nil
+}
+
+// replace writes text over the file Open read, unless it changed since.
+// Only the moment between the last check and the rename is left open
+// (design.md, Loading and saving).
+func (f *readFile) replace(path, text string, backup func() (string, error), force bool) (string, error) {
+	was := f.text
+	if force {
+		now, err := shclw.ReadText(path)
+		if err != nil {
+			return "", writeAtomic(path, text)
+		}
+		was = now
+	} else if f.gone {
+		if _, err := os.Lstat(path); err == nil {
+			return "", shclw.Changed(path)
+		}
+		return "", writeAtomic(path, text)
+	}
+	return shclw.ReplaceRead(path, was, text, backup, writeAtomic)
 }
 
 func writeAtomic(path, text string) error {
@@ -624,15 +673,19 @@ func writeAtomic(path, text string) error {
 
 // over is whether path names the file Open read: the same path, or the same
 // file by another name.
-func (up *upgradedFile) over(path string) bool {
+func (f *readFile) over(path string) bool {
 	a, aerr := filepath.Abs(path)
-	b, berr := filepath.Abs(up.path)
+	b, berr := filepath.Abs(f.path)
 	if aerr == nil && berr == nil && a == b {
 		return true
 	}
 	st, err := os.Stat(path)
-	return err == nil && up.st != nil && os.SameFile(st, up.st)
+	return err == nil && f.st != nil && os.SameFile(st, f.st)
 }
+
+// ReadOnly is whether the document was read from a newer format, which Write
+// refuses with ErrTooNew. On a layered document it's the edit layer's.
+func (d *Doc) ReadOnly() bool { return d.top().newer > 0 }
 
 // UpgradedFrom is the format Open upgraded the file from, or 0 when it
 // didn't upgrade it. Reads, Lines, Diags, and Text are all of the upgraded

@@ -609,7 +609,10 @@ static void write_(runner *r, const fields *f) {
 	if (!path) {
 		return;
 	}
-	shclw_kind k = shclw_write(r->doc, path, NULL);
+	shclw_write_opts o;
+	memset(&o, 0, sizeof o);
+	o.force = !strcmp(arg(f, 2), "force");
+	shclw_kind k = shclw_write_with(r->doc, path, &o, NULL);
 	char *saved = NULL;
 	size_t n = 0;
 	if (k == SHCLW_OK) {
@@ -623,6 +626,21 @@ static void write_(runner *r, const fields *f) {
 	line_out(r, "ok");
 	block(r, saved, n);
 	free(saved);
+}
+
+// Writes text to a file as another program would, behind the document's back.
+static void scribble(runner *r, const fields *f) {
+	char *path = file(r, arg(f, 1));
+	if (!path) {
+		return;
+	}
+	const char *text = arg(f, 2);
+	size_t n = strlen(text);
+	FILE *out = fopen(path, "wb");
+	bool ok = out && fwrite(text, 1, n, out) == n;
+	ok = (out && fclose(out) == 0) && ok;
+	free(path);
+	line_out(r, ok ? "ok" : "error io");
 }
 
 static void print_doc_diags(runner *r, shclw_doc *d) {
@@ -1157,6 +1175,11 @@ static void op_merged(runner *r, const fields *f) {
 static void op_get(runner *r, const fields *f) { get(r, arg(f, 1), arg(f, 2)); }
 static void op_or(runner *r, const fields *f) { or_(r, f); }
 static void op_write(runner *r, const fields *f) { write_(r, f); }
+static void op_readonly(runner *r, const fields *f) {
+	(void)f;
+	line_out(r, shclw_read_only(r->doc) ? "true" : "false");
+}
+static void op_scribble(runner *r, const fields *f) { scribble(r, f); }
 static void op_rewrites(runner *r, const fields *f) {
 	(void)f;
 	line_out(r, shclw_rewrites(r->doc) ? "true" : "false");
@@ -1230,6 +1253,8 @@ static const struct {
 	{"layers",    op_layers},
 	{"upgraded",  op_upgraded},
 	{"files",     op_files},
+	{"readonly",  op_readonly},
+	{"scribble",  op_scribble},
 };
 // clang-format on
 

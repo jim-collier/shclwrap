@@ -182,6 +182,7 @@ class ErrKind(Enum):
 	Ambiguous = "ambiguous"
 	BackupTaken = "backuptaken"
 	NoReadBack = "noreadback"
+	Changed = "changed"
 
 
 class Error(Exception):
@@ -306,6 +307,10 @@ def read_text(path: str) -> str:
 		raise Error(ErrKind.IO, path, "not valid UTF-8") from None
 
 
+def _changed(path: str) -> Error:
+	return Error(ErrKind.Changed, path, "changed since it was read; nothing written")
+
+
 def _unchanged(path: str, was: str) -> bool:
 	try:
 		return Path(path).read_bytes() == was.encode("utf-8")
@@ -319,11 +324,8 @@ def _replace_read(
 	"""Go's ReplaceRead: data over path, unless path changed since it held was.
 	backup keeps was first and names the copy, which comes back."""
 
-	def changed() -> Error:
-		return Error(ErrKind.IO, path, "changed since it was read; nothing written")
-
 	if not _unchanged(path, was):
-		raise changed()
+		raise _changed(path)
 	name = backup() if backup is not None else ""
 
 	def drop() -> None:
@@ -332,7 +334,7 @@ def _replace_read(
 
 	if not _unchanged(path, was):
 		drop()
-		raise changed()
+		raise _changed(path)
 	try:
 		write(path, data)
 		return name
@@ -686,13 +688,49 @@ def _too_new(path: str, f: int) -> Error:
 
 @dataclass
 class _UpgradedFile:
-	"""The file open() upgraded, kept until the first write over it backs it up."""
+	"""The format open() upgraded the file from, and where the first write over
+	it put the original."""
 
 	from_: int
+	backup: str = ""
+
+
+def _ident(path: str) -> tuple[int, int] | None:
+	try:
+		st = os.stat(path)
+	except OSError:
+		return None
+	return (st.st_dev, st.st_ino)
+
+
+@dataclass
+class _ReadFile:
+	"""The file open() read, as it was then, so write() can tell it changed
+	since. After a write over it, it's what that write left. gone is an
+	open_layers() user file that wasn't there."""
+
 	path: str
 	text: str
 	ident: tuple[int, int] | None
-	backup: str = ""
+	gone: bool = False
+
+	def replace(self, path: str, text: str, backup: Callable[[], str] | None, force: bool) -> str:
+		"""Writes text over the file open() read, unless it changed since. Only
+		the moment between the last check and the rename is left open
+		(design.md, Loading and saving)."""
+		was = self.text
+		if force:
+			try:
+				was = Path(path).read_bytes().decode("utf-8")
+			except (OSError, UnicodeDecodeError):
+				_write_atomic(path, text)
+				return ""
+		elif self.gone:
+			if os.path.lexists(path):
+				raise _changed(path)
+			_write_atomic(path, text)
+			return ""
+		return _replace_read(path, was, text, backup, _write_atomic)
 
 	def over(self, path: str) -> bool:
 		if os.path.abspath(path) == os.path.abspath(self.path):
@@ -736,6 +774,8 @@ class Doc:
 		self._info = _Info.AsIs
 		self._stamp = False
 		self._up: _UpgradedFile | None = None
+		self._file: _ReadFile | None = None
+		self._newer = 0  # the newer format the text names, which makes it read-only
 		self._lay: _LayerSet | None = None
 		self._src = ""  # the text as loaded, for merged()
 
@@ -784,13 +824,17 @@ class Doc:
 		t = self._top()
 		return t._finish(t._d.to_canonical())
 
-	def write(self, path: str) -> None:
+	def write(self, path: str, force: bool = False) -> None:
 		"""Saves text() atomically. Refuses with Refused when the load dropped
 		lines the save would lose. The first write over a file open() upgraded
-		backs up the original first, and backup_name() names the copy."""
+		backs up the original first, and backup_name() names the copy. A write
+		over the file open() read is Changed when it changed on disk since,
+		unless force, and a document read from a newer format is TooNew."""
 		if self._lay is not None:
-			self._top().write(path)
+			self._top().write(path, force)
 			return
+		if self._newer:
+			raise _too_new(path, self._newer)
 		text, kept = self._d.to_text_keep_lines()
 		lost = self._d.lost_count()
 		if not kept and lost > 0:
@@ -802,12 +846,21 @@ class Doc:
 		except Error as e:
 			e.path = path
 			raise
-		up = self._up
-		if up is not None and not up.backup and up.over(path):
-			up.backup = _replace_read(path, up.text, text, _keep_original(path, up.text, up.from_), _write_atomic)
-			up.text = ""
+		f = self._file
+		if f is None or not f.over(path):
+			_write_atomic(path, text)
 			return
-		_write_atomic(path, text)
+		up = self._up
+		if up is not None and not up.backup:
+			up.backup = f.replace(path, text, _keep_original(path, f.text, up.from_), force)
+		else:
+			f.replace(path, text, None, force)
+		f.text, f.gone, f.ident = text, False, _ident(path)
+
+	def read_only(self) -> bool:
+		"""Whether the document was read from a newer format, which write()
+		refuses with TooNew."""
+		return self._top()._newer > 0
 
 	def rewrites(self) -> bool:
 		"""Whether write() puts the canonical form in place of the lines the
@@ -1112,6 +1165,8 @@ def _parse_keep(text: str, s: Strictness) -> tuple[Doc, Error | None]:
 		err.__cause__ = e
 		d = Doc(inner)
 	d._src = text
+	f = format_of(text)
+	d._newer = f if f > FORMAT_MAJOR else 0
 	return d, err
 
 
@@ -1213,8 +1268,9 @@ def parse_with(text: str, s: Strictness) -> Doc:
 
 
 def open(path: str, s: Strictness = Strictness.Standard) -> Doc:
-	"""Reads and parses a file. A missing file is NotFound, and one written for
-	a newer format is TooNew. An older one is upgraded in memory, as upgrade()
+	"""Reads and parses a file. A missing file is NotFound. One written for a
+	newer format is read as this shcl reads it, and is read-only: write() on
+	it is TooNew. An older one is upgraded in memory, as upgrade()
 	with from_ 0 does, and upgraded_from() says so. Nothing is written until
 	write(), and the first write over the file backs it up. A 2.x file that
 	reads two ways is Ambiguous, and one shcl 2.0 reports errors on, or that
@@ -1229,27 +1285,20 @@ def open(path: str, s: Strictness = Strictness.Standard) -> Doc:
 def _open_keep(path: str, s: Strictness) -> tuple[Doc, Error | None]:
 	try:
 		text = read_text(path)
-		f = format_of(text)
-		if f > FORMAT_MAJOR:
-			raise _too_new(path, f)
 		up = None
 		body = text
-		# A file naming this format is current, so it skips the upgrade's parse.
-		if f != FORMAT_MAJOR:
+		# A file naming this format or a newer one skips the upgrade's parse.
+		if format_of(text) < FORMAT_MAJOR:
 			u = upgrade(text, 0)
 			if u.changed:
-				try:
-					st = os.stat(path)
-					ident: tuple[int, int] | None = (st.st_dev, st.st_ino)
-				except OSError:
-					ident = None
-				up = _UpgradedFile(u.from_, path, text, ident)
+				up = _UpgradedFile(u.from_)
 				body = u.text
 	except Error as e:
 		e.path = path
 		return new(), e
 	d, err = _parse_keep(body, s)
 	d._up = up
+	d._file = _ReadFile(path, text, _ident(path))
 	if err is not None:
 		err.path = path
 	return d, err
@@ -1280,6 +1329,7 @@ def open_layers(*layers: Layer) -> Doc:
 		elif err.kind is ErrKind.NotFound:
 			if i == edit:
 				docs[i] = new()
+				docs[i]._file = _ReadFile(ly.file, "", None, gone=True)
 		else:
 			for g in err.diags:
 				g.layer = i + 1
@@ -1689,7 +1739,11 @@ class _Runner:
 		elif name == "upgrade":
 			self.upgrade(arg(1))
 		elif name == "write":
-			self.write(arg(1))
+			self.write(arg(1), arg(2) == "force")
+		elif name == "readonly":
+			self.out(_bool(self.doc.read_only()))
+		elif name == "scribble":
+			self.scribble(arg(1), arg(2))
 		elif name == "open":
 			self.open(arg(1), arg(2))
 		elif name == "layers":
@@ -1857,12 +1911,25 @@ class _Runner:
 		self.out(f"from {u.from_} changed {_bool(u.changed)} unsure {u.unsure}")
 		self.block(u.text)
 
-	def write(self, name: str) -> None:
+	def scribble(self, name: str, text: str) -> None:
+		"""Writes text to a file as another program would, behind the
+		document's back."""
 		path = self.file(name)
 		if path is None:
 			return
 		try:
-			self.doc.write(path)
+			Path(path).write_bytes(text.encode("utf-8", "surrogateescape"))
+		except OSError:
+			self.out("error io")
+			return
+		self.out("ok")
+
+	def write(self, name: str, force: bool) -> None:
+		path = self.file(name)
+		if path is None:
+			return
+		try:
+			self.doc.write(path, force)
 			text = read_text(path)
 		except Error as e:
 			self.result(e)
