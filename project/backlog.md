@@ -301,13 +301,27 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 - Open a newer-format file read-only
 	- ID: 2026101513330014
 	- Type: Feature
-	- Status: Queued
+	- Status: Waiting for testing
+	- Needs local test suite run?: Yes, the full `cicd.bash` run (sanitized C, leakcheck, analyzers, fuzz). The quick run and the C lint stage passed.
+	- Needs external testing: Windows, for the C and Rust paths.
 	- Priority: Avg
 	- Opened: 20261015-133300
 	- Opened by: JC
+	- Related IDs: 2026101513330017, 2026101512024156
 	- Requirements:
 		- Open can read a newer file where the bound shcl is able to, and Write refuses on that document.
 	- Note: Open refuses with `ErrTooNew` today. Folderkite reads newer files and never saves over them. Radixmill never rewrites a file named on the command line. Cobblevale stops writing when its backup failed.
+	- Progress log:
+		- 2026-10-21: `Open` reads a newer file as 3.0 reads it, and the document is read-only. `ReadOnly` says so, and `Write` refuses it anywhere with `ErrTooNew`, force or not. `Parse` of such text is read-only too. In `OpenLayers` a newer lower layer reads, and a newer user file makes the document read-only. Go, Rust, C, and Python, plus a `readonly` op. design.md and README updated.
+		- Verified: Go tests, vet, staticcheck; Rust tests, clippy pedantic; C API tests plain, sanitized, and as C++, the C lint stage (clang-tidy, gcc-15 at C17, analyzers, format check), and the shared cases plain and sanitized; Python tests, ruff, and shared cases; `cicd.bash --quick`.
+		- Swept: every `TooNew` site in all 4 adapters. `Upgrade`, `UpgradeFile`, `InfoBlock`, and `StampFormat` still refuse a newer file. Cases 037 and 053 had `open` and `layers` failing on a newer file, and now show it read-only.
+		- Goes to signoff after the full run, for the README line and the change to what `Open` does.
+	- Decisions:
+		- `Open` succeeds and `Write` refuses, rather than `Open` giving the document beside an `ErrTooNew`. design.md, Decisions, says why.
+		- `Write` refuses with `ErrTooNew`, not a new kind.
+	- Commit: 12dcaaa
+	- Test case: shared case `055-open-newer`, and the newer-file parts of `037-open-refused` and `053-layers`, in all 4 languages.
+	- Acceptance signoff: waits on JC, for the README line and the `Open` change.
 
 - Create-only Write
 	- ID: 2026101513330015
@@ -334,11 +348,27 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 - Write refuses when the file changed on disk since it was read
 	- ID: 2026101513330017
 	- Type: Feature
-	- Status: Queued
+	- Status: Waiting for testing
+	- Needs local test suite run?: Yes, the full `cicd.bash` run (sanitized C, leakcheck, analyzers, fuzz). The quick run and the C lint stage passed.
+	- Needs external testing: Windows, where the same-file check is by path only in C, and the missing-file check uses `_stat64`.
 	- Priority: Avg
 	- Opened: 20261015-133300
 	- Opened by: JC
+	- Related IDs: 2026101513330014, 2026101513330015, 2026101513330016
 	- Note: Quillroute re-reads the file under its own lock. Radixmill and Lenscart both lost writes to 2 processes saving at once, and Lenscart moved its counters out of shcl because of it.
+	- Progress log:
+		- 2026-10-21: A `Write` over the file `Open` read refuses with the new `ErrChanged` when the file no longer holds what was read, byte for byte. After a good `Write` it checks against what that `Write` left. A layered document's user file that wasn't there must still not be there. `WriteWith(path, WriteOpts{Force: true})` skips the check. Go, Rust, C, and Python, plus `write FILE force` and a `scribble` op that changes a file behind the document's back.
+		- `UpgradeFile` and the first `Write` over an upgraded file gave `ErrIO` for the same thing, and now give `ErrChanged`. That reverses the Decisions row "A file that changed under `UpgradeFile` is `ErrIO`", which now says why.
+		- Verified: Go tests, vet, staticcheck; Rust tests, clippy pedantic; C API tests plain, sanitized, and as C++, the C lint stage, and the shared cases plain and sanitized; Python tests, ruff, and shared cases; `cicd.bash --quick`.
+		- Swept: `ReplaceRead` and its twins in all 4 languages give the new kind. The tests that wanted `ErrIO` for a changed file (Go, Rust, C) now want `ErrChanged`. Write failures stay `ErrIO`.
+		- Not covered, and said in design.md: a save by another program between the last check and the rename. A lock was left out.
+	- Decisions:
+		- Compare the text that was read, not a hash or size and mtime. Exact, already there for the backup, and costs a copy of the file in memory.
+		- On by default. `Force` is a field on `WriteOpts`, where create-only and a file mode can go later.
+		- `ErrChanged` is its own kind, for `Write` and the upgrade's backup alike.
+	- Commit: 12dcaaa
+	- Test case: shared case `056-write-changed` in all 4 languages, and Go's `TestWriteChangedOtherName`.
+	- Acceptance signoff: waits on JC, for the new kind, the reversed Decisions row, and the README line.
 
 - List the lines a load couldn't use
 	- ID: 2026101513330018
