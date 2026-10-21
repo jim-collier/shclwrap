@@ -82,7 +82,7 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- ID: 2026101916500100
 	- Type: Enhancement
 	- Status: Waiting for testing
-	- Needs local test suite run?: Yes. A full run, or `--quick --leakcheck`, to see the old leak reports cleared and the lint, sanitized test and leak modes pass under the container's init.
+	- Needs local test suite run?: Yes. The leak mode passing under the container's init, once the CodeQL findings from 2026101513330009 and 2026101513330017 are fixed.
 	- Priority: High
 	- Opened: 2026-10-19
 	- Opened by: JC
@@ -95,6 +95,7 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- Also left: a 57 MB scratch folder in `/tmp` from 2026-10-17, written into by the C container when it still ran as root. It needs root to remove. The `--user` fix stops it happening again.
 		- Ctrl+C left the C container running, since bash as PID 1 ignores it. The container now runs under an init that passes it to the whole tree.
 		- Added: dropping cached headers no pin names, keeping the newest 10 fuzz failure sets, clearing the leak reports when a fresh leak run starts, and removing an older C image no container uses. `docker builder prune` runs only after a real rebuild. Every build gets a new image ID, even a fully cached one, so it compares layers.
+		- 2026-10-21: The full run at `15509b0` passed lint and the sanitized tests under the init, and the leak mode started under it and cleared the old leak reports. It stopped at CodeQL findings from 2 other items, so CTU and the heaptrack soak weren't reached. After it and a second run without the leak checks: no scratch folder, no container, one C image, only the 2 pinned headers, and only the fresh `codeql.sarif` in the leak reports.
 	- Decisions:
 		- Kept, since the next run reuses them: `cicd/cache/c-home` with CodeQL's compiled queries, the pinned headers, the C image, Go's and cargo's caches, and the rotated run logs.
 	- Verified: `--quick` passed twice with the changes, and left no scratch folder, no container, and one C image. The unpinned header was dropped and the 2 pinned kept. On a stand-in tree, 12 marked fuzz sets went to 10, and an unmarked set, an unpinned folder holding another file, and a non-rev folder were left. Ctrl+C stopped the container with the init, and not without it.
@@ -250,8 +251,8 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 - Report blocks that shcl merged because they share a name
 	- ID: 2026101513330009
 	- Type: Feature
-	- Status: Waiting for testing
-	- Needs local test suite run?: Yes, the full gate, for the C analyzers under the sanitizers and the 60 second fuzz.
+	- Status: Queued
+	- Needs local test suite run?: Yes, a full run after the fix, for CodeQL, CTU, and the heaptrack soak.
 	- Priority: Avg
 	- Opened: 20261015-133300
 	- Opened by: JC
@@ -261,6 +262,7 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Note: Tallowbase, Cobblevale, and Radixmill all lost a second copy of a block without a word. shcl's H002 hint only fires when the 2 blocks are apart.
 	- Progress log:
 		- 2026-10-21: `Merged()` in all 4 languages, and a `merged` op. Each `Merge` has the kept copy's path and every copy's line, and a layer on a layered document.
+		- 2026-10-21: The full run at `15509b0` failed CodeQL on this: `cpp/suspicious-pointer-scaling` at `shclw.c:1400`, the `(char *)(lines + nl)` in `shclw_i_merges_of`'s packed result. The C analyzers and the sanitized tests passed, and a second run without the leak checks passed the 60 second fuzz.
 	- Decisions:
 		- A call beside `Diags`, not a field filled in at load, since it parses the text twice more.
 		- Every fold is listed, next to each other or apart, at every level of a block, and a key repeated with the same value too, as H002 counts them. A dotted line that only reopens a block isn't a copy.
@@ -302,7 +304,7 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- ID: 2026101513330014
 	- Type: Feature
 	- Status: Waiting for testing
-	- Needs local test suite run?: Yes, the full `cicd.bash` run (sanitized C, leakcheck, analyzers, fuzz). The quick run and the C lint stage passed.
+	- Needs local test suite run?: Yes, the full run's leak checks (CodeQL, CTU, heaptrack soak), after 2026101513330017's CodeQL finding is fixed.
 	- Needs external testing: Windows, for the C and Rust paths.
 	- Priority: Avg
 	- Opened: 20261015-133300
@@ -316,6 +318,7 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- Verified: Go tests, vet, staticcheck; Rust tests, clippy pedantic; C API tests plain, sanitized, and as C++, the C lint stage (clang-tidy, gcc-15 at C17, analyzers, format check), and the shared cases plain and sanitized; Python tests, ruff, and shared cases; `cicd.bash --quick`.
 		- Swept: every `TooNew` site in all 4 adapters. `Upgrade`, `UpgradeFile`, `InfoBlock`, and `StampFormat` still refuse a newer file. Cases 037 and 053 had `open` and `layers` failing on a newer file, and now show it read-only.
 		- Goes to signoff after the full run, for the README line and the change to what `Open` does.
+		- 2026-10-21: The full run at `15509b0` passed lint with the C analyzers and the sanitized C tests, and a second run without the leak checks passed the fuzz. The full run stopped at CodeQL findings from 2026101513330017 and 2026101513330009, so CTU and the heaptrack soak weren't reached.
 	- Decisions:
 		- `Open` succeeds and `Write` refuses, rather than `Open` giving the document beside an `ErrTooNew`. design.md, Decisions, says why.
 		- `Write` refuses with `ErrTooNew`, not a new kind.
@@ -327,7 +330,7 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- ID: 2026101513330015
 	- Type: Feature
 	- Status: Waiting for testing
-	- Needs local test suite run?: Yes, the full `cicd.bash` run (sanitized C cases, leakcheck, fuzz). The quick run, the C lint stage, and the sanitized C API tests passed.
+	- Needs local test suite run?: Yes, the full run's leak checks (CodeQL, CTU, heaptrack soak), after the CodeQL findings from 2026101513330009 and 2026101513330017 are fixed.
 	- Needs external testing: Windows: C's `MoveFileExA` path, Go, Rust, and Python hard links on NTFS, and a FAT or other no-link filesystem for the fallback.
 	- Priority: Avg
 	- Opened: 20261015-133300
@@ -340,6 +343,7 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- 2026-10-21: `WriteOpts.Create` writes a synced temp beside the file and hard-links it into place, so a taken name is the new `ErrExists` and the name never holds part of a file. A filesystem with no hard links falls back to an exclusive create of the name. C on Windows moves the temp without replacing. Go, Rust, C, and Python, plus `write FILE create`. design.md and README updated.
 		- Verified: Go tests, vet, staticcheck; Rust tests, clippy pedantic; C API tests plain, sanitized, and as C++, the C lint stage, and the shared cases plain and sanitized; Python tests, ruff, and shared cases; `cicd.bash --quick`.
 		- Each race test fails with a rename in place of the link, and passes with it.
+		- 2026-10-21: The full run at `15509b0` passed the sanitized C cases, and a second run without the leak checks passed the fuzz. The full run stopped at CodeQL findings from 2026101513330009 and 2026101513330017, so CTU and the heaptrack soak weren't reached.
 		- Swept: every `WriteOpts`, `write_opts`, and `force` site in all 4 adapters and runners, `replacing` in `shclw_upgrade_file`, and the fuzz script's `write` ops.
 	- Decisions:
 		- Link of a synced temp, with the exclusive create as the fallback, rather than refusing on a filesystem with no links. design.md, Decisions, says why.
@@ -352,7 +356,7 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- ID: 2026101513330016
 	- Type: Feature
 	- Status: Waiting for testing
-	- Needs local test suite run?: Yes, the full `cicd.bash` run, with 2026101513330015.
+	- Needs local test suite run?: Yes, the full run's leak checks, with 2026101513330015.
 	- Needs external testing: Windows, where the mode is ignored, and case 058's `mode` op prints what Windows has, so that case won't match there.
 	- Priority: Avg
 	- Opened: 20261015-133300
@@ -364,6 +368,7 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Progress log:
 		- 2026-10-21: `WriteOpts.Mode` is the exact mode of a file the `Write` creates, set by chmod before it's in place, so the umask doesn't mask it. A file that's there keeps its own mode, which shcl's atomic write already did. More than permission bits is `ErrBadValue`. Windows ignores it. Go, Rust, C, and Python, plus `write FILE mode=0600` and a `mode FILE` op. design.md and README updated.
 		- Verified: as 2026101513330015, same runs. The race tests check the mode too.
+		- 2026-10-21: The full run at `15509b0` passed the sanitized C cases, and a second run passed the fuzz. The full run stopped before CTU and the heaptrack soak, as 2026101513330015 says.
 		- Swept: as 2026101513330015.
 	- Decisions:
 		- Exact, not masked by the umask, and only on a file the `Write` creates. design.md, Decisions, says why.
@@ -375,8 +380,8 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 - Write refuses when the file changed on disk since it was read
 	- ID: 2026101513330017
 	- Type: Feature
-	- Status: Waiting for testing
-	- Needs local test suite run?: Yes, the full `cicd.bash` run (sanitized C, leakcheck, analyzers, fuzz). The quick run and the C lint stage passed.
+	- Status: Queued
+	- Needs local test suite run?: Yes, a full run after the fix, for CodeQL, CTU, and the heaptrack soak.
 	- Needs external testing: Windows, where the same-file check is by path only in C, and the missing-file check uses `_stat64`.
 	- Priority: Avg
 	- Opened: 20261015-133300
@@ -389,6 +394,7 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- Verified: Go tests, vet, staticcheck; Rust tests, clippy pedantic; C API tests plain, sanitized, and as C++, the C lint stage, and the shared cases plain and sanitized; Python tests, ruff, and shared cases; `cicd.bash --quick`.
 		- Swept: `ReplaceRead` and its twins in all 4 languages give the new kind. The tests that wanted `ErrIO` for a changed file (Go, Rust, C) now want `ErrChanged`. Write failures stay `ErrIO`.
 		- Not covered, and said in design.md: a save by another program between the last check and the rename. A lock was left out.
+		- 2026-10-21: The full run at `15509b0` failed CodeQL on this: `cpp/world-writable-file-creation` at `run.c:678`, the `fopen(path, "wb")` in the C runner's `scribble` op. Lint with the C analyzers and the sanitized C tests passed, and a second run without the leak checks passed the fuzz.
 	- Decisions:
 		- Compare the text that was read, not a hash or size and mtime. Exact, already there for the backup, and costs a copy of the file in memory.
 		- On by default. `Force` is a field on `WriteOpts`, where create-only and a file mode can go later.
@@ -401,7 +407,7 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- ID: 2026101513330018
 	- Type: Feature
 	- Status: Waiting for testing
-	- Needs local test suite run?: Yes, the full gate, with 2026101513330009.
+	- Needs local test suite run?: Yes, the full run's leak checks, after 2026101513330009's CodeQL finding is fixed.
 	- Priority: Avg
 	- Opened: 20261015-133300
 	- Opened by: JC
@@ -411,6 +417,7 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Note: Wovenshell builds the list from error diagnostics and drops line 0. Folderkite warns at load with the count. Cobblevale only tracks whether there were any.
 	- Progress log:
 		- 2026-10-21: `Unused()` in all 4 languages, and an `unused` op.
+		- 2026-10-21: The full run at `15509b0` passed the C analyzers and the sanitized tests, and a second run without the leak checks passed the fuzz. The full run stopped at a CodeQL finding in `Merged`'s code, 2026101513330009, so CTU and the heaptrack soak weren't reached.
 	- Decisions:
 		- Every error's line, once each, in order, leaving out line 0. Not only the lines shcl's `LostCount` counts, since a line kept as written but read as nothing is still lost to the program.
 		- A list of `Spot`s, each a line and a layer, rather than the plain numbers the upgrade gives, so a layered document's lines say which layer they're in.
