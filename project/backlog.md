@@ -326,24 +326,51 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 - Create-only Write
 	- ID: 2026101513330015
 	- Type: Feature
-	- Status: Queued
+	- Status: Waiting for testing
+	- Needs local test suite run?: Yes, the full `cicd.bash` run (sanitized C cases, leakcheck, fuzz). The quick run, the C lint stage, and the sanitized C API tests passed.
+	- Needs external testing: Windows: C's `MoveFileExA` path, Go, Rust, and Python hard links on NTFS, and a FAT or other no-link filesystem for the fallback.
 	- Priority: Avg
 	- Opened: 20261015-133300
 	- Opened by: JC
+	- Related IDs: 2026101513330016, 2026101513330017
 	- Requirements:
 		- Fails if the file exists, and stays right when 2 processes create it at once.
 	- Note: Radixmill hard-links a synced temp file into place. shcl's atomic write replaces a file it finds there.
+	- Progress log:
+		- 2026-10-21: `WriteOpts.Create` writes a synced temp beside the file and hard-links it into place, so a taken name is the new `ErrExists` and the name never holds part of a file. A filesystem with no hard links falls back to an exclusive create of the name. C on Windows moves the temp without replacing. Go, Rust, C, and Python, plus `write FILE create`. design.md and README updated.
+		- Verified: Go tests, vet, staticcheck; Rust tests, clippy pedantic; C API tests plain, sanitized, and as C++, the C lint stage, and the shared cases plain and sanitized; Python tests, ruff, and shared cases; `cicd.bash --quick`.
+		- Each race test fails with a rename in place of the link, and passes with it.
+		- Swept: every `WriteOpts`, `write_opts`, and `force` site in all 4 adapters and runners, `replacing` in `shclw_upgrade_file`, and the fuzz script's `write` ops.
+	- Decisions:
+		- Link of a synced temp, with the exclusive create as the fallback, rather than refusing on a filesystem with no links. design.md, Decisions, says why.
+		- `Force` has nothing to skip with `Create`, since it never replaces. Over the file `Open` read it's `ErrExists`.
+	- Commit: fabafb8
+	- Test case: shared case `057-write-create` in all 4 languages, and the race tests: Go `TestCreateRace`, Rust `create_race_link` and `create_race_in_place`, Python `CreateRace`, C `test_create_raced` (8 processes).
+	- Acceptance signoff: waits on JC after the full run, for the README line.
 
 - Write with a file mode
 	- ID: 2026101513330016
 	- Type: Feature
-	- Status: Queued
+	- Status: Waiting for testing
+	- Needs local test suite run?: Yes, the full `cicd.bash` run, with 2026101513330015.
+	- Needs external testing: Windows, where the mode is ignored, and case 058's `mode` op prints what Windows has, so that case won't match there.
 	- Priority: Avg
 	- Opened: 20261015-133300
 	- Opened by: JC
+	- Related IDs: 2026101513330015
 	- Requirements:
 		- A new file is created with the mode given, such as 0600.
 	- Note: Quillroute's accounts file has tokens in it. shcl creates files at 0666 less the umask.
+	- Progress log:
+		- 2026-10-21: `WriteOpts.Mode` is the exact mode of a file the `Write` creates, set by chmod before it's in place, so the umask doesn't mask it. A file that's there keeps its own mode, which shcl's atomic write already did. More than permission bits is `ErrBadValue`. Windows ignores it. Go, Rust, C, and Python, plus `write FILE mode=0600` and a `mode FILE` op. design.md and README updated.
+		- Verified: as 2026101513330015, same runs. The race tests check the mode too.
+		- Swept: as 2026101513330015.
+	- Decisions:
+		- Exact, not masked by the umask, and only on a file the `Write` creates. design.md, Decisions, says why.
+		- In Go and C 0 means no mode. Rust takes `Option<u32>`, and Python `None`.
+	- Commit: fabafb8
+	- Test case: shared case `058-write-mode` in all 4 languages, which reads modes back with the new `mode` op.
+	- Acceptance signoff: waits on JC after the full run, since it's about who can read a file.
 
 - Write refuses when the file changed on disk since it was read
 	- ID: 2026101513330017
