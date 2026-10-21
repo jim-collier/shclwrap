@@ -240,6 +240,8 @@ def gen_case(seed: int, corpus: list[str]) -> Case:
 						"rewrites",
 						"diags",
 						"errors",
+						"unused",
+						"merged",
 						"format",
 						f"upgrade\t{rng.choice(('', '2', '3'))}",
 						f"parse\t{rng.choice(('loose', 'standard', 'strict'))}",

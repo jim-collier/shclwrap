@@ -107,6 +107,23 @@ typedef struct {
 	size_t layer;
 } shclw_diag;
 
+// A line in a loaded document. layer is as in shclw_diag.
+typedef struct {
+	size_t line;
+	size_t layer;
+} shclw_spot;
+
+// A name shcl kept one copy of, since a later copy had the same name and value
+// and was folded into it. lines has the kept copy's line, then each later
+// copy's. path reads the kept copy, as a shclw_node's does, and layer is as in
+// shclw_diag.
+typedef struct {
+	shclw_string path;
+	const size_t *lines;
+	size_t n_lines;
+	size_t layer;
+} shclw_merge;
+
 // One layer for shclw_open_layers: a file, or with file NULL, text the program
 // has, such as its defaults or this run's command line.
 typedef struct {
@@ -248,6 +265,16 @@ bool shclw_rewrites(shclw_doc *d);
 shclw_diag *shclw_diags(shclw_doc *d, size_t *n);
 // How many of them are errors.
 size_t shclw_errors(shclw_doc *d);
+// The lines the load couldn't use, which are the lines with an error, once
+// each, by layer then line. Not the 2.0 errors a refused shclw_open leaves in
+// shclw_diags, since Go and Rust have those on the error. Caller frees. NULL
+// only when memory ran out.
+shclw_spot *shclw_unused(shclw_doc *d, size_t *n);
+// Each name the load kept one copy of, since a later copy had the same name
+// and value, with every copy's line. On a layered document it's each layer's
+// own, and not what the layers' merge folded. One block; caller frees. NULL
+// only when memory ran out.
+shclw_merge *shclw_merged(shclw_doc *d, size_t *n);
 // d checked against a schema document. Caller frees the block. NULL only when
 // memory ran out.
 shclw_diag *shclw_check(shclw_doc *d, shclw_doc *schema, size_t *n);

@@ -49,6 +49,9 @@ struct shclw_doc {
 	// to layers[edit].
 	shclw_doc **layers;
 	size_t n_layers, edit;
+	// The text as loaded, for shclw_merged.
+	char *src;
+	size_t src_len;
 };
 
 static void free_upgraded(upgraded_file *up) {
@@ -116,7 +119,10 @@ shclw_kind shclw_parse_with(const char *text, size_t len, shclw_strictness level
 	d->layers = NULL;
 	d->n_layers = 0;
 	d->edit = 0;
-	if (!d->d) {
+	d->src = shclw_i_dup(text ? text : "", text ? len : 0, &d->src_len);
+	if (!d->d || !d->src) {
+		shcl_free(d->d);
+		free(d->src);
 		free(d);
 		return shclw_i_fail(err, SHCLW_ERR_NO_MEMORY, NULL, NULL, 0);
 	}
@@ -206,6 +212,7 @@ static void free_doc(shclw_doc *d) {
 		shcl_free(d->d);
 		free_upgraded(d->up);
 		free(d->refused);
+		free(d->src);
 		free(d);
 	}
 }
@@ -619,6 +626,42 @@ static shclw_diag *own_diags(shclw_doc *d, size_t *n) {
 	}
 	shclw_diag *out = shclw_i_copy_diags(views, count, n);
 	free(views);
+	return out;
+}
+
+shclw_spot *shclw_unused(shclw_doc *d, size_t *n) {
+	*n = 0;
+	size_t k = 0;
+	shclw_diag *ds = d->refused ? NULL : shclw_diags(d, &k);
+	if (!d->refused && !ds) {
+		return NULL;
+	}
+	shclw_spot *out = shclw_i_unused_of(ds, k, n);
+	free(ds);
+	return out;
+}
+
+shclw_merge *shclw_merged(shclw_doc *d, size_t *n) {
+	*n = 0;
+	if (!d->layers) {
+		shclw_i_source one = {d->src, d->src_len, 0};
+		return shclw_i_merges_of(&one, 1, n);
+	}
+	shclw_i_source *srcs = (shclw_i_source *)calloc(d->n_layers, sizeof(shclw_i_source));
+	if (!srcs) {
+		return NULL;
+	}
+	size_t k = 0;
+	for (size_t i = 0; i < d->n_layers; i++) {
+		if (d->layers[i]) {
+			srcs[k].text = d->layers[i]->src;
+			srcs[k].len = d->layers[i]->src_len;
+			srcs[k].layer = i + 1;
+			k++;
+		}
+	}
+	shclw_merge *out = shclw_i_merges_of(srcs, k, n);
+	free(srcs);
 	return out;
 }
 

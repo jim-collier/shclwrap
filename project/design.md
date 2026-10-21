@@ -127,6 +127,8 @@ Go names are listed. Rust uses the same words in snake case, and `ShclDoc` has t
 | `d.UpgradedFrom()`        | The format `Open` upgraded the file from, or 0.
 | `d.BackupName()`          | Where the first `Write` over an upgraded file put the original, or empty.
 | `d.Diags()`, `d.Errors()` | The load's diagnostics, and how many are errors.
+| `d.Unused()`              | The lines the load couldn't use, once each.
+| `d.Merged()`              | Each name shcl kept one copy of, with the lines of every copy.
 | `d.Check(schema)`         | Validates against a schema document.
 | `schema.DropDeclared(ds)` | Drops the repeat hints for keys the schema says repeat.
 
@@ -159,6 +161,19 @@ Go names are listed. Rust uses the same words in snake case, and `ShclDoc` has t
 	- `Diags` and `Errors` are every layer's, in layer order. `Diag.Layer` is the layer's place in the list, from 1, and 0 on a document that isn't layered.
 	- An edit takes its path as the edit layer reads it. So an index from `Each`, `First`, or `Last` on the merge can name another instance, or none, where a lower layer has the same key.
 	- Rust takes `&[Layer::Text(..), Layer::File(..)]`. C's `shclw_open_layers` takes an array of `shclw_layer`, each a `file`, or with `file` NULL, a `text` and `len`.
+
+- `Unused` is the lines with an error, once each, in order, as a list of `Spot`s, each a `Line` and a `Layer` as `Diag` has them (2026101513330018). It's for a warning like "lines 4 and 9 were skipped".
+	- An error on no line has no line to give, so it's left out.
+	- A strict load that fails still has its document, and `Unused` says the same on it.
+	- In C it leaves out the 2.0 errors a refused `shclw_open` keeps in `shclw_diags`, since Go and Rust have those on the error and not on the document.
+
+- `Merged` lists each copy of a name shcl folded into an earlier one, since the 2 had the same name and value (2026101513330009). shcl's H002 hint says so only when the copies are apart, so 2 blocks next to each other fold without a word, and the second one's instance is gone.
+	- Each `Merge` has the kept copy's `Path`, as `Each` gives it, adn `Lines`, the kept copy's line and then each later copy's. A third copy adds a line to the same `Merge`.
+	- Every level of a folded block is listed, as H002 does. A block with a child block that folded too gives 2.
+	- A dotted line like `db.user: u` that only reopens `db` isn't a copy of `db`, so it isn't listed. A dotted line that writes `db.host` again with the same value is a copy of `db.host`.
+	- A repeated key with another value isn't folded. It reads as `Multiple`, and `Lines` lists it.
+	- Both say what the load found, so an edit doesn't change them. On a layered document they're each layer's own, with `Layer` set, and the folding the layers' own merge does is left out, since that's what layering is for.
+	- `Merged` parses the loaded text twice more when it's called, so it costs about 2 loads.
 
 - C also has `shclw_compact`, for a program that edits a lot between saves. [Decisions](#decisions) says why.
 
@@ -319,6 +334,8 @@ An ops script is one op per line, with fields split by tabs. `\t`, `\n`, `\r`, a
 | `text`, `canonical`                     | the document, one `\|`-prefixed line per line
 | `rewrites`                              | `true` or `false`, from `Rewrites`
 | `diags`, `errors`                       | each diagnostic as line, severity, code, and message, or the count. A layer's line is `LAYER:LINE`.
+| `unused`                                | how many lines, then each one
+| `merged`                                | each merge's path, then its lines, one merge per line
 | `get TYPE PATH`                         | status, line, and the value. Arrays print a count, then the items.
 | `or TYPE PATH FALLBACK...`              | the value or the fallback
 | `has`, `count`, `line`, `names`         | the answer for PATH
@@ -496,6 +513,15 @@ An ops script is one op per line, with fields split by tabs. `\t`, `\n`, `\r`, a
 - A missing layer file is skipped. Any other error stops the load, as `Open` does, rather than leave that layer out. Leaving out a broken site file would hide it, and leaving out a user file that's too new would let the next save write over it.
 
 - A diagnostic names its layer by its place in the list, `Layer`, rather than by a name. The program already has the list, C gets no string to free, and a document that isn't layered gives the same diagnostics as before.
+
+- `Unused` and `Merged` are calls beside `Diags`, rather than fields filled in at load (2026101513330018, 2026101513330009). A field would cost every load the work, `Merged`'s two parses most of all, and a call matches `Diags`.
+	- The lines are a list of `Spot`s rather than plain numbers, as the upgrade's are, since a layered document's line needs its layer to mean anything.
+
+- `Unused` is every error's line, rather than only the lines shcl dropped from a canonical save (its `LostCount`). A line kept as written but read as nothing is still a line the program didn't get. Wovenshell builds its list from the errors too, and leaves out line 0, an error about the whole file.
+
+- `Merged` finds a folded copy by its line: it's on no node, and has no error. Each such line that starts with a name gets that name made unique, and the text is parsed again, so the copy stands alone, at the line it came from, under the same parent. The kept copy is then the one before it, under that parent, with the same name and value. shcl would be the better place for this, since its parser sees each fold happen, but it has no call for it, and H002 leaves the next-to-each-other case out on purpose. A call in shcl can replace this later with the same results.
+	- Writing the parser's rules again in each wrapper was the other choice. It would have to know raw blocks, lists, and dotted paths to tell a copy from a line that only looks like one. The second parse gets that from shcl.
+	- A raw block's body line that looks like a copy is left alone. Its renamed name is still raw text, so no node shows up at its line.
 
 - There's no `OpenLayersWith` yet. A program that wants strict layers checks `Errors()`, which counts every layer.
 

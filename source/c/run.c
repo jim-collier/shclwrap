@@ -553,6 +553,15 @@ static void text(runner *r, bool canonical) {
 	free(t);
 }
 
+// A line, with its layer in front on a layered document.
+static void put_spot(buf *b, size_t line, size_t layer) {
+	if (layer) {
+		put_size(b, layer);
+		putc_(b, ':');
+	}
+	put_size(b, line);
+}
+
 // Prints and frees ds.
 static void print_diags(runner *r, shclw_diag *ds, size_t n) {
 	if (!ds) {
@@ -560,11 +569,7 @@ static void print_diags(runner *r, shclw_diag *ds, size_t n) {
 		return;
 	}
 	for (size_t i = 0; i < n; i++) {
-		if (ds[i].layer) {
-			put_size(&r->out, ds[i].layer);
-			putc_(&r->out, ':');
-		}
-		put_size(&r->out, ds[i].line);
+		put_spot(&r->out, ds[i].line, ds[i].layer);
 		putc_(&r->out, '\t');
 		puts_(&r->out, shclw_severity_name(ds[i].severity));
 		putc_(&r->out, '\t');
@@ -1115,6 +1120,40 @@ static void op_errors(runner *r, const fields *f) {
 	put_size(&r->out, shclw_errors(r->doc));
 	nl(&r->out);
 }
+static void op_unused(runner *r, const fields *f) {
+	(void)f;
+	size_t n = 0;
+	shclw_spot *spots = shclw_unused(r->doc, &n);
+	if (!spots) {
+		nomem(&r->out);
+		return;
+	}
+	put_size(&r->out, n);
+	for (size_t i = 0; i < n; i++) {
+		putc_(&r->out, '\t');
+		put_spot(&r->out, spots[i].line, spots[i].layer);
+	}
+	nl(&r->out);
+	free(spots);
+}
+static void op_merged(runner *r, const fields *f) {
+	(void)f;
+	size_t n = 0;
+	shclw_merge *ms = shclw_merged(r->doc, &n);
+	if (!ms) {
+		nomem(&r->out);
+		return;
+	}
+	for (size_t i = 0; i < n; i++) {
+		esc(&r->out, ms[i].path.p, ms[i].path.n);
+		for (size_t j = 0; j < ms[i].n_lines; j++) {
+			putc_(&r->out, '\t');
+			put_spot(&r->out, ms[i].lines[j], ms[i].layer);
+		}
+		nl(&r->out);
+	}
+	free(ms);
+}
 static void op_get(runner *r, const fields *f) { get(r, arg(f, 1), arg(f, 2)); }
 static void op_or(runner *r, const fields *f) { or_(r, f); }
 static void op_write(runner *r, const fields *f) { write_(r, f); }
@@ -1164,6 +1203,8 @@ static const struct {
 	{"rewrites",  op_rewrites},
 	{"diags",     op_diags},
 	{"errors",    op_errors},
+	{"unused",    op_unused},
+	{"merged",    op_merged},
 	{"get",       op_get},
 	{"or",        op_or},
 	{"has",       op_has},

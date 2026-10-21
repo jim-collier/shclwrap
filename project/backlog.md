@@ -250,13 +250,25 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 - Report blocks that shcl merged because they share a name
 	- ID: 2026101513330009
 	- Type: Feature
-	- Status: Queued
+	- Status: Waiting for testing
+	- Needs local test suite run?: Yes, the full gate, for the C analyzers under the sanitizers and the 60 second fuzz.
 	- Priority: Avg
 	- Opened: 20261015-133300
 	- Opened by: JC
+	- Related IDs: 2026101513330018, 2026101513330004, 2026102115285934
 	- Requirements:
 		- List each merged block, with the lines of both copies.
 	- Note: Tallowbase, Cobblevale, and Radixmill all lost a second copy of a block without a word. shcl's H002 hint only fires when the 2 blocks are apart.
+	- Progress log:
+		- 2026-10-21: `Merged()` in all 4 languages, and a `merged` op. Each `Merge` has the kept copy's path and every copy's line, and a layer on a layered document.
+	- Decisions:
+		- A call beside `Diags`, not a field filled in at load, since it parses the text twice more.
+		- Every fold is listed, next to each other or apart, at every level of a block, and a key repeated with the same value too, as H002 counts them. A dotted line that only reopens a block isn't a copy.
+		- The wrapper finds a fold with a second parse where each folded line's name is made unique. shcl's parser would be the better place; 2026102115285934 asks for that.
+		- design.md has these under Loading and saving, Ops scripts, and Decisions.
+	- Verified: the new shared case passes in Go, Rust, C (plain and under ASan and UBSan), and Python. A 90 second fuzz of all 4 with the new ops found no difference. The C lint stage passes.
+	- Swept: Go `shclw3`, Rust `v3`, C `shclw3.c`, and Python each have `Merged`, held by the `Doc` interface, `ShclDoc`, and Go's `docMethods` list. All 4 ops runners and fuzz.py's op list have `merged`.
+	- Test case: tests/cases/054-merged-unused, and the fuzz op.
 
 - Upgrade lists the lines it changed
 	- ID: 2026101513330012
@@ -329,13 +341,24 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 - List the lines a load couldn't use
 	- ID: 2026101513330018
 	- Type: Feature
-	- Status: Queued
+	- Status: Waiting for testing
+	- Needs local test suite run?: Yes, the full gate, with 2026101513330009.
 	- Priority: Avg
 	- Opened: 20261015-133300
 	- Opened by: JC
+	- Related IDs: 2026101513330009, 2026101513330012
 	- Requirements:
 		- Line numbers, not only a count.
 	- Note: Wovenshell builds the list from error diagnostics and drops line 0. Folderkite warns at load with the count. Cobblevale only tracks whether there were any.
+	- Progress log:
+		- 2026-10-21: `Unused()` in all 4 languages, and an `unused` op.
+	- Decisions:
+		- Every error's line, once each, in order, leaving out line 0. Not only the lines shcl's `LostCount` counts, since a line kept as written but read as nothing is still lost to the program.
+		- A list of `Spot`s, each a line and a layer, rather than the plain numbers the upgrade gives, so a layered document's lines say which layer they're in.
+		- C leaves out the 2.0 errors a refused open keeps in `shclw_diags`, so it gives what Go and Rust give.
+	- Verified: the new shared case passes in Go, Rust, C, and Python, and so does the fuzz with the new op.
+	- Swept: all 4 languages and runners, and fuzz.py, as in 2026101513330009.
+	- Test case: tests/cases/054-merged-unused, and the fuzz op.
 
 - Back up a file before a save that would lose lines
 	- ID: 2026101513330019
@@ -769,6 +792,16 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Opened by: JC
 	- Parent ID: 2026101512024159
 	- Note: shcl 1.2 and 2.0 print and exit on out of memory. Folderkite sets its own hook.
+
+- Ask shcl for a call that lists folded copies
+	- ID: 2026102115285934
+	- Type: Task
+	- Status: Queued
+	- Priority: Low
+	- Opened: 20261021-152859
+	- Opened by: JC
+	- Related IDs: 2026101513330009
+	- Note: `Merged` finds them with a second parse in each language. shcl's parser sees each fold, so a call there would be cheaper and could take that code's place.
 
 - Python: run from a copied file
 	- ID: 2026101513330050

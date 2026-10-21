@@ -79,6 +79,17 @@ shclw_string *shclw_i_dedupe_names(const shclw_string *names, size_t n, size_t *
 // Copies of the nodes in one block, each string with a NUL after it.
 shclw_node *shclw_i_copy_nodes(const shclw_node *nodes, size_t n, size_t *count);
 
+// The error lines in diags, once each, by layer then line. Caller frees.
+shclw_spot *shclw_i_unused_of(const shclw_diag *diags, size_t n, size_t *count);
+// One loaded text for shclw_i_merges_of, with the layer its lines are in.
+typedef struct {
+	const char *text;
+	size_t len;
+	size_t layer;
+} shclw_i_source;
+// Go's MergesOf over each source in turn, in one block the caller frees. NULL
+// only when memory ran out.
+shclw_merge *shclw_i_merges_of(const shclw_i_source *srcs, size_t n_srcs, size_t *count);
 // Copies of the diagnostics in one block, each string with a NUL after it.
 shclw_diag *shclw_i_copy_diags(const shclw_diag *diags, size_t n, size_t *count);
 

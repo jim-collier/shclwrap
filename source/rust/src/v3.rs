@@ -11,7 +11,7 @@
 /// The shcl crate underneath, so code using `inner()` can name its types.
 pub use shcl3 as shcl;
 
-use crate::{Diag, ErrKind, Error, Got, Layer, Node, Severity, ShclDoc, Status, Strictness, Upgraded, Value};
+use crate::{Diag, ErrKind, Error, Got, Layer, Merge, Node, Severity, ShclDoc, Status, Strictness, Upgraded, Value};
 
 /// The shcl release this module wraps.
 pub const SHCL_VERSION: &str = "3.0.0-dev+ea0998fa";
@@ -27,6 +27,8 @@ pub struct Doc {
 	stamp: bool,
 	up: Option<UpgradedFile>,
 	lay: Option<Layers>,
+	// The text as loaded, for `merged`.
+	src: String,
 }
 
 /// What `open_layers` read. `d` is then their merge, built again after each
@@ -125,22 +127,23 @@ pub fn parse_with(text: &str, level: Strictness) -> Result<Doc, Error> {
 
 fn parse_keep(text: &str, level: Strictness) -> (Doc, Option<Error>) {
 	match shcl::Document::parse_keep_lines(text, strictness(level)) {
-		Ok(d) => (doc(d), None),
+		Ok(d) => (doc(d, text), None),
 		Err(le) => {
 			let mut e = Error::new(ErrKind::Strict).msg(le.to_string());
 			e.diags = diags(&le.diagnostics);
-			(doc(le.document), Some(e))
+			(doc(le.document, text), Some(e))
 		}
 	}
 }
 
-fn doc(d: shcl::Document) -> Doc {
+fn doc(d: shcl::Document, text: &str) -> Doc {
 	Doc {
 		d,
 		info: crate::Info::AsIs,
 		stamp: false,
 		up: None,
 		lay: None,
+		src: text.to_owned(),
 	}
 }
 
@@ -728,6 +731,21 @@ impl ShclDoc for Doc {
 		for (i, x) in lay.docs.iter().enumerate() {
 			let Some(x) = x else { continue };
 			out.extend(x.diags().into_iter().map(|g| Diag { layer: i + 1, ..g }));
+		}
+		out
+	}
+
+	/// On a layered document it's each layer's own, and not what the
+	/// layers' merge folded.
+	fn merged(&self) -> Vec<Merge> {
+		let Some(lay) = &self.lay else {
+			return crate::merges_of(&self.src, parse, 0);
+		};
+		let mut out = Vec::new();
+		for (i, x) in lay.docs.iter().enumerate() {
+			if let Some(x) = x {
+				out.extend(crate::merges_of(&x.src, parse, i + 1));
+			}
 		}
 		out
 	}

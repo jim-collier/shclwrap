@@ -38,6 +38,8 @@ type (
 	ErrKind    = shclw.ErrKind
 	Upgraded   = shclw.Upgraded
 	Layer      = shclw.Layer
+	Spot       = shclw.Spot
+	Merge      = shclw.Merge
 )
 
 const (
@@ -63,6 +65,7 @@ type Doc struct {
 	stamp bool
 	up    *upgradedFile
 	lay   *layerSet
+	src   string // the text as loaded, for Merged
 }
 
 // layerSet is what OpenLayers read. d is then their merge, rebuilt after
@@ -115,14 +118,14 @@ func ParseWith(text string, s Strictness) (*Doc, error) {
 		d = shcl.New()
 	}
 	if err == nil {
-		return &Doc{d: d}, nil
+		return &Doc{d: d, src: text}, nil
 	}
 	e := &shclw.Error{Kind: shclw.ErrStrict, Err: err}
 	var le *shcl.LoadError
 	if errors.As(err, &le) {
 		e.Diags = diags(le.Diagnostics)
 	}
-	return &Doc{d: d}, e
+	return &Doc{d: d, src: text}, e
 }
 
 // Open reads and parses a file. A missing file is ErrNotFound, and a file
@@ -730,6 +733,28 @@ func (d *Doc) Errors() int {
 	}
 	return n
 }
+
+// Unused is the lines the load couldn't use, which are the lines with an
+// error, once each.
+func (d *Doc) Unused() []Spot { return shclw.UnusedOf(d.Diags()) }
+
+// Merged is each name the load kept one copy of, since a later copy had the
+// same name and value, with every copy's line. On a layered document it's
+// each layer's own, and not what the layers' merge folded.
+func (d *Doc) Merged() []Merge {
+	if d.lay == nil {
+		return shclw.MergesOf(d.src, parseDoc, 0)
+	}
+	out := []Merge{}
+	for i, x := range d.lay.docs {
+		if x != nil {
+			out = append(out, shclw.MergesOf(x.src, parseDoc, i+1)...)
+		}
+	}
+	return out
+}
+
+func parseDoc(text string) shclw.Doc { return Parse(text) }
 
 // Check validates the document against a schema document.
 func (d *Doc) Check(schema shclw.Doc) []Diag {

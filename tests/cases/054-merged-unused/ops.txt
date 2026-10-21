@@ -1,0 +1,26 @@
+# Copies with the same name and value fold into the first, next to each
+# other or apart, and every level of a folded block says so. A dotted line
+# that only reopens a block, and a repeated key with another value, aren't
+# folds. Lines in a raw body aren't either.
+merged
+diags
+unused
+get	int	db.pool
+lines	t
+# Edits don't change what the load found.
+put	int	db.pool	3
+merged
+unused
+# So does a strict load that fails.
+parse	strict
+merged
+unused
+# A layered document says which layer each line is in, and the layers'
+# own merge isn't listed.
+layers	=a:\n\tb: 1\na:\n\tc: 2\n[x\n	=a:\n\td: 3\nk: 1\nk: 1\n	=}\n
+merged
+unused
+# A selector line and a dotted line fold too, and so does a block that
+# reopens what a dotted line made. CRLF lines count the same.
+layers	=k.m.n: 1\nk.m.n: 1\nk:\n\tm:\n\t\tn: 1\ntv: u\n\tg: 1\ntv(u).g: 1\n	=a:\r\n\tb: 1\r\na:\r\n\tc: 2\r\n
+merged

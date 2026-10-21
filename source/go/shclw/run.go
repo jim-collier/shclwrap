@@ -78,6 +78,21 @@ func (r *runner) op(f []string) {
 		r.diags(d.Diags())
 	case "errors":
 		r.out(strconv.Itoa(d.Errors()))
+	case "unused":
+		spots := d.Unused()
+		out := make([]string, len(spots))
+		for i, sp := range spots {
+			out[i] = spotText(sp.Line, sp.Layer)
+		}
+		r.out(counted(len(out), strings.Join(out, "\t")))
+	case "merged":
+		for _, m := range d.Merged() {
+			out := []string{esc(m.Path)}
+			for _, n := range m.Lines {
+				out = append(out, spotText(n, m.Layer))
+			}
+			r.out(strings.Join(out, "\t"))
+		}
 	case "get":
 		r.out(r.get(arg(1), arg(2)))
 	case "or":
@@ -261,12 +276,16 @@ func (r *runner) result(err error) {
 
 func (r *runner) diags(ds []Diag) {
 	for _, d := range ds {
-		line := strconv.Itoa(d.Line)
-		if d.Layer > 0 {
-			line = strconv.Itoa(d.Layer) + ":" + line
-		}
-		r.out(fmt.Sprintf("%s\t%s\t%s\t%s", line, d.Severity, d.Code, esc(d.Message)))
+		r.out(fmt.Sprintf("%s\t%s\t%s\t%s", spotText(d.Line, d.Layer), d.Severity, d.Code, esc(d.Message)))
 	}
+}
+
+// spotText is a line, with its layer in front on a layered document.
+func spotText(line, layer int) string {
+	if layer > 0 {
+		return strconv.Itoa(layer) + ":" + strconv.Itoa(line)
+	}
+	return strconv.Itoa(line)
 }
 
 // block prints multi-line text one line per output line, so a golden file

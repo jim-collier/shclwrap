@@ -118,6 +118,26 @@ class Diag:
 		return f"line {self.line}: {self.code} {self.message}"
 
 
+@dataclass(frozen=True, order=True)
+class Spot:
+	"""A line in a loaded document. layer is as in Diag."""
+
+	layer: int
+	line: int
+
+
+@dataclass
+class Merge:
+	"""A name shcl kept one copy of, since a later copy had the same name and
+	value and was folded into it. lines is the kept copy's line, then each
+	later copy's. path reads the kept copy, as a Node's does, and layer is as
+	in Diag."""
+
+	path: str
+	lines: list[int]
+	layer: int = 0
+
+
 @dataclass(frozen=True)
 class Layer:
 	"""One layer for open_layers: a file, or with file empty, text the program
@@ -717,6 +737,7 @@ class Doc:
 		self._stamp = False
 		self._up: _UpgradedFile | None = None
 		self._lay: _LayerSet | None = None
+		self._src = ""  # the text as loaded, for merged()
 
 	@property
 	def inner(self) -> Any:
@@ -829,6 +850,23 @@ class Doc:
 				for g in x.diags():
 					g.layer = i + 1
 					out.append(g)
+		return out
+
+	def unused(self) -> list[Spot]:
+		"""The lines the load couldn't use, which are the lines with an error,
+		once each."""
+		return _unused_of(self.diags())
+
+	def merged(self) -> list[Merge]:
+		"""Each name the load kept one copy of, since a later copy had the same
+		name and value, with every copy's line. On a layered document it's
+		each layer's own, and not what the layers' merge folded."""
+		if self._lay is None:
+			return _merges_of(self._src, 0)
+		out = []
+		for i, x in enumerate(self._lay.docs):
+			if x is not None:
+				out += _merges_of(x._src, i + 1)
 		return out
 
 	def errors(self) -> int:
@@ -1065,13 +1103,104 @@ def parse(text: str) -> Doc:
 
 
 def _parse_keep(text: str, s: Strictness) -> tuple[Doc, Error | None]:
+	err = None
 	try:
-		return Doc(shcl.Document.parse_keep_lines(text, _strictness(s))), None
+		d = Doc(shcl.Document.parse_keep_lines(text, _strictness(s)))
 	except shcl.LoadError as e:
 		inner = e.document if e.document is not None else shcl.Document.new()
 		err = Error(ErrKind.Strict, diags=_diags(e.diagnostics))
 		err.__cause__ = e
-		return Doc(inner), err
+		d = Doc(inner)
+	d._src = text
+	return d, err
+
+
+def _unused_of(ds: list[Diag]) -> list[Spot]:
+	"""The lines with an error in ds, once each, by layer then line. An error on
+	no line, such as one about the whole file, has no line to give."""
+	return sorted({Spot(g.layer, g.line) for g in ds if g.severity is Severity.Error and g.line > 0})
+
+
+def _walk(x: Doc, path: str, see: Callable[[str, str, Node], bool]) -> None:
+	for name in x.names(path):
+		for n in x.each(x.child(path, name)):
+			if see(path, name, n):
+				_walk(x, n.path, see)
+
+
+def _probe_name(line: int) -> str:
+	return f"shclwprobe{line}x"
+
+
+def _merges_of(text: str, layer: int) -> list[Merge]:
+	"""The copies shcl folded into an earlier one in text, apart or not (shcl's
+	H002 only says so when they're apart). A folded copy's line is on no node,
+	so each such line gets its name made unique and the text is parsed again,
+	where the copy then stands alone (design.md, Decisions)."""
+	d = parse(text)
+	at: dict[int, str] = {}
+
+	def see_d(_parent: str, _name: str, n: Node) -> bool:
+		if n.line > 0:
+			at[n.line] = n.path
+		return True
+
+	_walk(d, "", see_d)
+	bad = {g.line for g in d.diags() if g.severity is Severity.Error}
+	probe = text.split("\n")
+	folded = set()
+	for i, ln in enumerate(probe):
+		n = i + 1
+		body = ln.lstrip(" \t")
+		if n in at or n in bad or not body:
+			continue
+		indent, c = ln[: len(ln) - len(body)], body[0]
+		if c in "\"'":
+			probe[i] = indent + c + _probe_name(n) + body[1:]
+		elif ord(c) >= 0x80 or ("a" <= c.lower() <= "z"):
+			probe[i] = indent + _probe_name(n) + body
+		else:
+			continue
+		folded.add(n)
+	out: list[Merge] = []
+	if not folded:
+		return out
+	p = parse("\n".join(probe))
+	slot: dict[str, int] = {}
+	# The path in d of the node a probe node stands for.
+	orig = {"": ""}
+
+	def see_p(parent: str, name: str, n: Node) -> bool:
+		if n.line not in folded:
+			orig[n.path] = at.get(n.line, "")
+			return n.line in at
+		if parent not in orig:
+			return False
+		pre = _probe_name(n.line)
+		if name.lower().startswith(pre):
+			name = name[len(pre) :]
+		kept = None
+		for k in d.each(d.child(orig[parent], name)):
+			if k.value == n.value and 0 < k.line < n.line and (kept is None or k.line > kept.line):
+				kept = k
+		if kept is None:
+			return False
+		orig[n.path] = kept.path
+		# A dotted line folds each step; only its last one is the copy.
+		for c in p.names(n.path):
+			if any(k.line == n.line for k in p.each(p.child(n.path, c))):
+				return True
+		if kept.path not in slot:
+			slot[kept.path] = len(out)
+			out.append(Merge(kept.path, [kept.line], layer))
+		out[slot[kept.path]].lines.append(n.line)
+		return True
+
+	_walk(p, "", see_p)
+	for m in out:
+		m.lines.sort()
+	out.sort(key=lambda m: (m.lines[0], m.path.encode("utf-8", "surrogateescape")))
+	return out
 
 
 def parse_with(text: str, s: Strictness) -> Doc:
@@ -1428,6 +1557,11 @@ def _esc(s: str) -> str:
 	return _NEEDS_ESC.sub(one, s)
 
 
+def _spot_text(line: int, layer: int) -> str:
+	"""A line, with its layer in front on a layered document."""
+	return f"{layer}:{line}" if layer > 0 else str(line)
+
+
 def _counted(n: int, items: str) -> str:
 	return "0" if n == 0 else f"{n}\t{items}"
 
@@ -1498,6 +1632,12 @@ class _Runner:
 			self.diags(d.diags())
 		elif name == "errors":
 			self.out(str(d.errors()))
+		elif name == "unused":
+			spots = d.unused()
+			self.out(_counted(len(spots), "\t".join(_spot_text(x.line, x.layer) for x in spots)))
+		elif name == "merged":
+			for m in d.merged():
+				self.out("\t".join([_esc(m.path)] + [_spot_text(n, m.layer) for n in m.lines]))
 		elif name == "get":
 			self.out(self.get(arg(1), arg(2)))
 		elif name == "or":
@@ -1624,7 +1764,7 @@ class _Runner:
 
 	def diags(self, ds: list[Diag]) -> None:
 		for d in ds:
-			line = f"{d.layer}:{d.line}" if d.layer > 0 else str(d.line)
+			line = _spot_text(d.line, d.layer)
 			self.out(f"{line}\t{d.severity.value}\t{d.code}\t{_esc(d.message)}")
 
 	def block(self, text: str) -> None:

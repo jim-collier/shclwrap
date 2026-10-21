@@ -97,6 +97,24 @@ impl fmt::Display for Diag {
 	}
 }
 
+/// A line in a loaded document. `layer` is as in `Diag`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Spot {
+	pub layer: usize,
+	pub line: usize,
+}
+
+/// A name shcl kept one copy of, since a later copy had the same name and
+/// value and was folded into it. `lines` is the kept copy's line, then each
+/// later copy's. `path` reads the kept copy, as a `Node::path` does, and
+/// `layer` is as in `Diag`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Merge {
+	pub path: String,
+	pub lines: Vec<usize>,
+	pub layer: usize,
+}
+
 /// One layer for `open_layers`: a file, or text the program has, such as
 /// its defaults or this run's command line.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -332,6 +350,14 @@ pub trait ShclDoc {
 	fn diags(&self) -> Vec<Diag>;
 	/// Counts error diagnostics.
 	fn errors(&self) -> usize;
+	/// The lines the load couldn't use, which are the lines with an error,
+	/// once each.
+	fn unused(&self) -> Vec<Spot> {
+		unused_of(&self.diags())
+	}
+	/// Each name the load kept one copy of, since a later copy had the same
+	/// name and value, with every copy's line.
+	fn merged(&self) -> Vec<Merge>;
 	/// Validates this document against a schema document.
 	fn check(&self, schema: &Self) -> Vec<Diag>;
 	/// Takes out the hints for keys this schema says repeat.
@@ -527,6 +553,130 @@ pub fn verify_syntax<D: ShclDoc>(d: &D, path: &str, alone: &D, line: &D) -> Resu
 			.msg("reads back as a different value"));
 	}
 	Ok(())
+}
+
+/// The lines with an error in `ds`, once each, by layer then line. An error
+/// on no line, such as one about the whole file, has no line to give.
+pub fn unused_of(ds: &[Diag]) -> Vec<Spot> {
+	let mut out: Vec<Spot> = ds
+		.iter()
+		.filter(|g| g.severity == Severity::Error && g.line > 0)
+		.map(|g| Spot {
+			layer: g.layer,
+			line: g.line,
+		})
+		.collect();
+	out.sort_unstable();
+	out.dedup();
+	out
+}
+
+fn walk<D: ShclDoc>(x: &D, path: &str, see: &mut dyn FnMut(&str, &str, &Node) -> bool) {
+	for name in x.names(path) {
+		for n in x.each(&x.child(path, &name)) {
+			if see(path, &name, &n) {
+				walk(x, &n.path, see);
+			}
+		}
+	}
+}
+
+fn probe_name(line: usize) -> String {
+	format!("shclwprobe{line}x")
+}
+
+/// The copies shcl folded into an earlier one in `text`, apart or not
+/// (shcl's H002 only says so when they're apart). A folded copy's line is
+/// on no node, so each such line gets its name made unique and the text is
+/// parsed again, where the copy then stands alone (design.md, Decisions).
+pub fn merges_of<D: ShclDoc>(text: &str, parse: impl Fn(&str) -> D, layer: usize) -> Vec<Merge> {
+	use std::collections::{HashMap, HashSet};
+	let d = parse(text);
+	let mut at: HashMap<usize, String> = HashMap::new();
+	walk(&d, "", &mut |_, _, n| {
+		if n.line > 0 {
+			at.insert(n.line, n.path.clone());
+		}
+		true
+	});
+	let bad: HashSet<usize> = d
+		.diags()
+		.iter()
+		.filter(|g| g.severity == Severity::Error)
+		.map(|g| g.line)
+		.collect();
+	let mut probe: Vec<String> = Vec::new();
+	let mut folded = HashSet::new();
+	for (i, l) in text.split('\n').enumerate() {
+		let n = i + 1;
+		let body = l.trim_start_matches([' ', '\t']);
+		let indent = &l[..l.len() - body.len()];
+		let c = body.bytes().next().unwrap_or(b' ');
+		if at.contains_key(&n) || bad.contains(&n) || body.is_empty() {
+			probe.push(l.to_owned());
+		} else if c == b'"' || c == b'\'' {
+			probe.push(format!("{indent}{}{}{}", &body[..1], probe_name(n), &body[1..]));
+			folded.insert(n);
+		} else if c >= 0x80 || c.is_ascii_alphabetic() {
+			probe.push(format!("{indent}{}{body}", probe_name(n)));
+			folded.insert(n);
+		} else {
+			probe.push(l.to_owned());
+		}
+	}
+	let mut out: Vec<Merge> = Vec::new();
+	if folded.is_empty() {
+		return out;
+	}
+	let p = parse(&probe.join("\n"));
+	let mut slot: HashMap<String, usize> = HashMap::new();
+	// The path in `d` of the node a probe node stands for.
+	let mut orig: HashMap<String, String> = HashMap::from([(String::new(), String::new())]);
+	walk(&p, "", &mut |parent, name, n| {
+		if !folded.contains(&n.line) {
+			let o = at.get(&n.line).cloned();
+			let ok = o.is_some();
+			orig.insert(n.path.clone(), o.unwrap_or_default());
+			return ok;
+		}
+		let Some(up) = orig.get(parent).cloned() else {
+			return false;
+		};
+		let pre = probe_name(n.line);
+		let name = if name.to_ascii_lowercase().starts_with(&pre) {
+			&name[pre.len()..]
+		} else {
+			name
+		};
+		let kept = d
+			.each(&d.child(&up, name))
+			.into_iter()
+			.filter(|k| k.value == n.value && k.line > 0 && k.line < n.line)
+			.max_by_key(|k| k.line);
+		let Some(kept) = kept else { return false };
+		orig.insert(n.path.clone(), kept.path.clone());
+		// A dotted line folds each step; only its last one is the copy.
+		for c in p.names(&n.path) {
+			if p.each(&p.child(&n.path, &c)).iter().any(|k| k.line == n.line) {
+				return true;
+			}
+		}
+		let i = *slot.entry(kept.path.clone()).or_insert_with(|| {
+			out.push(Merge {
+				path: kept.path.clone(),
+				lines: vec![kept.line],
+				layer,
+			});
+			out.len() - 1
+		});
+		out[i].lines.push(n.line);
+		true
+	});
+	for m in &mut out {
+		m.lines.sort_unstable();
+	}
+	out.sort_by(|a, b| a.lines[0].cmp(&b.lines[0]).then_with(|| a.path.cmp(&b.path)));
+	out
 }
 
 /// Sorts instances by line. `each` goes in tree order, which for a reopened
@@ -780,6 +930,22 @@ impl<L: Lib> Runner<'_, L> {
 			"rewrites" => self.say(&self.doc.rewrites().to_string()),
 			"diags" => self.diags(&self.doc.diags()),
 			"errors" => self.say(&self.doc.errors().to_string()),
+			"unused" => {
+				let spots = self.doc.unused();
+				let items = spots
+					.iter()
+					.map(|s| spot_text(s.line, s.layer))
+					.collect::<Vec<_>>()
+					.join("\t");
+				self.say(&counted(spots.len(), &items));
+			}
+			"merged" => {
+				for m in self.doc.merged() {
+					let mut items = vec![esc(&m.path)];
+					items.extend(m.lines.iter().map(|&n| spot_text(n, m.layer)));
+					self.say(&items.join("\t"));
+				}
+			}
 			"get" => {
 				let s = self.get(arg(1), arg(2));
 				self.say(&s);
@@ -950,11 +1116,7 @@ impl<L: Lib> Runner<'_, L> {
 
 	fn diags(&mut self, ds: &[Diag]) {
 		for d in ds {
-			let line = if d.layer > 0 {
-				format!("{}:{}", d.layer, d.line)
-			} else {
-				d.line.to_string()
-			};
+			let line = spot_text(d.line, d.layer);
 			self.say(&format!("{line}\t{}\t{}\t{}", d.severity, d.code, esc(&d.message)));
 		}
 	}
@@ -1216,6 +1378,15 @@ fn esc(s: &str) -> String {
 
 /// Puts an array's length before its items, so `[]` and `[""]` print
 /// differently.
+/// A line, with its layer in front on a layered document.
+fn spot_text(line: usize, layer: usize) -> String {
+	if layer > 0 {
+		format!("{layer}:{line}")
+	} else {
+		line.to_string()
+	}
+}
+
 fn counted(n: usize, items: &str) -> String {
 	if n == 0 {
 		"0".to_owned()
