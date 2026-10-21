@@ -268,6 +268,8 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- design.md has these under Loading and saving, Ops scripts, and Decisions.
 	- Verified: the new shared case passes in Go, Rust, C (plain and under ASan and UBSan), and Python. A 90 second fuzz of all 4 with the new ops found no difference. The C lint stage passes.
 	- Swept: Go `shclw3`, Rust `v3`, C `shclw3.c`, and Python each have `Merged`, held by the `Doc` interface, `ShclDoc`, and Go's `docMethods` list. All 4 ops runners and fuzz.py's op list have `merged`.
+	- Branch: round-1021
+	- Commit: 56aedbc
 	- Test case: tests/cases/054-merged-unused, and the fuzz op.
 
 - Upgrade lists the lines it changed
@@ -358,6 +360,8 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- C leaves out the 2.0 errors a refused open keeps in `shclw_diags`, so it gives what Go and Rust give.
 	- Verified: the new shared case passes in Go, Rust, C, and Python, and so does the fuzz with the new op.
 	- Swept: all 4 languages and runners, and fuzz.py, as in 2026101513330009.
+	- Branch: round-1021
+	- Commit: 56aedbc
 	- Test case: tests/cases/054-merged-unused, and the fuzz op.
 
 - Back up a file before a save that would lose lines
