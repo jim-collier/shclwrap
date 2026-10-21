@@ -209,6 +209,7 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- Reads with a fallback are `int_or` and the rest, not `int`, so no method takes a builtin's name.
 		- `put` takes a list or tuple. An empty one writes an empty array, which reads back the same for every type.
 		- No pip install anywhere. Tests point `PYTHONPATH` at the cached `shcl.py`.
+	- Commit: a4909af
 	- Test case: shared cases, all 53, through the Python driver; `source/python/tests/test_shclw.py`; the fuzz.
 
 - Move the other projects onto the wrapper
@@ -759,6 +760,7 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- Verified: `test_copied` runs the wrapper from a package with 3.0 copied beside it and 1.2 on the path, and fails with the copy lookup taken out. `test_none` checks the message with nothing found.
 	- Decisions:
 		- The copy beside the wrapper wins over the installed one, since bundling it is a choice. Waits on JC with the parent's question.
+	- Commit: a4909af
 	- Test case: `source/python/tests/test_shclw.py`, `test_copied` and `test_none`.
 
 - Rename the project shclwrap
