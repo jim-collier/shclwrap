@@ -100,6 +100,12 @@ shclw_upgraded *shclw_i_upgraded(const char *text, size_t len, int64_t from, boo
 
 // Nothing at path, not even a dangling link.
 bool shclw_i_missing(const char *path);
+// SHCLW_ERR_BAD_VALUE for a shclw_write_opts mode with more than permission
+// bits in it.
+shclw_kind shclw_i_check_mode(const char *path, unsigned mode, shclw_error *err);
+// Writes data to path only when nothing is there, and is SHCLW_ERR_EXISTS
+// otherwise (design.md, Loading and saving).
+shclw_kind shclw_i_create_new(const char *path, const char *data, size_t len, unsigned mode, shclw_error *err);
 
 // Something at path that isn't a regular file, such as a FIFO or a device.
 bool shclw_i_irregular(const char *path);

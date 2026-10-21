@@ -11,7 +11,9 @@ beside this file, _shclw_shcl2.py. See project/design.md.
 
 from __future__ import annotations
 
+import errno
 import importlib.util
+import itertools
 import math
 import os
 import re
@@ -183,6 +185,7 @@ class ErrKind(Enum):
 	BackupTaken = "backuptaken"
 	NoReadBack = "noreadback"
 	Changed = "changed"
+	Exists = "exists"
 
 
 class Error(Exception):
@@ -309,6 +312,136 @@ def read_text(path: str) -> str:
 
 def _changed(path: str) -> Error:
 	return Error(ErrKind.Changed, path, "changed since it was read; nothing written")
+
+
+def _exists(path: str) -> Error:
+	return Error(ErrKind.Exists, path, "already there; nothing written")
+
+
+def _check_mode(path: str, mode: int | None) -> None:
+	if mode is not None and mode & ~0o777:
+		raise Error(ErrKind.BadValue, path, f"mode {mode:#o} is more than permission bits")
+
+
+_temp_seq = itertools.count()
+
+
+def create_new(path: str, data: str, mode: int | None = None) -> None:
+	"""Writes data to path only when nothing is there, and raises Exists
+	otherwise. The text is synced under a temp name and hard-linked into
+	place, so the name never holds part of it, and of 2 creates at once
+	exactly one wins. A filesystem with no hard links gets an exclusive
+	create of path itself (design.md, Loading and saving)."""
+	_check_mode(path, mode)
+	try:
+		tmp = _write_temp(path, data, mode)
+	except OSError as e:
+		raise _create_err(path, e) from e
+	try:
+		os.link(tmp, path)
+	except FileExistsError as e:
+		raise _exists(path) from e
+	except OSError as e:
+		if not isinstance(e, PermissionError) and e.errno not in (errno.ENOTSUP, errno.EOPNOTSUPP, errno.ENOSYS):
+			raise _create_err(path, e) from e
+		_create_in_place(path, data, mode)
+		return
+	finally:
+		os.remove(tmp)
+	_sync_dir(path)
+
+
+def _write_temp(path: str, data: str, mode: int | None) -> str:
+	head, base = os.path.split(path)
+	# shcl's temp names cut the base the same way, to stay under 255 bytes.
+	b = base.encode("utf-8", "surrogateescape")[:64].decode("utf-8", "ignore")
+	last: OSError = FileExistsError(errno.EEXIST, "temp names taken")
+	for _ in range(8):
+		tmp = os.path.join(head, f".{b}.new{os.getpid()}.{next(_temp_seq)}")
+		try:
+			fd = _open_new(tmp, mode)
+		except FileExistsError as e:
+			last = e
+			continue
+		try:
+			_fill(fd, data, mode)
+		except OSError:
+			os.remove(tmp)
+			raise
+		return tmp
+	raise last
+
+
+def _create_in_place(path: str, data: str, mode: int | None) -> None:
+	"""create_new without a temp, for a filesystem with no hard links. A crash
+	part way leaves part of the file."""
+	try:
+		fd = _open_new(path, mode)
+	except FileExistsError as e:
+		raise _exists(path) from e
+	except OSError as e:
+		raise _create_err(path, e) from e
+	try:
+		_fill(fd, data, mode)
+	except OSError as e:
+		os.remove(path)  # ours, made just above
+		raise _create_err(path, e) from e
+	_sync_dir(path)
+
+
+def _open_new(path: str, mode: int | None) -> int:
+	# One with a mode is born private, and gets its mode exactly in _fill,
+	# past the umask.
+	flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0)
+	return os.open(path, flags, 0o666 if mode is None else 0o600)
+
+
+def _fill(fd: int, data: str, mode: int | None) -> None:
+	with os.fdopen(fd, "wb") as f:
+		f.write(data.encode("utf-8", "surrogateescape"))
+		if mode is not None and os.name != "nt":
+			os.fchmod(fd, mode)
+		f.flush()
+		os.fsync(fd)
+
+
+def _sync_dir(path: str) -> None:
+	if os.name == "nt":
+		return
+	try:
+		fd = os.open(os.path.dirname(path) or ".", os.O_RDONLY)
+	except OSError:
+		return
+	try:
+		os.fsync(fd)
+	except OSError:
+		pass  # some filesystems can't; the file itself is synced
+	finally:
+		os.close(fd)
+
+
+def _create_err(path: str, e: OSError) -> Error:
+	return Error(ErrKind.NotFound if isinstance(e, FileNotFoundError) else ErrKind.IO, path, str(e))
+
+
+def _write_mode(mode: int | None) -> Callable[[str, str], None]:
+	"""_write_atomic where a file it creates gets mode. One that's there keeps
+	its own, as shcl's atomic write keeps it."""
+	if mode is None:
+		return _write_atomic
+
+	def write(path: str, text: str) -> None:
+		if os.path.lexists(path):
+			_write_atomic(path, text)
+			return
+		try:
+			create_new(path, text, mode)
+		except Error as e:
+			if e.kind != ErrKind.Exists:
+				raise
+			_write_atomic(path, text)  # made in the meantime
+
+	return write
 
 
 def _unchanged(path: str, was: str) -> bool:
@@ -714,7 +847,9 @@ class _ReadFile:
 	ident: tuple[int, int] | None
 	gone: bool = False
 
-	def replace(self, path: str, text: str, backup: Callable[[], str] | None, force: bool) -> str:
+	def replace(
+		self, path: str, text: str, backup: Callable[[], str] | None, force: bool, write: Callable[[str, str], None]
+	) -> str:
 		"""Writes text over the file open() read, unless it changed since. Only
 		the moment between the last check and the rename is left open
 		(design.md, Loading and saving)."""
@@ -723,14 +858,14 @@ class _ReadFile:
 			try:
 				was = Path(path).read_bytes().decode("utf-8")
 			except (OSError, UnicodeDecodeError):
-				_write_atomic(path, text)
+				write(path, text)
 				return ""
 		elif self.gone:
 			if os.path.lexists(path):
 				raise _changed(path)
-			_write_atomic(path, text)
+			write(path, text)
 			return ""
-		return _replace_read(path, was, text, backup, _write_atomic)
+		return _replace_read(path, was, text, backup, write)
 
 	def over(self, path: str) -> bool:
 		if os.path.abspath(path) == os.path.abspath(self.path):
@@ -824,17 +959,23 @@ class Doc:
 		t = self._top()
 		return t._finish(t._d.to_canonical())
 
-	def write(self, path: str, force: bool = False) -> None:
+	def write(self, path: str, force: bool = False, *, create: bool = False, mode: int | None = None) -> None:
 		"""Saves text() atomically. Refuses with Refused when the load dropped
 		lines the save would lose. The first write over a file open() upgraded
 		backs up the original first, and backup_name() names the copy. A write
 		over the file open() read is Changed when it changed on disk since,
-		unless force, and a document read from a newer format is TooNew."""
+		unless force, and a document read from a newer format is TooNew.
+
+		create writes only where nothing is there yet, and is Exists otherwise,
+		even with 2 programs creating the file at once. mode is the permission
+		bits a file this write creates gets, exactly, with no umask. A file
+		that's already there keeps its own mode. Windows ignores it."""
 		if self._lay is not None:
-			self._top().write(path, force)
+			self._top().write(path, force, create=create, mode=mode)
 			return
 		if self._newer:
 			raise _too_new(path, self._newer)
+		_check_mode(path, mode)
 		text, kept = self._d.to_text_keep_lines()
 		lost = self._d.lost_count()
 		if not kept and lost > 0:
@@ -847,14 +988,20 @@ class Doc:
 			e.path = path
 			raise
 		f = self._file
+		if create:
+			create_new(path, text, mode)
+			if f is not None and f.over(path):
+				f.text, f.gone, f.ident = text, False, _ident(path)
+			return
+		write = _write_mode(mode)
 		if f is None or not f.over(path):
-			_write_atomic(path, text)
+			write(path, text)
 			return
 		up = self._up
 		if up is not None and not up.backup:
-			up.backup = f.replace(path, text, _keep_original(path, f.text, up.from_), force)
+			up.backup = f.replace(path, text, _keep_original(path, f.text, up.from_), force, write)
 		else:
-			f.replace(path, text, None, force)
+			f.replace(path, text, None, force, write)
 		f.text, f.gone, f.ident = text, False, _ident(path)
 
 	def read_only(self) -> bool:
@@ -1739,7 +1886,9 @@ class _Runner:
 		elif name == "upgrade":
 			self.upgrade(arg(1))
 		elif name == "write":
-			self.write(arg(1), arg(2) == "force")
+			self.write(arg(1), f[2:])
+		elif name == "mode":
+			self.mode(arg(1))
 		elif name == "readonly":
 			self.out(_bool(self.doc.read_only()))
 		elif name == "scribble":
@@ -1924,12 +2073,32 @@ class _Runner:
 			return
 		self.out("ok")
 
-	def write(self, name: str, force: bool) -> None:
+	def mode(self, name: str) -> None:
 		path = self.file(name)
 		if path is None:
 			return
 		try:
-			self.doc.write(path, force)
+			self.out(f"{stat.S_IMODE(os.stat(path).st_mode) & 0o777:04o}")
+		except OSError:
+			self.out("error io")
+
+	def write(self, name: str, flags: list[str]) -> None:
+		path = self.file(name)
+		if path is None:
+			return
+		force, create, mode = False, False, None
+		for flag in flags:
+			if flag == "force":
+				force = True
+			elif flag == "create":
+				create = True
+			elif flag.startswith("mode=") and re.fullmatch(r"[0-7]+", flag[5:]):
+				mode = int(flag[5:], 8)
+			else:
+				self.out("error badvalue")
+				return
+		try:
+			self.doc.write(path, force, create=create, mode=mode)
 			text = read_text(path)
 		except Error as e:
 			self.result(e)

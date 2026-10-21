@@ -123,7 +123,7 @@ Go names are listed. Rust uses the same words in snake case, and `ShclDoc` has t
 | `d.Text()`                | The document as it would be saved.
 | `d.Canonical()`           | The document in canonical form.
 | `d.Write(path)`           | Saves `Text()` atomically. The first one over a file `Open` upgraded backs it up first. Over a file that changed on disk since `Open` read it, it's `ErrChanged`.
-| `d.WriteWith(path, opts)` | `Write` with `WriteOpts`. `Force` writes over a file that changed.
+| `d.WriteWith(path, opts)` | `Write` with `WriteOpts`. `Force` writes over a file that changed, `Create` writes only a new file, and `Mode` is a new file's mode.
 | `d.ReadOnly()`            | Whether the document came from a newer format, which `Write` refuses.
 | `d.Rewrites()`            | Whether `Write` puts the canonical form in place of the lines the document was loaded from.
 | `d.UpgradedFrom()`        | The format `Open` upgraded the file from, or 0.
@@ -161,7 +161,21 @@ Go names are listed. Rust uses the same words in snake case, and `ShclDoc` has t
 	- Over the file means the path `Open` read, or the same file by another name. A `Write` anywhere else isn't checked.
 	- A layered document's user file that wasn't there at load has to still not be there. Another program that made it meanwhile is `ErrChanged`.
 	- `Parse` and `New` documents read no file, so there's nothing to check.
-	- `WriteWith(path, WriteOpts{Force: true})` skips the check, for a program that means to replace whatever is there. On an upgraded file the first `Write` still backs up the original `Open` read. Rust takes `&WriteOpts { force: true }`, Python `write(path, force=True)`, and C a `shclw_write_opts` or NULL.
+	- `WriteWith(path, WriteOpts{Force: true})` skips the check, for a program that means to replace whatever is there. On an upgraded file the first `Write` still backs up the original `Open` read. Rust takes `&WriteOpts { force: true, ..WriteOpts::default() }`, Python `write(path, force=True)`, and C a `shclw_write_opts` or NULL.
+
+- `WriteOpts{Create: true}` writes only where nothing is there yet, and is `ErrExists` otherwise (2026101513330015). Of 2 programs creating one file at once, exactly one gets it, and the file is all of that one's text.
+	- The text goes to a temp file beside it, synced, which is then hard-linked to the name and removed. A link fails when the name is taken, so the name never holds part of a file, and there's no moment between a check and the write. That's what Radixmill does. On Windows C moves the temp into place without replacing, which fails the same way, and Go, Rust, and Python link there too, as NTFS has hard links.
+	- A filesystem with no hard links, such as FAT, gets an exclusive create of the name itself. The one-winner rule holds, but a crash part way leaves part of a file, which then blocks the next create.
+	- Anything at the name counts, a dangling symlink too.
+	- It never replaces, so there's no changed check, and `Force` has nothing to skip. A document `Open` read refuses with `ErrExists` over its own file, unless that file was removed since. A read-only document is still `ErrTooNew`, and nothing is backed up.
+	- Rust and Python have it as `create`, and C as the `create` field.
+
+- `WriteOpts{Mode: 0o600}` is the permission bits a file this `Write` creates gets, exactly, past the umask (2026101513330016). It's born private and set by chmod before it's in place, so it's never readable to anyone the mode leaves out.
+	- A file that's already there keeps its own mode, as every save keeps it, since shcl's atomic write copies the old file's mode to the new one. So a program that wants an existing file's mode changed calls chmod itself.
+	- A file a `Write` with no mode creates gets 0666 less the umask, as any create does. So does one made through a symlink that points at nothing yet, since the name is taken and shcl's write follows the link.
+	- More than permission bits, such as setuid or sticky, is `ErrBadValue`, and nothing is written.
+	- Windows has no Unix modes and ignores it.
+	- In Go and C a mode of 0 means none was given. Rust takes `mode: Some(0o600)`, and Python `mode=0o600`.
 
 - A save whose text has no Format line has 2.x's `#` info block swapped for the current one, with its Format line, where the old one sat (2026101513330010). That's `Write`, `Text`, and `Canonical`.
 	- It's the upgrade's swap, with the same block finder, so a block's text inside a raw body doesn't count. The lines end as the file's did.
@@ -300,7 +314,7 @@ Go names are listed. Rust uses the same words in snake case, and `ShclDoc` has t
 
 ### Errors
 
-- One error type, `*shclw.Error` in Go, `shclw::Error` in Rust, and `shclw.Error` in Python, with a kind a program can act on: `NotFound`, `IO`, `Strict`, `Refused`, `BadPath`, `BadValue`, `TooNew`, `Unsupported`, `Ambiguous`, `BackupTaken`, `NoReadBack`, and `Changed`.
+- One error type, `*shclw.Error` in Go, `shclw::Error` in Rust, and `shclw.Error` in Python, with a kind a program can act on: `NotFound`, `IO`, `Strict`, `Refused`, `BadPath`, `BadValue`, `TooNew`, `Unsupported`, `Ambiguous`, `BackupTaken`, `NoReadBack`, `Changed`, and `Exists`.
 
 - `Refused` is a save that would drop lines the load couldn't use, which 3.0 refuses. It's also an upgrade of a 2.x file that shcl 2.0 reports errors on.
 
@@ -365,7 +379,8 @@ An ops script is one op per line, with fields split by tabs. `\t`, `\n`, `\r`, a
 | `info on\|off`, `stamp`                 | `ok` or `error KIND`, from `InfoBlock` and `StampFormat`
 | `check FILE [all\|drop]`                | the schema check, with the load's own diagnostics for `all`, and then dropped ones for `drop`
 | `format`, `upgrade [FROM]`              | the format number, or the upgrade's result and text
-| `write FILE [force]`                    | `ok` and the saved file, or `error KIND`. `force` is `WriteOpts.Force`.
+| `write FILE [force] [create] [mode=M]`  | `ok` and the saved file, or `error KIND`. The flags are `WriteOpts`'s, with M in octal.
+| `mode FILE`                             | the file's permission bits, in octal
 | `readonly`                              | `true` or `false`, from `ReadOnly`
 | `scribble FILE TEXT`                    | `ok` once TEXT is in FILE, written as another program would
 | `open FILE [loose\|standard\|strict]`   | `ok`, or `error KIND` and the error's diagnostics, and the document is reloaded
@@ -548,6 +563,12 @@ An ops script is one op per line, with fields split by tabs. `\t`, `\n`, `\r`, a
 	- The check is on by default, since a lost save is worse than a refused one. `Force` turns it off for one `Write`.
 	- It compares the text `Open` read, rather than a hash or size and mtime. It's exact, it was already there for the backup, and the cost is a copy of a config file. An mtime can stay the same across 2 saves in one tick, or change with nothing new.
 	- `WriteOpts` is a struct so the create-only Write (2026101513330015) and a file mode (2026101513330016) can be fields on it later.
+
+- Create-only is a link of a synced temp file, rather than an exclusive create of the name (2026101513330015). The exclusive create alone has the one-winner rule, but a reader or a crash can catch the file half written. A filesystem with no hard links falls back to the exclusive create, rather than refusing, since a save that fails on a USB stick is worse than one that's not atomic there.
+	- A taken name is `ErrExists`, a kind of its own, since a program acts on it, by reading the file that's there.
+
+- `Mode` is exact, set by chmod past the umask, rather than masked by it (2026101513330016). A program taht asks for 0600 means 0600, and a umask can only take bits away anyway, so masking would change nothing for 0600 and surprise anyone who asked for 0644 under a umask of 077.
+	- It applies only to a file the `Write` creates, as the mode of `open(2)` does. An existing file keeps its mode, which shcl's atomic write already did, so a program never changes a file's mode by saving it.
 
 - There's no `OpenLayersWith` yet. A program that wants strict layers checks `Errors()`, which counts every layer.
 

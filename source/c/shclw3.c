@@ -490,6 +490,7 @@ typedef struct {
 	const char *text;
 	size_t len;
 	int64_t from;
+	unsigned mode; // for a file the save creates
 } replacing;
 
 static shclw_kind keep_original(void *ctx, char **name, shclw_error *err) {
@@ -521,9 +522,18 @@ static shclw_kind write_new(void *ctx, const char *path, const char *data, size_
 	return shclw_i_fail(err, SHCLW_ERR_IO, path, shcl_write_status_name(why), errno);
 }
 
-// shcl's atomic save, with a missing folder as SHCLW_ERR_NOT_FOUND.
+// shcl's atomic save, with a missing folder as SHCLW_ERR_NOT_FOUND. ctx is
+// NULL or a replacing, whose mode goes on a file the save creates. One that's
+// there keeps its own, as shcl's atomic write keeps it.
 static shclw_kind save(void *ctx, const char *path, const char *data, size_t len, shclw_error *err) {
-	(void)ctx;
+	unsigned mode = ctx ? ((const replacing *)ctx)->mode : 0;
+	if (mode && shclw_i_missing(path)) {
+		shclw_kind k = shclw_i_create_new(path, data, len, mode, err);
+		if (k != SHCLW_ERR_EXISTS) {
+			return k;
+		}
+		// made in the meantime
+	}
 	shcl_write_status why = SHCL_WRITE_OK;
 	errno = 0;
 	if (shcl_write_file_atomic(path, data, len, &why)) {
@@ -543,14 +553,17 @@ bool shclw_read_only(shclw_doc *d) { return shclw_i_top(d)->newer > 0; }
 // Writes text over the file shclw_open read, unless it changed since. Only the
 // moment between the last check and the rename is left open (design.md,
 // Loading and saving).
-static shclw_kind replace(read_file *f, const char *path, const char *text, size_t len, bool force, shclw_error *err) {
+static shclw_kind replace(read_file *f, const char *path, const char *text, size_t len, const shclw_write_opts *o,
+                          shclw_error *err) {
+	// The first save over a file shclw_open upgraded keeps the original.
+	replacing r = {path, f->text, f->len, f->from, o->mode};
 	char *now = NULL;
 	size_t now_len = 0;
 	const char *was = f->text;
 	size_t was_len = f->len;
-	if (force) {
+	if (o->force) {
 		if (shclw_read_text(path, &now, &now_len, NULL) != SHCLW_OK) {
-			return save(NULL, path, text, len, err);
+			return save(&r, path, text, len, err);
 		}
 		was = now;
 		was_len = now_len;
@@ -558,10 +571,8 @@ static shclw_kind replace(read_file *f, const char *path, const char *text, size
 		if (!shclw_i_missing(path)) {
 			return shclw_i_fail(err, SHCLW_ERR_CHANGED, path, "changed since it was read; nothing written", 0);
 		}
-		return save(NULL, path, text, len, err);
+		return save(&r, path, text, len, err);
 	}
-	// The first save over a file shclw_open upgraded keeps the original.
-	replacing r = {path, f->text, f->len, f->from};
 	shclw_i_replacer how = {f->from && !f->backup ? keep_original : NULL, save, &r};
 	char *name = NULL;
 	shclw_kind k = shclw_i_replace_read(path, was, was_len, text, len, &how, &name, err);
@@ -578,6 +589,15 @@ shclw_kind shclw_write_with(shclw_doc *d, const char *path, const shclw_write_op
 	if (d->newer) {
 		return too_new(err, path, d->newer);
 	}
+	shclw_write_opts o;
+	memset(&o, 0, sizeof o);
+	if (opts) {
+		o = *opts;
+	}
+	shclw_kind k = shclw_i_check_mode(path, o.mode, err);
+	if (k != SHCLW_OK) {
+		return k;
+	}
 	int kept = 0;
 	shcl_str s = shcl_to_text_keep_lines(d->d, &kept);
 	size_t lost = shcl_lost_count(d->d);
@@ -589,14 +609,19 @@ shclw_kind shclw_write_with(shclw_doc *d, const char *path, const shclw_write_op
 	}
 	char *text = NULL;
 	size_t len = 0;
-	shclw_kind k = saved(d, s.p ? s.p : "", s.p ? s.n : 0, path, &text, &len, err);
+	k = saved(d, s.p ? s.p : "", s.p ? s.n : 0, path, &text, &len, err);
 	shcl_reads_release(d->d);
 	if (k != SHCLW_OK) {
 		return k;
 	}
 	read_file *f = d->file;
 	bool over = f && shclw_i_same_file(path, f->path, f->id);
-	k = over ? replace(f, path, text, len, opts && opts->force, err) : save(NULL, path, text, len, err);
+	replacing plain = {path, NULL, 0, 0, o.mode};
+	if (o.create) {
+		k = shclw_i_create_new(path, text, len, o.mode, err);
+	} else {
+		k = over ? replace(f, path, text, len, &o, err) : save(&plain, path, text, len, err);
+	}
 	if (over && k == SHCLW_OK) {
 		free(f->text);
 		f->text = text;
@@ -1580,7 +1605,7 @@ shclw_kind shclw_upgrade_file(const char *path, int64_t from, shclw_upgraded **o
 		free(u);
 		return k;
 	}
-	replacing r = {path, text, len, u->from};
+	replacing r = {path, text, len, u->from, 0};
 	shclw_i_replacer how = {keep_original, write_new, &r};
 	char *backup = NULL;
 	k = shclw_i_replace_read(path, text, len, u->text.p, u->text.n, &how, &backup, err);

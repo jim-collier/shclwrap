@@ -22,7 +22,9 @@
 
 use std::fmt::{self, Write as _};
 use std::fs;
+use std::io::{self, Write as _};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 mod info;
 pub use info::{finish_info, Info, InfoEdit};
@@ -164,6 +166,7 @@ pub enum ErrKind {
 	BackupTaken,
 	NoReadBack,
 	Changed,
+	Exists,
 }
 
 impl fmt::Display for ErrKind {
@@ -181,6 +184,7 @@ impl fmt::Display for ErrKind {
 			ErrKind::BackupTaken => "backuptaken",
 			ErrKind::NoReadBack => "noreadback",
 			ErrKind::Changed => "changed",
+			ErrKind::Exists => "exists",
 		})
 	}
 }
@@ -334,6 +338,14 @@ pub struct WriteOpts {
 	/// Writes over the file `open` read even when it changed on disk since.
 	/// It doesn't write over a file in a newer format.
 	pub force: bool,
+	/// Writes only where nothing is there yet, and is `Exists` otherwise,
+	/// even with 2 programs creating the file at once. It never replaces, so
+	/// there's no changed check for `force` to skip.
+	pub create: bool,
+	/// The permission bits a file this write creates gets, exactly, with no
+	/// umask. `None` is a plain create's 0666 less the umask. A file that's
+	/// already there keeps its own mode. Windows ignores it.
+	pub mode: Option<u32>,
 }
 
 /// What every module's document does. Bring it into scope to call the
@@ -732,6 +744,149 @@ pub fn changed(path: &str) -> Error {
 		.msg("changed since it was read; nothing written")
 }
 
+/// The error for a create-only write where the name is taken.
+pub fn exists(path: &str) -> Error {
+	Error::new(ErrKind::Exists)
+		.path(path)
+		.msg("already there; nothing written")
+}
+
+/// Refuses a `WriteOpts::mode` with more than permission bits in it.
+pub fn check_mode(path: &str, mode: Option<u32>) -> Result<(), Error> {
+	match mode {
+		Some(m) if m & !0o777 != 0 => Err(Error::new(ErrKind::BadValue)
+			.path(path)
+			.msg(format!("mode {m:#o} is more than permission bits"))),
+		_ => Ok(()),
+	}
+}
+
+static TEMP_SEQ: AtomicU64 = AtomicU64::new(0);
+
+/// Writes `data` to `path` only when nothing is there, and is `Exists`
+/// otherwise. The text is synced under a temp name and hard-linked into
+/// place, so the name never holds part of it, and of 2 creates at once
+/// exactly one wins. A filesystem with no hard links gets an exclusive
+/// create of `path` itself (design.md, Loading and saving).
+pub fn create_new(path: &str, data: &str, mode: Option<u32>) -> Result<(), Error> {
+	check_mode(path, mode)?;
+	let tmp = write_temp(path, data, mode).map_err(|e| create_err(path, &e))?;
+	let linked = fs::hard_link(&tmp, path);
+	let _ = fs::remove_file(&tmp);
+	match linked {
+		Ok(()) => {
+			sync_dir(path);
+			Ok(())
+		}
+		Err(e) if e.kind() == io::ErrorKind::AlreadyExists => Err(exists(path)),
+		Err(e) if matches!(e.kind(), io::ErrorKind::PermissionDenied | io::ErrorKind::Unsupported) => {
+			create_in_place(path, data, mode)
+		}
+		Err(e) => Err(create_err(path, &e)),
+	}
+}
+
+/// Writes `data` to a new file beside `path` and syncs it.
+fn write_temp(path: &str, data: &str, mode: Option<u32>) -> io::Result<PathBuf> {
+	let p = Path::new(path);
+	let dir = p
+		.parent()
+		.filter(|d| !d.as_os_str().is_empty())
+		.unwrap_or(Path::new("."));
+	let base = p.file_name().and_then(|b| b.to_str()).unwrap_or_default();
+	// shcl's temp names cut the base the same way, to stay under 255 bytes.
+	let mut cut = base.len().min(64);
+	while !base.is_char_boundary(cut) {
+		cut -= 1;
+	}
+	let mut last = io::Error::from(io::ErrorKind::AlreadyExists);
+	for _ in 0..8 {
+		let seq = TEMP_SEQ.fetch_add(1, Ordering::Relaxed);
+		let tmp = dir.join(format!(".{}.new{}.{seq}", &base[..cut], std::process::id()));
+		match open_new(&tmp, mode) {
+			Ok(f) => {
+				if let Err(e) = fill(f, data, mode) {
+					let _ = fs::remove_file(&tmp);
+					return Err(e);
+				}
+				return Ok(tmp);
+			}
+			Err(e) if e.kind() == io::ErrorKind::AlreadyExists => last = e,
+			Err(e) => return Err(e),
+		}
+	}
+	Err(last)
+}
+
+/// `create_new` without a temp, for a filesystem with no hard links. A
+/// crash part way leaves part of the file.
+fn create_in_place(path: &str, data: &str, mode: Option<u32>) -> Result<(), Error> {
+	let f = match open_new(Path::new(path), mode) {
+		Ok(f) => f,
+		Err(e) if e.kind() == io::ErrorKind::AlreadyExists => return Err(exists(path)),
+		Err(e) => return Err(create_err(path, &e)),
+	};
+	if let Err(e) = fill(f, data, mode) {
+		let _ = fs::remove_file(path); // ours, made just above
+		return Err(create_err(path, &e));
+	}
+	sync_dir(path);
+	Ok(())
+}
+
+/// One with a mode is born private, and gets its mode exactly in `fill`,
+/// past the umask.
+fn open_new(path: &Path, mode: Option<u32>) -> io::Result<fs::File> {
+	let mut o = fs::OpenOptions::new();
+	o.write(true).create_new(true);
+	#[cfg(unix)]
+	{
+		use std::os::unix::fs::OpenOptionsExt;
+		o.mode(if mode.is_some() { 0o600 } else { 0o666 });
+	}
+	#[cfg(not(unix))]
+	let _ = mode;
+	o.open(path)
+}
+
+fn fill(mut f: fs::File, data: &str, mode: Option<u32>) -> io::Result<()> {
+	f.write_all(data.as_bytes())?;
+	#[cfg(unix)]
+	{
+		use std::os::unix::fs::PermissionsExt;
+		if let Some(m) = mode {
+			f.set_permissions(fs::Permissions::from_mode(m))?;
+		}
+	}
+	#[cfg(not(unix))]
+	let _ = mode;
+	f.sync_all()
+}
+
+fn sync_dir(path: &str) {
+	#[cfg(unix)]
+	{
+		let dir = Path::new(path)
+			.parent()
+			.filter(|d| !d.as_os_str().is_empty())
+			.unwrap_or(Path::new("."));
+		if let Ok(d) = fs::File::open(dir) {
+			let _ = d.sync_all(); // some filesystems can't; the file itself is synced
+		}
+	}
+	#[cfg(not(unix))]
+	let _ = path;
+}
+
+fn create_err(path: &str, e: &io::Error) -> Error {
+	let kind = if e.kind() == io::ErrorKind::NotFound {
+		ErrKind::NotFound
+	} else {
+		ErrKind::Io
+	};
+	Error::new(kind).path(path).msg(e.to_string())
+}
+
 /// Whether `path` still holds `was`, byte for byte.
 pub fn unchanged(path: &str, was: &str) -> bool {
 	fs::read(path).is_ok_and(|b| b == was.as_bytes())
@@ -1037,7 +1192,8 @@ impl<L: Lib> Runner<'_, L> {
 			"check" => self.check(arg(1), arg(2)),
 			"format" => self.say(&L::format_of(self.input).to_string()),
 			"upgrade" => self.upgrade(arg(1)),
-			"write" => self.write(arg(1), arg(2) == "force"),
+			"write" => self.write(arg(1), &rest(2)),
+			"mode" => self.mode(arg(1)),
 			"readonly" => self.say(&self.doc.read_only().to_string()),
 			"scribble" => self.scribble(arg(1), arg(2)),
 			"open" => self.open(arg(1), arg(2)),
@@ -1287,10 +1443,21 @@ impl<L: Lib> Runner<'_, L> {
 		}
 	}
 
-	fn write(&mut self, name: &str, force: bool) {
+	fn write(&mut self, name: &str, flags: &[String]) {
 		let Some(path) = self.file(name) else { return };
 		let path = path.to_string_lossy().into_owned();
-		if let Err(e) = self.doc.write_with(&path, &WriteOpts { force }) {
+		let mut opts = WriteOpts::default();
+		for flag in flags {
+			match flag.as_str() {
+				"force" => opts.force = true,
+				"create" => opts.create = true,
+				_ => match flag.strip_prefix("mode=").map(|m| u32::from_str_radix(m, 8)) {
+					Some(Ok(m)) => opts.mode = Some(m),
+					_ => return self.say("error badvalue"),
+				},
+			}
+		}
+		if let Err(e) = self.doc.write_with(&path, &opts) {
 			return self.result(Some(e));
 		}
 		match read_text(&path) {
@@ -1299,6 +1466,15 @@ impl<L: Lib> Runner<'_, L> {
 				self.block(&t);
 			}
 			Err(e) => self.result(Some(e)),
+		}
+	}
+
+	/// Prints a file's permission bits.
+	fn mode(&mut self, name: &str) {
+		let Some(path) = self.file(name) else { return };
+		match fs::metadata(&path) {
+			Ok(m) => self.say(&format!("{:04o}", perm_bits(&m))),
+			Err(e) => self.result(Some(Error::new(ErrKind::Io).msg(e.to_string()))),
 		}
 	}
 
@@ -1445,3 +1621,82 @@ fn join_floats(v: &[f64]) -> String {
 
 #[cfg(feature = "shcl3")]
 pub mod v3;
+
+#[cfg(unix)]
+fn perm_bits(m: &fs::Metadata) -> u32 {
+	use std::os::unix::fs::PermissionsExt;
+	m.permissions().mode() & 0o777
+}
+
+// What Go reports for a Windows file.
+#[cfg(not(unix))]
+fn perm_bits(m: &fs::Metadata) -> u32 {
+	if m.permissions().readonly() {
+		0o444
+	} else {
+		0o666
+	}
+}
+
+#[cfg(test)]
+mod create_tests {
+	use super::{create_in_place, create_new, ErrKind, Error};
+	use std::fs;
+	use std::path::PathBuf;
+
+	fn text(i: usize) -> String {
+		format!("v: {i}\n").repeat(5000)
+	}
+
+	// Of several creates of one name at once, exactly one wins, and the file
+	// is all of the winner's text.
+	fn race(name: &str, create: fn(&str, &str, Option<u32>) -> Result<(), Error>) {
+		let base = std::env::var_os("TMPDIR").map_or_else(std::env::temp_dir, PathBuf::from);
+		for round in 0..20 {
+			let dir = base.join(format!("shclw-rust-{name}-{}-{round}", std::process::id()));
+			let _ = fs::remove_dir_all(&dir); // a dead run's, if the pid came around again
+			fs::create_dir_all(&dir).unwrap();
+			let path = dir.join("a.shcl").to_string_lossy().into_owned();
+			let results: Vec<_> = std::thread::scope(|s| {
+				let racers: Vec<_> = (0..8)
+					.map(|i| {
+						s.spawn({
+							let path = &path;
+							move || create(path, &text(i), Some(0o600))
+						})
+					})
+					.collect();
+				racers.into_iter().map(|r| r.join().unwrap()).collect()
+			});
+			let mut won = None;
+			for (i, r) in results.iter().enumerate() {
+				match r {
+					Ok(()) => {
+						assert!(won.is_none(), "2 racers won");
+						won = Some(i);
+					}
+					Err(e) => assert_eq!(e.kind, ErrKind::Exists, "racer {i}: {e:?}"),
+				}
+			}
+			let won = won.expect("nobody won");
+			assert_eq!(fs::read_to_string(&path).unwrap(), text(won));
+			assert_eq!(fs::read_dir(&dir).unwrap().count(), 1);
+			#[cfg(unix)]
+			{
+				use std::os::unix::fs::PermissionsExt;
+				assert_eq!(fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
+			}
+			fs::remove_dir_all(&dir).unwrap(); // made above
+		}
+	}
+
+	#[test]
+	fn create_race_link() {
+		race("create-link", create_new);
+	}
+
+	#[test]
+	fn create_race_in_place() {
+		race("create-inplace", create_in_place);
+	}
+}

@@ -81,6 +81,7 @@ typedef enum {
 	SHCLW_ERR_BACKUP_TAKEN,
 	SHCLW_ERR_NO_READ_BACK,
 	SHCLW_ERR_CHANGED,
+	SHCLW_ERR_EXISTS,
 	SHCLW_ERR_NO_MEMORY
 } shclw_kind;
 
@@ -256,8 +257,18 @@ shclw_kind shclw_write(shclw_doc *d, const char *path, shclw_error *err);
 // What a save does. Zeroed is a plain shclw_write. force writes over the file
 // shclw_open read even when it changed on disk since. It doesn't write over a
 // file in a newer format.
+//
+// create writes only where nothing is there yet, and is SHCLW_ERR_EXISTS
+// otherwise, even with 2 programs creating the file at once. It never
+// replaces, so there's no changed check for force to skip.
+//
+// mode is the permission bits a file this save creates gets, exactly, with no
+// umask. 0 is a plain create's 0666 less the umask. A file that's already
+// there keeps its own mode. Windows ignores it.
 typedef struct {
 	bool force;
+	bool create;
+	unsigned mode;
 } shclw_write_opts;
 // shclw_write with options, which may be NULL.
 shclw_kind shclw_write_with(shclw_doc *d, const char *path, const shclw_write_opts *opts, shclw_error *err);

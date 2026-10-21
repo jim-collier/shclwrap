@@ -153,6 +153,7 @@ const (
 	ErrBackupTaken
 	ErrNoReadBack
 	ErrChanged
+	ErrExists
 )
 
 func (k ErrKind) String() string {
@@ -181,6 +182,8 @@ func (k ErrKind) String() string {
 		return "noreadback"
 	case ErrChanged:
 		return "changed"
+	case ErrExists:
+		return "exists"
 	}
 	return "unknown"
 }
@@ -234,8 +237,18 @@ type Upgraded struct {
 //
 // Force writes over the file Open read even when it changed on disk since.
 // It doesn't write over a file in a newer format.
+//
+// Create writes only where nothing is there yet, and is ErrExists otherwise,
+// even with 2 programs creating the file at once. It never replaces, so
+// there's no changed check for Force to skip.
+//
+// Mode is the permission bits a file this Write creates gets, exactly, with
+// no umask. 0 is a plain create's 0666 less the umask. A file that's already
+// there keeps its own mode. Windows has no such bits and ignores it.
 type WriteOpts struct {
-	Force bool
+	Force  bool
+	Create bool
+	Mode   fs.FileMode
 }
 
 // Doc is what every adapter's document does. Programs use the adapter's

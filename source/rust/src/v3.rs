@@ -99,13 +99,13 @@ impl ReadFile {
 		path: &str,
 		text: &str,
 		backup: impl FnOnce() -> Result<String, Error>,
-		force: bool,
+		opts: &WriteOpts,
 	) -> Result<String, Error> {
 		let now;
 		let mut was = self.text.as_str();
-		if force {
+		if opts.force {
 			let Ok(b) = std::fs::read_to_string(path) else {
-				return write_atomic(path, text).map(|()| String::new());
+				return write_mode(path, text, opts.mode).map(|()| String::new());
 			};
 			now = b;
 			was = &now;
@@ -113,9 +113,9 @@ impl ReadFile {
 			if std::fs::symlink_metadata(path).is_ok() {
 				return Err(crate::changed(path));
 			}
-			return write_atomic(path, text).map(|()| String::new());
+			return write_mode(path, text, opts.mode).map(|()| String::new());
 		}
-		crate::replace_read(path, was, text, backup, write_atomic)
+		crate::replace_read(path, was, text, backup, |p, t| write_mode(p, t, opts.mode))
 	}
 }
 
@@ -390,6 +390,18 @@ fn keep_original(path: &str, text: &str, from: u32) -> Result<String, Error> {
 		};
 		Error::new(kind).path(path).msg(e.to_string())
 	})
+}
+
+/// `write_atomic` where a file it creates gets `mode`. One that's there
+/// keeps its own, as shcl's atomic write keeps it.
+fn write_mode(path: &str, text: &str, mode: Option<u32>) -> Result<(), Error> {
+	if mode.is_none() || std::fs::symlink_metadata(path).is_ok() {
+		return write_atomic(path, text);
+	}
+	match crate::create_new(path, text, mode) {
+		Err(e) if e.kind == ErrKind::Exists => write_atomic(path, text), // made in the meantime
+		r => r,
+	}
 }
 
 fn write_atomic(path: &str, text: &str) -> Result<(), Error> {
@@ -726,6 +738,7 @@ impl ShclDoc for Doc {
 		if self.newer > 0 {
 			return Err(too_new(self.newer).path(path));
 		}
+		crate::check_mode(path, opts.mode)?;
 		let (text, kept) = self.d.to_text_keep_lines();
 		let lost = self.d.lost_count();
 		if !kept && lost > 0 {
@@ -735,15 +748,24 @@ impl ShclDoc for Doc {
 		}
 		let text = if kept { text } else { self.d.to_canonical() };
 		let text = saved(&text, self.info, self.stamp).map_err(|e| e.path(path))?;
+		if opts.create {
+			crate::create_new(path, &text, opts.mode)?;
+		}
 		let Some(f) = self.file.as_mut().filter(|f| f.over(path)) else {
-			return write_atomic(path, &text);
+			return if opts.create {
+				Ok(())
+			} else {
+				write_mode(path, &text, opts.mode)
+			};
 		};
-		match self.up.as_mut().filter(|u| u.backup.is_empty()) {
-			Some(up) => {
-				up.backup = f.replace(path, &text, || keep_original(path, &f.text, up.from), opts.force)?;
-			}
-			None => {
-				f.replace(path, &text, || Ok(String::new()), opts.force)?;
+		if !opts.create {
+			match self.up.as_mut().filter(|u| u.backup.is_empty()) {
+				Some(up) => {
+					up.backup = f.replace(path, &text, || keep_original(path, &f.text, up.from), opts)?;
+				}
+				None => {
+					f.replace(path, &text, || Ok(String::new()), opts)?;
+				}
 			}
 		}
 		f.text = text;

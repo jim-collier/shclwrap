@@ -12,6 +12,7 @@ package shclw3
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
@@ -606,6 +607,9 @@ func (d *Doc) WriteWith(path string, o shclw.WriteOpts) error {
 	if d.newer > 0 {
 		return tooNew(path, d.newer)
 	}
+	if err := shclw.CheckMode(path, o.Mode); err != nil {
+		return err
+	}
 	text, kept := d.d.ToTextKeepLines()
 	if lost := d.d.LostCount(); !kept && lost > 0 {
 		return &shclw.Error{Kind: shclw.ErrRefused, Path: path,
@@ -620,14 +624,28 @@ func (d *Doc) WriteWith(path string, o shclw.WriteOpts) error {
 		return err
 	}
 	f := d.file
+	if o.Create {
+		if err := shclw.CreateNew(path, text, o.Mode); err != nil {
+			return err
+		}
+		if f != nil && f.over(path) {
+			f.text, f.gone = text, false
+			f.st, _ = os.Stat(path)
+		}
+		return nil
+	}
+	write := writeAtomic
+	if o.Mode != 0 {
+		write = writeMode(o.Mode)
+	}
 	if f == nil || !f.over(path) {
-		return writeAtomic(path, text)
+		return write(path, text)
 	}
 	var backup func() (string, error)
 	if d.up != nil && d.up.backup == "" {
 		backup = keepOriginal(path, f.text, d.up.from)
 	}
-	name, err := f.replace(path, text, backup, o.Force)
+	name, err := f.replace(path, text, backup, o.Force, write)
 	if err != nil {
 		return err
 	}
@@ -642,21 +660,36 @@ func (d *Doc) WriteWith(path string, o shclw.WriteOpts) error {
 // replace writes text over the file Open read, unless it changed since.
 // Only the moment between the last check and the rename is left open
 // (design.md, Loading and saving).
-func (f *readFile) replace(path, text string, backup func() (string, error), force bool) (string, error) {
+func (f *readFile) replace(path, text string, backup func() (string, error), force bool, write func(path, text string) error) (string, error) {
 	was := f.text
 	if force {
 		now, err := shclw.ReadText(path)
 		if err != nil {
-			return "", writeAtomic(path, text)
+			return "", write(path, text)
 		}
 		was = now
 	} else if f.gone {
 		if _, err := os.Lstat(path); err == nil {
 			return "", shclw.Changed(path)
 		}
-		return "", writeAtomic(path, text)
+		return "", write(path, text)
 	}
-	return shclw.ReplaceRead(path, was, text, backup, writeAtomic)
+	return shclw.ReplaceRead(path, was, text, backup, write)
+}
+
+// writeMode is writeAtomic where a file it creates gets mode. One that's
+// there keeps its own, as shcl's atomic write keeps it.
+func writeMode(mode fs.FileMode) func(path, text string) error {
+	return func(path, text string) error {
+		if _, err := os.Lstat(path); err == nil {
+			return writeAtomic(path, text)
+		}
+		err := shclw.CreateNew(path, text, mode)
+		if shclw.KindOf(err) == shclw.ErrExists {
+			return writeAtomic(path, text) // made in the meantime
+		}
+		return err
+	}
 }
 
 func writeAtomic(path, text string) error {

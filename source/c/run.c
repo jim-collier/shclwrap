@@ -17,6 +17,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #ifdef _WIN32
 #include <io.h>
 #else
@@ -611,7 +612,27 @@ static void write_(runner *r, const fields *f) {
 	}
 	shclw_write_opts o;
 	memset(&o, 0, sizeof o);
-	o.force = !strcmp(arg(f, 2), "force");
+	bool bad = false;
+	for (size_t i = 2; i < f->n && !bad; i++) {
+		const char *flag = f->v[i];
+		if (!strcmp(flag, "force")) {
+			o.force = true;
+		} else if (!strcmp(flag, "create")) {
+			o.create = true;
+		} else if (!strncmp(flag, "mode=", 5) && flag[5] >= '0' && flag[5] <= '7') {
+			char *end = NULL;
+			unsigned long m = strtoul(flag + 5, &end, 8);
+			bad = *end != '\0' || m > 07777777;
+			o.mode = (unsigned)m;
+		} else {
+			bad = true;
+		}
+	}
+	if (bad) {
+		free(path);
+		line_out(r, "error badvalue");
+		return;
+	}
 	shclw_kind k = shclw_write_with(r->doc, path, &o, NULL);
 	char *saved = NULL;
 	size_t n = 0;
@@ -626,6 +647,24 @@ static void write_(runner *r, const fields *f) {
 	line_out(r, "ok");
 	block(r, saved, n);
 	free(saved);
+}
+
+// A file's permission bits.
+static void mode(runner *r, const fields *f) {
+	char *path = file(r, arg(f, 1));
+	if (!path) {
+		return;
+	}
+	struct stat st;
+	int rc = stat(path, &st);
+	free(path);
+	if (rc != 0) {
+		line_out(r, "error io");
+		return;
+	}
+	char bits[8];
+	(void)snprintf(bits, sizeof bits, "%04o", (unsigned)st.st_mode & 0777u);
+	line_out(r, bits);
 }
 
 // Writes text to a file as another program would, behind the document's back.
@@ -1180,6 +1219,7 @@ static void op_readonly(runner *r, const fields *f) {
 	line_out(r, shclw_read_only(r->doc) ? "true" : "false");
 }
 static void op_scribble(runner *r, const fields *f) { scribble(r, f); }
+static void op_mode(runner *r, const fields *f) { mode(r, f); }
 static void op_rewrites(runner *r, const fields *f) {
 	(void)f;
 	line_out(r, shclw_rewrites(r->doc) ? "true" : "false");
@@ -1255,6 +1295,7 @@ static const struct {
 	{"files",     op_files},
 	{"readonly",  op_readonly},
 	{"scribble",  op_scribble},
+	{"mode",      op_mode},
 };
 // clang-format on
 

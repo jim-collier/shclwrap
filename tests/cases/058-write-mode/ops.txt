@@ -1,0 +1,22 @@
+# A mode goes on a file the Write creates, exactly, past the umask.
+write	secret.shcl	mode=0600
+mode	secret.shcl
+write	open.shcl	create	mode=0666
+mode	open.shcl
+# A file that's there keeps its own.
+write	secret.shcl	mode=0644
+mode	secret.shcl
+open	secret.shcl
+put	int	a	4
+write	secret.shcl	mode=0644
+mode	secret.shcl
+write	secret.shcl	force	mode=0644
+mode	secret.shcl
+# A user file that wasn't there gets it too.
+layers	=a: 1\n	user.shcl
+write	user.shcl	mode=0640
+mode	user.shcl
+# More than permission bits is refused, and nothing is written.
+write	sticky.shcl	mode=01644
+write	sticky.shcl	mode=9
+files

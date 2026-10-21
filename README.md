@@ -59,6 +59,8 @@ If your program uses one shcl version and doesn't plan to move, you don't need t
 
 - A save over a file another program changed since it was read is refused too, so that program's edit isn't lost. A program that means to replace it can force the save.
 
+- A save can be create-only, which fails when the file is already there, even with 2 programs saving it at once. A new file can get an exact mode, such as 0600 for one holding tokens.
+
 - Old files are upgraded as they're opened, in memory. The first save keeps the original beside it, and a program that only reads never writes.
 
 - Layered config: defaults, then a site file, then the user's file, read as one document. Edits and saves go to the user's file only, and a missing site or user file is fine.

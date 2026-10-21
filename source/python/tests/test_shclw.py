@@ -11,7 +11,9 @@ import os
 import subprocess
 import sys
 import tempfile
+import threading
 import unittest
+from collections.abc import Callable
 from pathlib import Path
 
 import shclw
@@ -152,3 +154,42 @@ class Api(unittest.TestCase):
 
 if __name__ == "__main__":
 	unittest.main()
+
+
+class CreateRace(unittest.TestCase):
+	"""Of several creates of one name at once, exactly one wins, and the file
+	is all of the winner's text."""
+
+	def race(self, create: Callable[[str, str, int | None], None]) -> None:
+		for _ in range(20):
+			with tempfile.TemporaryDirectory() as tmp:
+				path = os.path.join(tmp, "a.shcl")
+				start = threading.Barrier(8)
+				outcome: dict[int, str] = {}
+
+				def racer(i: int, path: str, start: threading.Barrier, outcome: dict[int, str]) -> None:
+					start.wait()
+					try:
+						create(path, f"v: {i}\n" * 5000, 0o600)
+						outcome[i] = "won"
+					except shclw.Error as e:
+						outcome[i] = e.kind.value
+
+				threads = [threading.Thread(target=racer, args=(i, path, start, outcome)) for i in range(8)]
+				for t in threads:
+					t.start()
+				for t in threads:
+					t.join()
+				won = [i for i, o in outcome.items() if o == "won"]
+				self.assertEqual(len(won), 1, outcome)
+				self.assertEqual(sorted(set(outcome.values())), ["exists", "won"])
+				self.assertEqual(Path(path).read_text(), f"v: {won[0]}\n" * 5000)
+				self.assertEqual(os.listdir(tmp), ["a.shcl"])
+				if os.name != "nt":
+					self.assertEqual(os.stat(path).st_mode & 0o777, 0o600)
+
+	def test_link(self) -> None:
+		self.race(shclw.create_new)
+
+	def test_in_place(self) -> None:
+		self.race(shclw._create_in_place)  # noqa: SLF001 - the no-hard-link path

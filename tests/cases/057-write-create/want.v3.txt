@@ -1,0 +1,34 @@
+> write	new.shcl	create
+ok
+| a: 1
+> put	int	b	2
+ok
+> write	new.shcl	create
+error exists
+> get	int	b
+Good	0	2
+> open	doc.shcl
+ok
+> put	int	a	2
+ok
+> write	doc.shcl	create
+error exists
+> write	doc.shcl	create	force
+error exists
+> layers	=a: 1\n	user.shcl
+ok
+> put	int	a	3
+ok
+> write	user.shcl	create
+ok
+| a: 3
+> write	user.shcl	create
+error exists
+> write	user.shcl
+ok
+| a: 3
+> files
+doc.shcl
+new.shcl
+ops.txt
+user.shcl

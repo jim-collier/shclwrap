@@ -17,6 +17,13 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#ifdef _WIN32
+#include <io.h>
+#include <windows.h>
+#else
+#include <fcntl.h>
+#include <unistd.h>
+#endif
 
 const char *shclw_status_name(shclw_status s) {
 	switch (s) {
@@ -45,6 +52,7 @@ const char *shclw_kind_name(shclw_kind k) {
 	case SHCLW_ERR_BACKUP_TAKEN: return "backuptaken";
 	case SHCLW_ERR_NO_READ_BACK: return "noreadback";
 	case SHCLW_ERR_CHANGED: return "changed";
+	case SHCLW_ERR_EXISTS: return "exists";
 	case SHCLW_ERR_NO_MEMORY: return "nomemory";
 	}
 	return "unknown";
@@ -1415,3 +1423,224 @@ shclw_merge *shclw_i_merges_of(const shclw_i_source *srcs, size_t n_srcs, size_t
 	free(c.stack);
 	return out;
 }
+
+shclw_kind shclw_i_check_mode(const char *path, unsigned mode, shclw_error *err) {
+	if (mode & ~0777u) {
+		char why[64];
+		(void)snprintf(why, sizeof why, "mode %#o is more than permission bits", mode);
+		return shclw_i_fail(err, SHCLW_ERR_BAD_VALUE, path, why, 0);
+	}
+	return shclw_i_ok(err);
+}
+
+static shclw_kind exists(const char *path, shclw_error *err) {
+	return shclw_i_fail(err, SHCLW_ERR_EXISTS, path, "already there; nothing written", 0);
+}
+
+static shclw_kind create_failed(const char *path, int e, shclw_error *err) {
+	return shclw_i_fail(err, e == ENOENT ? SHCLW_ERR_NOT_FOUND : SHCLW_ERR_IO, path, strerror(e), e);
+}
+
+// A name beside path for the new text: the folder, then at most 64 bytes of
+// the base, cut where a character starts, as shcl cuts its temp names.
+static char *temp_name(const char *path, int attempt) {
+	const char *slash = strrchr(path, '/');
+#ifdef _WIN32
+	const char *back = strrchr(path, '\\');
+	if (back && (!slash || back > slash)) {
+		slash = back;
+	}
+#endif
+	size_t dlen = slash ? (size_t)(slash - path) + 1 : 0;
+	const char *base = path + dlen;
+	size_t cut = strlen(base);
+	if (cut > 64) {
+		cut = 64;
+		while (cut > 0 && ((unsigned char)base[cut] & 0xC0) == 0x80) {
+			cut--;
+		}
+	}
+	size_t n = dlen + cut + 64;
+	char *tmp = (char *)malloc(n);
+	if (!tmp) {
+		return NULL;
+	}
+	// A local's address differs between threads racing in one process.
+#ifdef _WIN32
+	long pid = (long)GetCurrentProcessId();
+#else
+	long pid = (long)getpid();
+#endif
+	(void)snprintf(tmp, n, "%.*s.%.*s.new%ld.%lx.%d", (int)dlen, path, (int)cut, base, pid,
+	               (unsigned long)(uintptr_t)&attempt, attempt);
+	return tmp;
+}
+
+#ifdef _WIN32
+
+// Writes data to a new file and syncs it. Returns 0 or an errno.
+static int write_new_file(const char *path, const char *data, size_t len) {
+	FILE *f = fopen(path, "wbx");
+	if (!f) {
+		return errno == EEXIST ? EEXIST : (errno ? errno : EIO);
+	}
+	int e = fwrite(data, 1, len, f) == len && fflush(f) == 0 && _commit(_fileno(f)) == 0 ? 0 : EIO;
+	if (fclose(f) != 0 && !e) {
+		e = EIO;
+	}
+	if (e) {
+		(void)remove(path); // ours, made just above
+	}
+	return e;
+}
+
+// Windows moves a file into place only when nothing is there, without a hard
+// link. There's no Unix mode to give it.
+shclw_kind shclw_i_create_new(const char *path, const char *data, size_t len, unsigned mode, shclw_error *err) {
+	shclw_kind k = shclw_i_check_mode(path, mode, err);
+	if (k != SHCLW_OK) {
+		return k;
+	}
+	char *tmp = NULL;
+	int e = EEXIST;
+	for (int attempt = 0; attempt < 8 && e == EEXIST; attempt++) {
+		free(tmp);
+		tmp = temp_name(path, attempt);
+		if (!tmp) {
+			return shclw_i_fail(err, SHCLW_ERR_NO_MEMORY, path, NULL, 0);
+		}
+		e = write_new_file(tmp, data, len);
+	}
+	if (e) {
+		free(tmp);
+		return create_failed(path, e, err);
+	}
+	if (MoveFileExA(tmp, path, MOVEFILE_WRITE_THROUGH)) {
+		free(tmp);
+		return shclw_i_ok(err);
+	}
+	DWORD w = GetLastError();
+	(void)remove(tmp);
+	free(tmp);
+	if (w == ERROR_ALREADY_EXISTS || w == ERROR_FILE_EXISTS) {
+		return exists(path, err);
+	}
+	return create_failed(path, w == ERROR_PATH_NOT_FOUND ? ENOENT : EIO, err);
+}
+
+#else
+
+// Writes data, sets mode, syncs, and closes fd. Returns 0 or an errno.
+static int fill(int fd, const char *data, size_t len, unsigned mode) {
+	int e = 0;
+	while (len > 0) {
+		ssize_t n = write(fd, data, len);
+		if (n < 0) {
+			if (errno == EINTR) {
+				continue;
+			}
+			e = errno;
+			break;
+		}
+		data += n;
+		len -= (size_t)n;
+	}
+	if (!e && mode && fchmod(fd, (mode_t)mode) != 0) {
+		e = errno;
+	}
+	if (!e && fsync(fd) != 0) {
+		e = errno;
+	}
+	if (close(fd) != 0 && !e) {
+		e = errno;
+	}
+	return e;
+}
+
+// One with a mode is born private, and gets its mode exactly in fill, past
+// the umask.
+static int open_new(const char *path, unsigned mode) {
+	return open(path, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, mode ? 0600 : 0666);
+}
+
+static void sync_dir(const char *path) {
+	const char *slash = strrchr(path, '/');
+	char *dir = slash ? shclw_i_dup(path, (size_t)(slash - path) + 1, NULL) : NULL;
+	int fd = open(dir ? dir : ".", O_RDONLY | O_CLOEXEC);
+	free(dir);
+	if (fd >= 0) {
+		(void)fsync(fd); // some filesystems can't; the file itself is synced
+		(void)close(fd);
+	}
+}
+
+// shclw_i_create_new without a temp, for a filesystem with no hard links. A
+// crash part way leaves part of the file.
+static shclw_kind create_in_place(const char *path, const char *data, size_t len, unsigned mode, shclw_error *err) {
+	int fd = open_new(path, mode);
+	if (fd < 0) {
+		return errno == EEXIST ? exists(path, err) : create_failed(path, errno, err);
+	}
+	int e = fill(fd, data, len, mode);
+	if (e) {
+		(void)unlink(path); // ours, made just above
+		return create_failed(path, e, err);
+	}
+	sync_dir(path);
+	return shclw_i_ok(err);
+}
+
+static bool no_links(int e) {
+#if EOPNOTSUPP != ENOTSUP
+	if (e == EOPNOTSUPP) {
+		return true;
+	}
+#endif
+	return e == EPERM || e == ENOTSUP || e == ENOSYS;
+}
+
+// The text is synced under a temp name and hard-linked into place, so the
+// name never holds part of it, and of 2 creates at once exactly one wins.
+shclw_kind shclw_i_create_new(const char *path, const char *data, size_t len, unsigned mode, shclw_error *err) {
+	shclw_kind k = shclw_i_check_mode(path, mode, err);
+	if (k != SHCLW_OK) {
+		return k;
+	}
+	char *tmp = NULL;
+	int fd = -1;
+	for (int attempt = 0; attempt < 8 && fd < 0; attempt++) {
+		free(tmp);
+		tmp = temp_name(path, attempt);
+		if (!tmp) {
+			return shclw_i_fail(err, SHCLW_ERR_NO_MEMORY, path, NULL, 0);
+		}
+		fd = open_new(tmp, mode);
+		if (fd < 0 && errno != EEXIST) {
+			break;
+		}
+	}
+	if (fd < 0) {
+		int e = errno;
+		free(tmp);
+		return create_failed(path, e, err);
+	}
+	int e = fill(fd, data, len, mode);
+	if (!e && link(tmp, path) != 0) {
+		e = errno;
+		(void)unlink(tmp);
+		free(tmp);
+		if (e == EEXIST) {
+			return exists(path, err);
+		}
+		return no_links(e) ? create_in_place(path, data, len, mode, err) : create_failed(path, e, err);
+	}
+	(void)unlink(tmp);
+	free(tmp);
+	if (e) {
+		return create_failed(path, e, err);
+	}
+	sync_dir(path);
+	return shclw_i_ok(err);
+}
+
+#endif

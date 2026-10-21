@@ -1,0 +1,17 @@
+# Create writes only where nothing is there yet.
+write	new.shcl	create
+put	int	b	2
+write	new.shcl	create
+get	int	b
+# It won't replace the file Open read, Force or not.
+open	doc.shcl
+put	int	a	2
+write	doc.shcl	create
+write	doc.shcl	create	force
+# A user file that wasn't there is made by it.
+layers	=a: 1\n	user.shcl
+put	int	a	3
+write	user.shcl	create
+write	user.shcl	create
+write	user.shcl
+files
