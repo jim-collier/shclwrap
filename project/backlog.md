@@ -125,6 +125,23 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Acceptance signoff: Self-closed: the flags were in, and now have a regression test.
 	- Closed: 2026-10-21
 
+- shcl analyzer probe fails under the container's clang
+	- ID: 2026102113502809
+	- Type: Bug
+	- Status: Queued
+	- Severity: High
+	- Opened: 2026-10-21
+	- Related IDs: 2026101916500102
+	- Steps to reproduce [Bug]:
+		- Push branch `wip/round-1021-2026101916500102`, or run `cicd.bash --ci` on it.
+	- Incorrect behavior [Bug]:
+		- The lint stage stops with "analyze-shcl missed the planted double free (shcl3.clang)".
+	- Expected behavior [Bug]:
+		- clang flags the planted double free in the stand-in `shcl.h`, as it did with clang 19 on the host.
+	- Reproduced [Bug]: 2026-10-21, in the pre-push gate. The container has clang-22.
+	- Possible cause [Bug]: clang-22 handles the header flag or the probe differently. Not looked at yet.
+	- Branch: wip/round-1021-2026101916500102 (`eda48d5`). It also has the backlog edits for 2026101916500102 and the new item 2026102113393169, which aren't on the round branch yet.
+
 - Leak tests and all tests cover third-party and vendored code
 	- ID: 2026101916500102
 	- Type: Enhancement
@@ -138,6 +155,9 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Notes:
 		- Pre-next-cut.
 		- This may only affect what's already written in the backlog, and/or done.
+	- Progress log:
+		- 2026-10-21: the sanitizers already build shcl's code, but gcc's and clang's analyzers skipped it as a system header, and CodeQL's root left it out. A fix adds `make analyze-shcl` with a planted-fault probe, and moves CodeQL's root up. It passed on the host but failed the gate in the container. See 2026102113502809.
+	- Branch: wip/round-1021-2026101916500102
 
 - Layered loading
 	- ID: 2026101512024156
