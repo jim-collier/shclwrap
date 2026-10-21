@@ -230,6 +230,23 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- Each project's other workarounds have their own items, with the project named in the item.
 		- 2026-10-21: waits on a go-ahead to edit the other repos, and which one goes first. Asked in the round's questions file.
 
+- clang-tidy refuses a cast in the upgrade line lists
+	- ID: 2026102114534365
+	- Type: Bug
+	- Status: Queued
+	- Severity: Avg
+	- Opened: 2026-10-21
+	- Related IDs: 2026101513330012, 2026101513330013
+	- Steps to reproduce [Bug]:
+		- Run `cicd.bash --ci` on branch `wip/round-1021-2026101513330012`.
+	- Incorrect behavior [Bug]:
+		- The C lint stage stops on `shclw.c:948`, "do not cast 'char *' to 'size_t *' through 'void *'" (bugprone-casting-through-void).
+	- Expected behavior [Bug]:
+		- clang-tidy passes, as it did before the line lists were added.
+	- Reproduced [Bug]: 2026-10-21, in the pre-push gate.
+	- Possible cause [Bug]: the lists sit inside the result's single memory block, and the code reaches them by a byte offset. The quick checks don't run clang-tidy.
+	- Branch: wip/round-1021-2026101513330012 (`0150af2`). It also has the design.md and backlog notes for both items.
+
 - Report blocks that shcl merged because they share a name
 	- ID: 2026101513330009
 	- Type: Feature
@@ -249,6 +266,9 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Opened: 20261015-133300
 	- Opened by: JC
 	- Note: Quillroute diffs the text line by line to say how many lines were written differently.
+	- Progress log:
+		- 2026-10-21: built in all 4 languages with `Lost` and `Rewritten` line lists on the upgrade result. The quick checks passed, but clang-tidy failed the gate. See 2026102114534365.
+	- Branch: wip/round-1021-2026101513330012
 
 - Upgrade lists the lines it lost
 	- ID: 2026101513330013
@@ -260,6 +280,9 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Requirements:
 		- Line numbers, not only a count.
 	- Note: Cobblevale logs them, and its CI checks the count. Wovenshell shows a notice for each one. A 1.x line break in a bare value that looks like a Windows path counts as lost, though 3.0 could write it as `\u000A`.
+	- Progress log:
+		- 2026-10-21: built in all 4 languages with `Lost` and `Rewritten` line lists on the upgrade result. The quick checks passed, but clang-tidy failed the gate. See 2026102114534365.
+	- Branch: wip/round-1021-2026101513330012
 
 - Open a newer-format file read-only
 	- ID: 2026101513330014
