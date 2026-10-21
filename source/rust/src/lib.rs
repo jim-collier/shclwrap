@@ -22,7 +22,9 @@
 
 use std::fmt::{self, Write as _};
 use std::fs;
+use std::io::{self, Write as _};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 mod info;
 pub use info::{finish_info, Info, InfoEdit};
@@ -77,18 +79,50 @@ impl fmt::Display for Severity {
 }
 
 /// One diagnostic from a load or a schema check. `line` is 1-based.
+/// `layer` is the 1-based place in `open_layers`' list of the layer the line
+/// is in, or 0 for a document that isn't layered.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Diag {
 	pub line: usize,
 	pub severity: Severity,
 	pub code: &'static str,
 	pub message: String,
+	pub layer: usize,
 }
 
 impl fmt::Display for Diag {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		if self.layer > 0 {
+			write!(f, "layer {} ", self.layer)?;
+		}
 		write!(f, "line {}: {} {}", self.line, self.code, self.message)
 	}
+}
+
+/// A line in a loaded document. `layer` is as in `Diag`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Spot {
+	pub layer: usize,
+	pub line: usize,
+}
+
+/// A name shcl kept one copy of, since a later copy had the same name and
+/// value and was folded into it. `lines` is the kept copy's line, then each
+/// later copy's. `path` reads the kept copy, as a `Node::path` does, and
+/// `layer` is as in `Diag`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Merge {
+	pub path: String,
+	pub lines: Vec<usize>,
+	pub layer: usize,
+}
+
+/// One layer for `open_layers`: a file, or text the program has, such as
+/// its defaults or this run's command line.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Layer<'a> {
+	File(&'a str),
+	Text(&'a str),
 }
 
 /// A read with its status. Check `status` before trusting `value`. `text`
@@ -131,6 +165,8 @@ pub enum ErrKind {
 	Ambiguous,
 	BackupTaken,
 	NoReadBack,
+	Changed,
+	Exists,
 }
 
 impl fmt::Display for ErrKind {
@@ -147,6 +183,8 @@ impl fmt::Display for ErrKind {
 			ErrKind::Ambiguous => "ambiguous",
 			ErrKind::BackupTaken => "backuptaken",
 			ErrKind::NoReadBack => "noreadback",
+			ErrKind::Changed => "changed",
+			ErrKind::Exists => "exists",
 		})
 	}
 }
@@ -294,6 +332,22 @@ impl From<&[f64]> for Value {
 	}
 }
 
+/// What a write does. The default is a plain `write`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct WriteOpts {
+	/// Writes over the file `open` read even when it changed on disk since.
+	/// It doesn't write over a file in a newer format.
+	pub force: bool,
+	/// Writes only where nothing is there yet, and is `Exists` otherwise,
+	/// even with 2 programs creating the file at once. It never replaces, so
+	/// there's no changed check for `force` to skip.
+	pub create: bool,
+	/// The permission bits a file this write creates gets, exactly, with no
+	/// umask. `None` is a plain create's 0666 less the umask. A file that's
+	/// already there keeps its own mode. Windows ignores it.
+	pub mode: Option<u32>,
+}
+
 /// What every module's document does. Bring it into scope to call the
 /// methods: `use shclw::ShclDoc;`.
 pub trait ShclDoc {
@@ -302,8 +356,17 @@ pub trait ShclDoc {
 	/// The document in canonical form.
 	fn canonical(&self) -> String;
 	/// Saves `text()` atomically. The first write over a file `open`
-	/// upgraded backs up the original first, as `upgrade_file` does.
-	fn write(&mut self, path: &str) -> Result<(), Error>;
+	/// upgraded backs up the original first, as `upgrade_file` does. A write
+	/// over the file `open` read is `Changed` when it changed on disk since,
+	/// and a document read from a newer format is `TooNew`.
+	fn write(&mut self, path: &str) -> Result<(), Error> {
+		self.write_with(path, &WriteOpts::default())
+	}
+	/// `write` with options.
+	fn write_with(&mut self, path: &str, opts: &WriteOpts) -> Result<(), Error>;
+	/// Whether the document was read from a newer format, which `write`
+	/// refuses with `TooNew`.
+	fn read_only(&self) -> bool;
 	/// Whether `write` puts the canonical form in place of the lines the
 	/// document was loaded from, so lines no edit touched can change. A file
 	/// `open` upgraded is rewritten until the first write over it.
@@ -318,6 +381,14 @@ pub trait ShclDoc {
 	fn diags(&self) -> Vec<Diag>;
 	/// Counts error diagnostics.
 	fn errors(&self) -> usize;
+	/// The lines the load couldn't use, which are the lines with an error,
+	/// once each.
+	fn unused(&self) -> Vec<Spot> {
+		unused_of(&self.diags())
+	}
+	/// Each name the load kept one copy of, since a later copy had the same
+	/// name and value, with every copy's line.
+	fn merged(&self) -> Vec<Merge>;
 	/// Validates this document against a schema document.
 	fn check(&self, schema: &Self) -> Vec<Diag>;
 	/// Takes out the hints for keys this schema says repeat.
@@ -407,6 +478,7 @@ pub trait Lib {
 	/// A load at `level`, with the document back even when it fails.
 	fn parse_keep(text: &str, level: Strictness) -> (Self::Doc, Option<Error>);
 	fn open_with(path: &str, level: Strictness) -> Result<Self::Doc, Error>;
+	fn open_layers(layers: &[Layer]) -> Result<Self::Doc, Error>;
 	fn format_of(text: &str) -> u32;
 	fn upgrade(text: &str, from: u32) -> Result<Upgraded, Error>;
 }
@@ -514,6 +586,130 @@ pub fn verify_syntax<D: ShclDoc>(d: &D, path: &str, alone: &D, line: &D) -> Resu
 	Ok(())
 }
 
+/// The lines with an error in `ds`, once each, by layer then line. An error
+/// on no line, such as one about the whole file, has no line to give.
+pub fn unused_of(ds: &[Diag]) -> Vec<Spot> {
+	let mut out: Vec<Spot> = ds
+		.iter()
+		.filter(|g| g.severity == Severity::Error && g.line > 0)
+		.map(|g| Spot {
+			layer: g.layer,
+			line: g.line,
+		})
+		.collect();
+	out.sort_unstable();
+	out.dedup();
+	out
+}
+
+fn walk<D: ShclDoc>(x: &D, path: &str, see: &mut dyn FnMut(&str, &str, &Node) -> bool) {
+	for name in x.names(path) {
+		for n in x.each(&x.child(path, &name)) {
+			if see(path, &name, &n) {
+				walk(x, &n.path, see);
+			}
+		}
+	}
+}
+
+fn probe_name(line: usize) -> String {
+	format!("shclwprobe{line}x")
+}
+
+/// The copies shcl folded into an earlier one in `text`, apart or not
+/// (shcl's H002 only says so when they're apart). A folded copy's line is
+/// on no node, so each such line gets its name made unique and the text is
+/// parsed again, where the copy then stands alone (design.md, Decisions).
+pub fn merges_of<D: ShclDoc>(text: &str, parse: impl Fn(&str) -> D, layer: usize) -> Vec<Merge> {
+	use std::collections::{HashMap, HashSet};
+	let d = parse(text);
+	let mut at: HashMap<usize, String> = HashMap::new();
+	walk(&d, "", &mut |_, _, n| {
+		if n.line > 0 {
+			at.insert(n.line, n.path.clone());
+		}
+		true
+	});
+	let bad: HashSet<usize> = d
+		.diags()
+		.iter()
+		.filter(|g| g.severity == Severity::Error)
+		.map(|g| g.line)
+		.collect();
+	let mut probe: Vec<String> = Vec::new();
+	let mut folded = HashSet::new();
+	for (i, l) in text.split('\n').enumerate() {
+		let n = i + 1;
+		let body = l.trim_start_matches([' ', '\t']);
+		let indent = &l[..l.len() - body.len()];
+		let c = body.bytes().next().unwrap_or(b' ');
+		if at.contains_key(&n) || bad.contains(&n) || body.is_empty() {
+			probe.push(l.to_owned());
+		} else if c == b'"' || c == b'\'' {
+			probe.push(format!("{indent}{}{}{}", &body[..1], probe_name(n), &body[1..]));
+			folded.insert(n);
+		} else if c >= 0x80 || c.is_ascii_alphabetic() {
+			probe.push(format!("{indent}{}{body}", probe_name(n)));
+			folded.insert(n);
+		} else {
+			probe.push(l.to_owned());
+		}
+	}
+	let mut out: Vec<Merge> = Vec::new();
+	if folded.is_empty() {
+		return out;
+	}
+	let p = parse(&probe.join("\n"));
+	let mut slot: HashMap<String, usize> = HashMap::new();
+	// The path in `d` of the node a probe node stands for.
+	let mut orig: HashMap<String, String> = HashMap::from([(String::new(), String::new())]);
+	walk(&p, "", &mut |parent, name, n| {
+		if !folded.contains(&n.line) {
+			let o = at.get(&n.line).cloned();
+			let ok = o.is_some();
+			orig.insert(n.path.clone(), o.unwrap_or_default());
+			return ok;
+		}
+		let Some(up) = orig.get(parent).cloned() else {
+			return false;
+		};
+		let pre = probe_name(n.line);
+		let name = if name.to_ascii_lowercase().starts_with(&pre) {
+			&name[pre.len()..]
+		} else {
+			name
+		};
+		let kept = d
+			.each(&d.child(&up, name))
+			.into_iter()
+			.filter(|k| k.value == n.value && k.line > 0 && k.line < n.line)
+			.max_by_key(|k| k.line);
+		let Some(kept) = kept else { return false };
+		orig.insert(n.path.clone(), kept.path.clone());
+		// A dotted line folds each step; only its last one is the copy.
+		for c in p.names(&n.path) {
+			if p.each(&p.child(&n.path, &c)).iter().any(|k| k.line == n.line) {
+				return true;
+			}
+		}
+		let i = *slot.entry(kept.path.clone()).or_insert_with(|| {
+			out.push(Merge {
+				path: kept.path.clone(),
+				lines: vec![kept.line],
+				layer,
+			});
+			out.len() - 1
+		});
+		out[i].lines.push(n.line);
+		true
+	});
+	for m in &mut out {
+		m.lines.sort_unstable();
+	}
+	out.sort_by(|a, b| a.lines[0].cmp(&b.lines[0]).then_with(|| a.path.cmp(&b.path)));
+	out
+}
+
 /// Sorts instances by line. `each` goes in tree order, which for a reopened
 /// block isn't the order of the file. An instance a put made has no line,
 /// and goes after the rest in `each` order.
@@ -541,6 +737,156 @@ pub fn read_text(path: &str) -> Result<String, Error> {
 	}
 }
 
+/// The error for a file that changed on disk since it was read.
+pub fn changed(path: &str) -> Error {
+	Error::new(ErrKind::Changed)
+		.path(path)
+		.msg("changed since it was read; nothing written")
+}
+
+/// The error for a create-only write where the name is taken.
+pub fn exists(path: &str) -> Error {
+	Error::new(ErrKind::Exists)
+		.path(path)
+		.msg("already there; nothing written")
+}
+
+/// Refuses a `WriteOpts::mode` with more than permission bits in it.
+pub fn check_mode(path: &str, mode: Option<u32>) -> Result<(), Error> {
+	match mode {
+		Some(m) if m & !0o777 != 0 => Err(Error::new(ErrKind::BadValue)
+			.path(path)
+			.msg(format!("mode {m:#o} is more than permission bits"))),
+		_ => Ok(()),
+	}
+}
+
+static TEMP_SEQ: AtomicU64 = AtomicU64::new(0);
+
+/// Writes `data` to `path` only when nothing is there, and is `Exists`
+/// otherwise. The text is synced under a temp name and hard-linked into
+/// place, so the name never holds part of it, and of 2 creates at once
+/// exactly one wins. A filesystem with no hard links gets an exclusive
+/// create of `path` itself (design.md, Loading and saving).
+pub fn create_new(path: &str, data: &str, mode: Option<u32>) -> Result<(), Error> {
+	check_mode(path, mode)?;
+	let tmp = write_temp(path, data, mode).map_err(|e| create_err(path, &e))?;
+	let linked = fs::hard_link(&tmp, path);
+	let _ = fs::remove_file(&tmp);
+	match linked {
+		Ok(()) => {
+			sync_dir(path);
+			Ok(())
+		}
+		Err(e) if e.kind() == io::ErrorKind::AlreadyExists => Err(exists(path)),
+		Err(e) if matches!(e.kind(), io::ErrorKind::PermissionDenied | io::ErrorKind::Unsupported) => {
+			create_in_place(path, data, mode)
+		}
+		Err(e) => Err(create_err(path, &e)),
+	}
+}
+
+/// Writes `data` to a new file beside `path` and syncs it.
+fn write_temp(path: &str, data: &str, mode: Option<u32>) -> io::Result<PathBuf> {
+	let p = Path::new(path);
+	let dir = p
+		.parent()
+		.filter(|d| !d.as_os_str().is_empty())
+		.unwrap_or(Path::new("."));
+	let base = p.file_name().and_then(|b| b.to_str()).unwrap_or_default();
+	// shcl's temp names cut the base the same way, to stay under 255 bytes.
+	let mut cut = base.len().min(64);
+	while !base.is_char_boundary(cut) {
+		cut -= 1;
+	}
+	let mut last = io::Error::from(io::ErrorKind::AlreadyExists);
+	for _ in 0..8 {
+		let seq = TEMP_SEQ.fetch_add(1, Ordering::Relaxed);
+		let tmp = dir.join(format!(".{}.new{}.{seq}", &base[..cut], std::process::id()));
+		match open_new(&tmp, mode) {
+			Ok(f) => {
+				if let Err(e) = fill(f, data, mode) {
+					let _ = fs::remove_file(&tmp);
+					return Err(e);
+				}
+				return Ok(tmp);
+			}
+			Err(e) if e.kind() == io::ErrorKind::AlreadyExists => last = e,
+			Err(e) => return Err(e),
+		}
+	}
+	Err(last)
+}
+
+/// `create_new` without a temp, for a filesystem with no hard links. A
+/// crash part way leaves part of the file.
+fn create_in_place(path: &str, data: &str, mode: Option<u32>) -> Result<(), Error> {
+	let f = match open_new(Path::new(path), mode) {
+		Ok(f) => f,
+		Err(e) if e.kind() == io::ErrorKind::AlreadyExists => return Err(exists(path)),
+		Err(e) => return Err(create_err(path, &e)),
+	};
+	if let Err(e) = fill(f, data, mode) {
+		let _ = fs::remove_file(path); // ours, made just above
+		return Err(create_err(path, &e));
+	}
+	sync_dir(path);
+	Ok(())
+}
+
+/// One with a mode is born private, and gets its mode exactly in `fill`,
+/// past the umask.
+fn open_new(path: &Path, mode: Option<u32>) -> io::Result<fs::File> {
+	let mut o = fs::OpenOptions::new();
+	o.write(true).create_new(true);
+	#[cfg(unix)]
+	{
+		use std::os::unix::fs::OpenOptionsExt;
+		o.mode(if mode.is_some() { 0o600 } else { 0o666 });
+	}
+	#[cfg(not(unix))]
+	let _ = mode;
+	o.open(path)
+}
+
+fn fill(mut f: fs::File, data: &str, mode: Option<u32>) -> io::Result<()> {
+	f.write_all(data.as_bytes())?;
+	#[cfg(unix)]
+	{
+		use std::os::unix::fs::PermissionsExt;
+		if let Some(m) = mode {
+			f.set_permissions(fs::Permissions::from_mode(m))?;
+		}
+	}
+	#[cfg(not(unix))]
+	let _ = mode;
+	f.sync_all()
+}
+
+fn sync_dir(path: &str) {
+	#[cfg(unix)]
+	{
+		let dir = Path::new(path)
+			.parent()
+			.filter(|d| !d.as_os_str().is_empty())
+			.unwrap_or(Path::new("."));
+		if let Ok(d) = fs::File::open(dir) {
+			let _ = d.sync_all(); // some filesystems can't; the file itself is synced
+		}
+	}
+	#[cfg(not(unix))]
+	let _ = path;
+}
+
+fn create_err(path: &str, e: &io::Error) -> Error {
+	let kind = if e.kind() == io::ErrorKind::NotFound {
+		ErrKind::NotFound
+	} else {
+		ErrKind::Io
+	};
+	Error::new(kind).path(path).msg(e.to_string())
+}
+
 /// Whether `path` still holds `was`, byte for byte.
 pub fn unchanged(path: &str, was: &str) -> bool {
 	fs::read(path).is_ok_and(|b| b == was.as_bytes())
@@ -560,11 +906,7 @@ pub fn replace_read(
 	backup: impl FnOnce() -> Result<String, Error>,
 	write: impl FnOnce(&str, &str) -> Result<(), Error>,
 ) -> Result<String, Error> {
-	let changed = || {
-		Error::new(ErrKind::Io)
-			.path(path)
-			.msg("changed since it was read; nothing written")
-	};
+	let changed = || changed(path);
 	if !unchanged(path, was) {
 		return Err(changed());
 	}
@@ -755,6 +1097,8 @@ impl<L: Lib> Runner<'_, L> {
 		self.out.push('\n');
 	}
 
+	// One arm per op in design.md's table, so it's as long as that is.
+	#[allow(clippy::too_many_lines)]
 	fn op(&mut self, f: &[String]) {
 		let arg = |i: usize| f.get(i).map_or("", String::as_str);
 		let rest = |i: usize| f.get(i..).unwrap_or(&[]).to_vec();
@@ -765,6 +1109,22 @@ impl<L: Lib> Runner<'_, L> {
 			"rewrites" => self.say(&self.doc.rewrites().to_string()),
 			"diags" => self.diags(&self.doc.diags()),
 			"errors" => self.say(&self.doc.errors().to_string()),
+			"unused" => {
+				let spots = self.doc.unused();
+				let items = spots
+					.iter()
+					.map(|s| spot_text(s.line, s.layer))
+					.collect::<Vec<_>>()
+					.join("\t");
+				self.say(&counted(spots.len(), &items));
+			}
+			"merged" => {
+				for m in self.doc.merged() {
+					let mut items = vec![esc(&m.path)];
+					items.extend(m.lines.iter().map(|&n| spot_text(n, m.layer)));
+					self.say(&items.join("\t"));
+				}
+			}
 			"get" => {
 				let s = self.get(arg(1), arg(2));
 				self.say(&s);
@@ -832,8 +1192,12 @@ impl<L: Lib> Runner<'_, L> {
 			"check" => self.check(arg(1), arg(2)),
 			"format" => self.say(&L::format_of(self.input).to_string()),
 			"upgrade" => self.upgrade(arg(1)),
-			"write" => self.write(arg(1)),
+			"write" => self.write(arg(1), &rest(2)),
+			"mode" => self.mode(arg(1)),
+			"readonly" => self.say(&self.doc.read_only().to_string()),
+			"scribble" => self.scribble(arg(1), arg(2)),
 			"open" => self.open(arg(1), arg(2)),
+			"layers" => self.layers(&rest(1)),
 			"upgraded" => self.upgraded(),
 			"files" => self.files(),
 			_ => self.say("error unknownop"),
@@ -851,6 +1215,34 @@ impl<L: Lib> Runner<'_, L> {
 	fn open(&mut self, name: &str, level: &str) {
 		let Some(path) = self.file(name) else { return };
 		match L::open_with(&path.to_string_lossy(), strictness_of(level)) {
+			Ok(d) => {
+				self.doc = d;
+				self.say("ok");
+			}
+			Err(e) => {
+				self.say(&format!("error {}", e.kind));
+				self.diags(&e.diags);
+				self.doc = L::parse("");
+			}
+		}
+	}
+
+	/// File names, and text for a text layer after a "=".
+	fn layers(&mut self, specs: &[String]) {
+		let mut paths = Vec::with_capacity(specs.len());
+		for spec in specs {
+			if let Some(text) = spec.strip_prefix('=') {
+				paths.push((false, text.to_owned()));
+				continue;
+			}
+			let Some(path) = self.file(spec) else { return };
+			paths.push((true, path.to_string_lossy().into_owned()));
+		}
+		let layers: Vec<Layer> = paths
+			.iter()
+			.map(|(file, s)| if *file { Layer::File(s) } else { Layer::Text(s) })
+			.collect();
+		match L::open_layers(&layers) {
 			Ok(d) => {
 				self.doc = d;
 				self.say("ok");
@@ -906,7 +1298,8 @@ impl<L: Lib> Runner<'_, L> {
 
 	fn diags(&mut self, ds: &[Diag]) {
 		for d in ds {
-			self.say(&format!("{}\t{}\t{}\t{}", d.line, d.severity, d.code, esc(&d.message)));
+			let line = spot_text(d.line, d.layer);
+			self.say(&format!("{line}\t{}\t{}\t{}", d.severity, d.code, esc(&d.message)));
 		}
 	}
 
@@ -1050,10 +1443,21 @@ impl<L: Lib> Runner<'_, L> {
 		}
 	}
 
-	fn write(&mut self, name: &str) {
+	fn write(&mut self, name: &str, flags: &[String]) {
 		let Some(path) = self.file(name) else { return };
 		let path = path.to_string_lossy().into_owned();
-		if let Err(e) = self.doc.write(&path) {
+		let mut opts = WriteOpts::default();
+		for flag in flags {
+			match flag.as_str() {
+				"force" => opts.force = true,
+				"create" => opts.create = true,
+				_ => match flag.strip_prefix("mode=").map(|m| u32::from_str_radix(m, 8)) {
+					Some(Ok(m)) => opts.mode = Some(m),
+					_ => return self.say("error badvalue"),
+				},
+			}
+		}
+		if let Err(e) = self.doc.write_with(&path, &opts) {
 			return self.result(Some(e));
 		}
 		match read_text(&path) {
@@ -1062,6 +1466,25 @@ impl<L: Lib> Runner<'_, L> {
 				self.block(&t);
 			}
 			Err(e) => self.result(Some(e)),
+		}
+	}
+
+	/// Prints a file's permission bits.
+	fn mode(&mut self, name: &str) {
+		let Some(path) = self.file(name) else { return };
+		match fs::metadata(&path) {
+			Ok(m) => self.say(&format!("{:04o}", perm_bits(&m))),
+			Err(e) => self.result(Some(Error::new(ErrKind::Io).msg(e.to_string()))),
+		}
+	}
+
+	/// Writes `text` to a file as another program would, behind the
+	/// document's back.
+	fn scribble(&mut self, name: &str, text: &str) {
+		let Some(path) = self.file(name) else { return };
+		match fs::write(&path, text) {
+			Ok(()) => self.say("ok"),
+			Err(e) => self.result(Some(Error::new(ErrKind::Io).msg(e.to_string()))),
 		}
 	}
 
@@ -1167,6 +1590,15 @@ fn esc(s: &str) -> String {
 
 /// Puts an array's length before its items, so `[]` and `[""]` print
 /// differently.
+/// A line, with its layer in front on a layered document.
+fn spot_text(line: usize, layer: usize) -> String {
+	if layer > 0 {
+		format!("{layer}:{line}")
+	} else {
+		line.to_string()
+	}
+}
+
 fn counted(n: usize, items: &str) -> String {
 	if n == 0 {
 		"0".to_owned()
@@ -1189,3 +1621,82 @@ fn join_floats(v: &[f64]) -> String {
 
 #[cfg(feature = "shcl3")]
 pub mod v3;
+
+#[cfg(unix)]
+fn perm_bits(m: &fs::Metadata) -> u32 {
+	use std::os::unix::fs::PermissionsExt;
+	m.permissions().mode() & 0o777
+}
+
+// What Go reports for a Windows file.
+#[cfg(not(unix))]
+fn perm_bits(m: &fs::Metadata) -> u32 {
+	if m.permissions().readonly() {
+		0o444
+	} else {
+		0o666
+	}
+}
+
+#[cfg(test)]
+mod create_tests {
+	use super::{create_in_place, create_new, ErrKind, Error};
+	use std::fs;
+	use std::path::PathBuf;
+
+	fn text(i: usize) -> String {
+		format!("v: {i}\n").repeat(5000)
+	}
+
+	// Of several creates of one name at once, exactly one wins, and the file
+	// is all of the winner's text.
+	fn race(name: &str, create: fn(&str, &str, Option<u32>) -> Result<(), Error>) {
+		let base = std::env::var_os("TMPDIR").map_or_else(std::env::temp_dir, PathBuf::from);
+		for round in 0..20 {
+			let dir = base.join(format!("shclw-rust-{name}-{}-{round}", std::process::id()));
+			let _ = fs::remove_dir_all(&dir); // a dead run's, if the pid came around again
+			fs::create_dir_all(&dir).unwrap();
+			let path = dir.join("a.shcl").to_string_lossy().into_owned();
+			let results: Vec<_> = std::thread::scope(|s| {
+				let racers: Vec<_> = (0..8)
+					.map(|i| {
+						s.spawn({
+							let path = &path;
+							move || create(path, &text(i), Some(0o600))
+						})
+					})
+					.collect();
+				racers.into_iter().map(|r| r.join().unwrap()).collect()
+			});
+			let mut won = None;
+			for (i, r) in results.iter().enumerate() {
+				match r {
+					Ok(()) => {
+						assert!(won.is_none(), "2 racers won");
+						won = Some(i);
+					}
+					Err(e) => assert_eq!(e.kind, ErrKind::Exists, "racer {i}: {e:?}"),
+				}
+			}
+			let won = won.expect("nobody won");
+			assert_eq!(fs::read_to_string(&path).unwrap(), text(won));
+			assert_eq!(fs::read_dir(&dir).unwrap().count(), 1);
+			#[cfg(unix)]
+			{
+				use std::os::unix::fs::PermissionsExt;
+				assert_eq!(fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
+			}
+			fs::remove_dir_all(&dir).unwrap(); // made above
+		}
+	}
+
+	#[test]
+	fn create_race_link() {
+		race("create-link", create_new);
+	}
+
+	#[test]
+	fn create_race_in_place() {
+		race("create-inplace", create_in_place);
+	}
+}

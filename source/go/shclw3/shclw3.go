@@ -12,6 +12,7 @@ package shclw3
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
@@ -37,6 +38,9 @@ type (
 	Error      = shclw.Error
 	ErrKind    = shclw.ErrKind
 	Upgraded   = shclw.Upgraded
+	Layer      = shclw.Layer
+	Spot       = shclw.Spot
+	Merge      = shclw.Merge
 )
 
 const (
@@ -61,16 +65,33 @@ type Doc struct {
 	info  shclw.Info
 	stamp bool
 	up    *upgradedFile
+	file  *readFile
+	lay   *layerSet
+	src   string // the text as loaded, for Merged
+	newer int    // the newer format the text names, which makes it read-only
 }
 
-// upgradedFile is the file Open upgraded, kept until the first Write over it
-// backs it up.
+// layerSet is what OpenLayers read. d is then their merge, rebuilt after
+// each edit, and edits and saves go to docs[edit].
+type layerSet struct {
+	docs []*Doc // nil for a file that wasn't there
+	edit int
+}
+
+// upgradedFile is the format Open upgraded the file from, and where the
+// first Write over it put the original.
 type upgradedFile struct {
 	from   int
-	path   string
-	st     os.FileInfo
-	text   string
 	backup string
+}
+
+// readFile is the file Open read, as it was then, so Write can tell it
+// changed since. After a Write over it, it's what that Write left.
+type readFile struct {
+	path string
+	st   os.FileInfo
+	text string
+	gone bool // an OpenLayers user file that wasn't there
 }
 
 var _ shclw.Doc = (*Doc)(nil)
@@ -83,6 +104,7 @@ var Lib = shclw.Lib{
 	Parse:       func(text string) shclw.Doc { return Parse(text) },
 	ParseWith:   func(text string, s Strictness) (shclw.Doc, error) { return ParseWith(text, s) },
 	OpenWith:    func(path string, s Strictness) (shclw.Doc, error) { return OpenWith(path, s) },
+	OpenLayers:  func(layers ...Layer) (shclw.Doc, error) { return OpenLayers(layers...) },
 	FormatOf:    FormatOf,
 	Upgrade:     Upgrade,
 }
@@ -104,19 +126,24 @@ func ParseWith(text string, s Strictness) (*Doc, error) {
 	if d == nil {
 		d = shcl.New()
 	}
+	out := &Doc{d: d, src: text}
+	if f := FormatOf(text); f > FormatMajor {
+		out.newer = f
+	}
 	if err == nil {
-		return &Doc{d: d}, nil
+		return out, nil
 	}
 	e := &shclw.Error{Kind: shclw.ErrStrict, Err: err}
 	var le *shcl.LoadError
 	if errors.As(err, &le) {
 		e.Diags = diags(le.Diagnostics)
 	}
-	return &Doc{d: d}, e
+	return out, e
 }
 
-// Open reads and parses a file. A missing file is ErrNotFound, and a file
-// written for a newer format is ErrTooNew. An older file is upgraded in
+// Open reads and parses a file. A missing file is ErrNotFound. A file
+// written for a newer format is read as this shcl reads it, and is
+// read-only: Write on it is ErrTooNew. An older file is upgraded in
 // memory, as Upgrade with from 0 does, and UpgradedFrom says so. Nothing is
 // written until Write, and the first Write over the file backs it up. A 2.x
 // file that reads two ways is ErrAmbiguous, and one shcl 2.0 reports errors
@@ -131,30 +158,105 @@ func OpenWith(path string, s Strictness) (*Doc, error) {
 		return New(), err
 	}
 	f := FormatOf(text)
-	if f > FormatMajor {
-		return New(), tooNew(path, f)
-	}
 	var up *upgradedFile
 	body := text
 	// A file naming this format is current, so it skips the upgrade's parse.
-	if f != FormatMajor {
+	if f < FormatMajor {
 		u, err := Upgrade(text, 0)
 		if err != nil {
 			err.(*shclw.Error).Path = path
 			return New(), err
 		}
 		if u.Changed {
-			up = &upgradedFile{from: u.From, path: path, text: text}
-			up.st, _ = os.Stat(path)
+			up = &upgradedFile{from: u.From}
 			body = u.Text
 		}
 	}
 	d, err := ParseWith(body, s)
 	d.up = up
+	d.file = &readFile{path: path, text: text}
+	d.file.st, _ = os.Stat(path)
 	if e, ok := err.(*shclw.Error); ok {
 		e.Path = path
 	}
 	return d, err
+}
+
+// OpenLayers reads layers in order, lowest first, such as defaults, then a
+// site file, then the user's, and reads as their merge: a later layer's
+// value, array, or raw block takes the place of a lower one's, and blocks
+// merge name by name, as shcl's Merge does. A missing file is skipped.
+//
+// Edits and saves go to the last file layer, so Text, Write, and the rest
+// are that layer's, and Write writes only it. Text layers after it, such as
+// this run's command line, still win reads. Each file is opened as Open
+// does, and the first error is returned with an empty document. Diags are
+// every layer's, with Layer set (design.md, Decisions).
+func OpenLayers(layers ...Layer) (*Doc, error) {
+	if len(layers) == 0 {
+		return New(), nil
+	}
+	l := &layerSet{docs: make([]*Doc, len(layers)), edit: len(layers) - 1}
+	for i := len(layers) - 1; i >= 0; i-- {
+		if layers[i].File != "" {
+			l.edit = i
+			break
+		}
+	}
+	for i, ly := range layers {
+		if ly.File == "" {
+			l.docs[i] = Parse(ly.Text)
+			continue
+		}
+		x, err := Open(ly.File)
+		switch {
+		case shclw.KindOf(err) == shclw.ErrNotFound:
+			if i == l.edit {
+				l.docs[i] = New()
+				l.docs[i].file = &readFile{path: ly.File, gone: true}
+			}
+		case err != nil:
+			if e, ok := err.(*shclw.Error); ok {
+				for j := range e.Diags {
+					e.Diags[j].Layer = i + 1
+				}
+			}
+			return New(), err
+		default:
+			l.docs[i] = x
+		}
+	}
+	d := &Doc{lay: l}
+	d.remerge()
+	return d, nil
+}
+
+// remerge builds the reads' document from the layers again. Lower layers
+// never change, but a merge changes its base, so it starts over.
+func (d *Doc) remerge() {
+	m := shcl.New()
+	for _, x := range d.lay.docs {
+		if x != nil {
+			m.Merge(x.d)
+		}
+	}
+	d.d = m
+}
+
+// top is where edits and saves go: the edit layer of a layered document,
+// or the document itself.
+func (d *Doc) top() *Doc {
+	if d.lay == nil {
+		return d
+	}
+	return d.lay.docs[d.lay.edit]
+}
+
+// edited rebuilds the merge after an edit to the edit layer.
+func (d *Doc) edited() {
+	if d.lay != nil {
+		d.remerge()
+	}
 }
 
 // FormatOf is the format a file's Format line names, or 0 with none.
@@ -431,15 +533,23 @@ func upgraded(u shcl.Upgraded) Upgraded {
 	return Upgraded{Text: u.Text, From: u.Format, Changed: !u.Current, Unsure: u.Lost, Backup: u.Backup}
 }
 
-// Inner is the shcl document underneath, for calls shclw doesn't cover.
+// Inner is the shcl document underneath, for calls shclw doesn't cover. On
+// a layered document it's the merge, which OpenLayers builds again after
+// every edit.
 func (d *Doc) Inner() *shcl.Document { return d.d }
 
 // Text is the document as it would be saved: its lines as typed, plus the
 // edits, or the canonical form when 3.0 can't keep the lines.
-func (d *Doc) Text() string { return d.finish(d.lines()) }
+func (d *Doc) Text() string {
+	t := d.top()
+	return t.finish(t.lines())
+}
 
 // Canonical is the document in canonical form.
-func (d *Doc) Canonical() string { return d.finish(d.d.ToCanonical()) }
+func (d *Doc) Canonical() string {
+	t := d.top()
+	return t.finish(t.d.ToCanonical())
+}
 
 // lines is the save's text before the info block and the Format line.
 func (d *Doc) lines() string {
@@ -483,9 +593,23 @@ func saved(text string, info shclw.Info, stamp bool) (string, error) {
 // the current one where it sat.
 //
 // The first Write over a file Open upgraded backs up the original first, as
-// UpgradeFile does, and BackupName names the copy. A file that changed since
-// Open read it is left alone with ErrIO.
-func (d *Doc) Write(path string) error {
+// UpgradeFile does, and BackupName names the copy. A Write over the file
+// Open read leaves it alone with ErrChanged when it changed on disk since,
+// and a document read from a newer format is ErrTooNew.
+func (d *Doc) Write(path string) error { return d.WriteWith(path, shclw.WriteOpts{}) }
+
+// WriteWith is Write with options. Force writes over a file that changed
+// since it was read.
+func (d *Doc) WriteWith(path string, o shclw.WriteOpts) error {
+	if d.lay != nil {
+		return d.top().WriteWith(path, o)
+	}
+	if d.newer > 0 {
+		return tooNew(path, d.newer)
+	}
+	if err := shclw.CheckMode(path, o.Mode); err != nil {
+		return err
+	}
 	text, kept := d.d.ToTextKeepLines()
 	if lost := d.d.LostCount(); !kept && lost > 0 {
 		return &shclw.Error{Kind: shclw.ErrRefused, Path: path,
@@ -499,15 +623,73 @@ func (d *Doc) Write(path string) error {
 		err.(*shclw.Error).Path = path
 		return err
 	}
-	if up := d.up; up != nil && up.backup == "" && up.over(path) {
-		name, err := shclw.ReplaceRead(path, up.text, text, keepOriginal(path, up.text, up.from), writeAtomic)
-		if err != nil {
+	f := d.file
+	if o.Create {
+		if err := shclw.CreateNew(path, text, o.Mode); err != nil {
 			return err
 		}
-		up.backup, up.text = name, ""
+		if f != nil && f.over(path) {
+			f.text, f.gone = text, false
+			f.st, _ = os.Stat(path)
+		}
 		return nil
 	}
-	return writeAtomic(path, text)
+	write := writeAtomic
+	if o.Mode != 0 {
+		write = writeMode(o.Mode)
+	}
+	if f == nil || !f.over(path) {
+		return write(path, text)
+	}
+	var backup func() (string, error)
+	if d.up != nil && d.up.backup == "" {
+		backup = keepOriginal(path, f.text, d.up.from)
+	}
+	name, err := f.replace(path, text, backup, o.Force, write)
+	if err != nil {
+		return err
+	}
+	if backup != nil {
+		d.up.backup = name
+	}
+	f.text, f.gone = text, false
+	f.st, _ = os.Stat(path)
+	return nil
+}
+
+// replace writes text over the file Open read, unless it changed since.
+// Only the moment between the last check and the rename is left open
+// (design.md, Loading and saving).
+func (f *readFile) replace(path, text string, backup func() (string, error), force bool, write func(path, text string) error) (string, error) {
+	was := f.text
+	if force {
+		now, err := shclw.ReadText(path)
+		if err != nil {
+			return "", write(path, text)
+		}
+		was = now
+	} else if f.gone {
+		if _, err := os.Lstat(path); err == nil {
+			return "", shclw.Changed(path)
+		}
+		return "", write(path, text)
+	}
+	return shclw.ReplaceRead(path, was, text, backup, write)
+}
+
+// writeMode is writeAtomic where a file it creates gets mode. One that's
+// there keeps its own, as shcl's atomic write keeps it.
+func writeMode(mode fs.FileMode) func(path, text string) error {
+	return func(path, text string) error {
+		if _, err := os.Lstat(path); err == nil {
+			return writeAtomic(path, text)
+		}
+		err := shclw.CreateNew(path, text, mode)
+		if shclw.KindOf(err) == shclw.ErrExists {
+			return writeAtomic(path, text) // made in the meantime
+		}
+		return err
+	}
 }
 
 func writeAtomic(path, text string) error {
@@ -524,20 +706,25 @@ func writeAtomic(path, text string) error {
 
 // over is whether path names the file Open read: the same path, or the same
 // file by another name.
-func (up *upgradedFile) over(path string) bool {
+func (f *readFile) over(path string) bool {
 	a, aerr := filepath.Abs(path)
-	b, berr := filepath.Abs(up.path)
+	b, berr := filepath.Abs(f.path)
 	if aerr == nil && berr == nil && a == b {
 		return true
 	}
 	st, err := os.Stat(path)
-	return err == nil && up.st != nil && os.SameFile(st, up.st)
+	return err == nil && f.st != nil && os.SameFile(st, f.st)
 }
+
+// ReadOnly is whether the document was read from a newer format, which Write
+// refuses with ErrTooNew. On a layered document it's the edit layer's.
+func (d *Doc) ReadOnly() bool { return d.top().newer > 0 }
 
 // UpgradedFrom is the format Open upgraded the file from, or 0 when it
 // didn't upgrade it. Reads, Lines, Diags, and Text are all of the upgraded
 // text.
 func (d *Doc) UpgradedFrom() int {
+	d = d.top()
 	if d.up == nil {
 		return 0
 	}
@@ -547,6 +734,7 @@ func (d *Doc) UpgradedFrom() int {
 // BackupName is where the first Write over an upgraded file put the
 // original, or "" before then.
 func (d *Doc) BackupName() string {
+	d = d.top()
 	if d.up == nil {
 		return ""
 	}
@@ -560,6 +748,7 @@ func (d *Doc) BackupName() string {
 // and StampFormat change only their own lines, so they don't change the
 // answer. A file Open upgraded is rewritten until the first Write over it.
 func (d *Doc) Rewrites() bool {
+	d = d.top()
 	if d.up != nil && d.up.backup == "" {
 		return true
 	}
@@ -574,6 +763,7 @@ func (d *Doc) Rewrites() bool {
 // names another format is refused, and so is one that ends in a raw block
 // that never closes.
 func (d *Doc) InfoBlock(on bool) error {
+	d = d.top()
 	info := shclw.InfoOff
 	if on {
 		info = shclw.InfoOn
@@ -589,6 +779,7 @@ func (d *Doc) InfoBlock(on bool) error {
 // unless a comment already names format 3. It refuses what InfoBlock
 // refuses.
 func (d *Doc) StampFormat() error {
+	d = d.top()
 	if _, err := shclw.FinishInfo(d.lines(), d.info, true, infoEdit); err != nil {
 		return err
 	}
@@ -596,11 +787,60 @@ func (d *Doc) StampFormat() error {
 	return nil
 }
 
-// Diags is what the load found.
-func (d *Doc) Diags() []Diag { return diags(d.d.Diagnostics()) }
+// Diags is what the load found. A layered document has every layer's, in
+// layer order, each with its Layer.
+func (d *Doc) Diags() []Diag {
+	if d.lay == nil {
+		return diags(d.d.Diagnostics())
+	}
+	var out []Diag
+	for i, x := range d.lay.docs {
+		if x == nil {
+			continue
+		}
+		for _, g := range x.Diags() {
+			g.Layer = i + 1
+			out = append(out, g)
+		}
+	}
+	return out
+}
 
-// Errors counts error diagnostics.
-func (d *Doc) Errors() int { return d.d.ErrorCount() }
+// Errors counts error diagnostics, in every layer of a layered document.
+func (d *Doc) Errors() int {
+	if d.lay == nil {
+		return d.d.ErrorCount()
+	}
+	n := 0
+	for _, x := range d.lay.docs {
+		if x != nil {
+			n += x.Errors()
+		}
+	}
+	return n
+}
+
+// Unused is the lines the load couldn't use, which are the lines with an
+// error, once each.
+func (d *Doc) Unused() []Spot { return shclw.UnusedOf(d.Diags()) }
+
+// Merged is each name the load kept one copy of, since a later copy had the
+// same name and value, with every copy's line. On a layered document it's
+// each layer's own, and not what the layers' merge folded.
+func (d *Doc) Merged() []Merge {
+	if d.lay == nil {
+		return shclw.MergesOf(d.src, parseDoc, 0)
+	}
+	out := []Merge{}
+	for i, x := range d.lay.docs {
+		if x != nil {
+			out = append(out, shclw.MergesOf(x.src, parseDoc, i+1)...)
+		}
+	}
+	return out
+}
+
+func parseDoc(text string) shclw.Doc { return Parse(text) }
 
 // Check validates the document against a schema document.
 func (d *Doc) Check(schema shclw.Doc) []Diag {
@@ -702,6 +942,10 @@ func (d *Doc) Lines(path string) []int { return shclw.LinesOf(d, path) }
 // strings, ints, and floats. A value that doesn't read back the same is
 // ErrNoReadBack, with the edit left in place.
 func (d *Doc) Put(path string, v any) error {
+	if d.lay != nil {
+		defer d.edited()
+		return d.top().Put(path, v)
+	}
 	val, err := shclw.Normalize(path, v)
 	if err != nil {
 		return err
@@ -733,6 +977,10 @@ func (d *Doc) Put(path string, v any) error {
 // read back as typed, such as one with a trailing comment, is
 // ErrNoReadBack, with the edit left in place.
 func (d *Doc) PutSyntax(path, text string) error {
+	if d.lay != nil {
+		defer d.edited()
+		return d.top().PutSyntax(path, text)
+	}
 	if err := d.setErr(path, d.d.SetLiteral(path, text)); err != nil {
 		return err
 	}
@@ -743,11 +991,18 @@ func (d *Doc) PutSyntax(path, text string) error {
 }
 
 // Comment sets the comment above path.
-func (d *Doc) Comment(path, text string) error { return d.setErr(path, d.d.SetComment(path, text)) }
+func (d *Doc) Comment(path, text string) error {
+	defer d.edited()
+	t := d.top()
+	return t.setErr(path, t.d.SetComment(path, text))
+}
 
 // Remove takes out path and everything under it, and says how many
 // instances went.
-func (d *Doc) Remove(path string) int { return d.d.Remove(path) }
+func (d *Doc) Remove(path string) int {
+	defer d.edited()
+	return d.top().d.Remove(path)
+}
 
 func (d *Doc) setErr(path string, st shcl.SetStatus) error {
 	switch st {

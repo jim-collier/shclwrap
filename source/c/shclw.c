@@ -17,6 +17,13 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#ifdef _WIN32
+#include <io.h>
+#include <windows.h>
+#else
+#include <fcntl.h>
+#include <unistd.h>
+#endif
 
 const char *shclw_status_name(shclw_status s) {
 	switch (s) {
@@ -44,6 +51,8 @@ const char *shclw_kind_name(shclw_kind k) {
 	case SHCLW_ERR_AMBIGUOUS: return "ambiguous";
 	case SHCLW_ERR_BACKUP_TAKEN: return "backuptaken";
 	case SHCLW_ERR_NO_READ_BACK: return "noreadback";
+	case SHCLW_ERR_CHANGED: return "changed";
+	case SHCLW_ERR_EXISTS: return "exists";
 	case SHCLW_ERR_NO_MEMORY: return "nomemory";
 	}
 	return "unknown";
@@ -451,6 +460,7 @@ shclw_diag *shclw_i_copy_diags(const shclw_diag *diags, size_t n, size_t *count)
 			text += from[k]->n + 1;
 		}
 		out[i].line = diags[i].line;
+		out[i].layer = diags[i].layer;
 		out[i].severity = diags[i].severity;
 	}
 	*count = n;
@@ -635,8 +645,14 @@ shclw_i_value shclw_i_value_of(shclw_i_kind kind, size_t n) {
 }
 
 static shclw_kind put(shclw_doc *d, const char *path, const shclw_i_value *v, shclw_error *err) {
-	shclw_kind k = shclw_i_set(d, path, v, err);
-	return k == SHCLW_OK ? shclw_i_verify_put(d, path, v, err) : k;
+	shclw_doc *top = shclw_i_top(d);
+	shclw_kind k = shclw_i_set(top, path, v, err);
+	if (k == SHCLW_OK) {
+		k = shclw_i_verify_put(top, path, v, err);
+	}
+	// The set is in place even when the read-back failed.
+	shclw_kind m = shclw_i_edited(d, NULL);
+	return m == SHCLW_OK ? k : shclw_i_fail(err, m, path, NULL, 0);
 }
 
 shclw_kind shclw_put_int(shclw_doc *d, const char *path, int64_t v, shclw_error *err) {
@@ -812,8 +828,7 @@ static bool unchanged(const char *path, const char *was, size_t was_len) {
 	return fclose(f) == 0 && same;
 }
 
-// Nothing at path, not even a dangling link.
-static bool missing(const char *path) {
+bool shclw_i_missing(const char *path) {
 #ifdef _WIN32
 	struct _stat64 st;
 	return _stat64(path, &st) != 0 && errno == ENOENT;
@@ -846,7 +861,7 @@ shclw_kind shclw_i_replace_read(const char *path, const char *was, size_t was_le
 	static const char changed[] = "changed since it was read; nothing written";
 	*backup_name = NULL;
 	if (!unchanged(path, was, was_len)) {
-		return shclw_i_fail(err, SHCLW_ERR_IO, path, changed, 0);
+		return shclw_i_fail(err, SHCLW_ERR_CHANGED, path, changed, 0);
 	}
 	char *name = NULL;
 	if (how->backup) {
@@ -857,7 +872,7 @@ shclw_kind shclw_i_replace_read(const char *path, const char *was, size_t was_le
 	}
 	if (!unchanged(path, was, was_len)) {
 		drop_backup(name);
-		return shclw_i_fail(err, SHCLW_ERR_IO, path, changed, 0);
+		return shclw_i_fail(err, SHCLW_ERR_CHANGED, path, changed, 0);
 	}
 	shclw_kind k = how->write(how->ctx, path, data, len, err);
 	if (k == SHCLW_OK) {
@@ -872,7 +887,7 @@ shclw_kind shclw_i_replace_read(const char *path, const char *was, size_t was_le
 		return k;
 	}
 	// A replace that fails part way on Windows can leave nothing at path.
-	if (missing(path) && rename(name, path) == 0) {
+	if (shclw_i_missing(path) && rename(name, path) == 0) {
 		note(err, "the original was put back", NULL);
 	} else {
 		note(err, "the original is ", name);
@@ -978,3 +993,654 @@ bool shclw_i_irregular(const char *path) {
 	return stat(path, &st) == 0 && !S_ISREG(st.st_mode);
 #endif
 }
+
+static int by_spot(const void *a, const void *b) {
+	const shclw_spot *x = (const shclw_spot *)a;
+	const shclw_spot *y = (const shclw_spot *)b;
+	if (x->layer != y->layer) {
+		return x->layer < y->layer ? -1 : 1;
+	}
+	return (x->line > y->line) - (x->line < y->line);
+}
+
+shclw_spot *shclw_i_unused_of(const shclw_diag *diags, size_t n, size_t *count) {
+	*count = 0;
+	shclw_spot *out = (shclw_spot *)calloc(n + 1, sizeof(shclw_spot));
+	if (!out) {
+		return NULL;
+	}
+	size_t k = 0;
+	for (size_t i = 0; i < n; i++) {
+		if (diags[i].severity == SHCLW_SEV_ERROR && diags[i].line > 0) {
+			out[k].line = diags[i].line;
+			out[k].layer = diags[i].layer;
+			k++;
+		}
+	}
+	qsort(out, k, sizeof *out, by_spot);
+	size_t w = 0;
+	for (size_t i = 0; i < k; i++) {
+		if (w == 0 || by_spot(&out[w - 1], &out[i]) != 0) {
+			out[w++] = out[i];
+		}
+	}
+	*count = w;
+	return out;
+}
+
+// One merge as it's found, before shclw_i_merges_of packs them in one block.
+typedef struct {
+	char *path;
+	size_t path_len;
+	size_t *lines;
+	size_t n_lines, cap;
+	size_t layer;
+} merge_acc;
+
+// A path still to walk, and in the probe walk the path in the loaded document
+// of the node it stands for.
+typedef struct {
+	char *path;
+	char *orig;
+} walk_item;
+
+typedef struct {
+	shclw_doc *d, *p;
+	// By line: the deepest node's path in d, and whether the probe renamed it.
+	char **at;
+	bool *folded;
+	size_t n_lines;
+	size_t layer;
+	merge_acc *acc;
+	size_t n_acc, cap_acc;
+	walk_item *stack;
+	size_t n_stack, cap_stack;
+	bool oom;
+} merge_ctx;
+
+static void push_walk(merge_ctx *c, const char *path, size_t path_len, const char *orig) {
+	if (c->n_stack == c->cap_stack) {
+		size_t cap = c->cap_stack ? c->cap_stack * 2 : 16;
+		walk_item *grown =
+			cap < SIZE_MAX / sizeof(walk_item) ? (walk_item *)realloc(c->stack, cap * sizeof(walk_item)) : NULL;
+		if (!grown) {
+			c->oom = true;
+			return;
+		}
+		c->stack = grown;
+		c->cap_stack = cap;
+	}
+	walk_item *w = &c->stack[c->n_stack];
+	w->path = shclw_i_dup(path, path_len, NULL);
+	w->orig = orig ? shclw_i_dup(orig, strlen(orig), NULL) : NULL;
+	if (!w->path || (orig && !w->orig)) {
+		free(w->path);
+		free(w->orig);
+		c->oom = true;
+		return;
+	}
+	c->n_stack++;
+}
+
+static bool push_line(merge_acc *m, size_t line) {
+	if (m->n_lines == m->cap) {
+		size_t cap = m->cap ? m->cap * 2 : 4;
+		size_t *grown = cap < SIZE_MAX / sizeof(size_t) ? (size_t *)realloc(m->lines, cap * sizeof(size_t)) : NULL;
+		if (!grown) {
+			return false;
+		}
+		m->lines = grown;
+		m->cap = cap;
+	}
+	m->lines[m->n_lines++] = line;
+	return true;
+}
+
+static void add_merge(merge_ctx *c, const shclw_node *kept, size_t line) {
+	merge_acc *m = NULL;
+	for (size_t i = 0; i < c->n_acc && !m; i++) {
+		merge_acc *x = &c->acc[i];
+		if (x->layer == c->layer && x->path_len == kept->path.n && memcmp(x->path, kept->path.p, x->path_len) == 0) {
+			m = x;
+		}
+	}
+	if (!m) {
+		if (c->n_acc == c->cap_acc) {
+			size_t cap = c->cap_acc ? c->cap_acc * 2 : 8;
+			merge_acc *grown =
+				cap < SIZE_MAX / sizeof(merge_acc) ? (merge_acc *)realloc(c->acc, cap * sizeof(merge_acc)) : NULL;
+			if (!grown) {
+				c->oom = true;
+				return;
+			}
+			c->acc = grown;
+			c->cap_acc = cap;
+		}
+		m = &c->acc[c->n_acc];
+		memset(m, 0, sizeof *m);
+		m->layer = c->layer;
+		m->path = shclw_i_dup(kept->path.p, kept->path.n, &m->path_len);
+		if (!m->path) {
+			c->oom = true;
+			return;
+		}
+		c->n_acc++;
+		if (!push_line(m, kept->line)) {
+			c->oom = true;
+			return;
+		}
+	}
+	c->oom = c->oom || !push_line(m, line);
+}
+
+// The nodes under path in x, one block per name, through see.
+typedef void (*see_fn)(merge_ctx *c, const walk_item *from, const shclw_node *n, shclw_string name);
+
+static void walk_from(merge_ctx *c, shclw_doc *x, see_fn see) {
+	while (c->n_stack > 0 && !c->oom) {
+		c->n_stack--;
+		char *path = c->stack[c->n_stack].path;
+		char *orig = c->stack[c->n_stack].orig;
+		const walk_item from = {path, orig};
+		size_t k = 0;
+		shclw_string *names = shclw_names(x, path, &k);
+		c->oom = c->oom || !names;
+		for (size_t i = 0; names && i < k && !c->oom; i++) {
+			char *child = shclw_child(x, path, names[i].p, names[i].n, NULL);
+			size_t m = 0;
+			shclw_node *nodes = child ? shclw_each(x, child, &m) : NULL;
+			c->oom = c->oom || !nodes;
+			for (size_t j = 0; nodes && j < m && !c->oom; j++) {
+				see(c, &from, &nodes[j], names[i]);
+			}
+			free(nodes);
+			free(child);
+		}
+		free(names);
+		free(path);
+		free(orig);
+	}
+}
+
+static void see_loaded(merge_ctx *c, const walk_item *from, const shclw_node *n, shclw_string name) {
+	(void)from;
+	(void)name;
+	size_t line = n->line;
+	if (line > 0 && line <= c->n_lines && (!c->at[line] || strlen(c->at[line]) < n->path.n)) {
+		free(c->at[line]);
+		c->at[line] = shclw_i_dup(n->path.p, n->path.n, NULL);
+		c->oom = c->oom || !c->at[line];
+	}
+	push_walk(c, n->path.p, n->path.n, NULL);
+}
+
+static int probe_name(size_t line, char *buf, size_t size) { return snprintf(buf, size, "shclwprobe%zux", line); }
+
+// Whether a node in the probe has a child on its own line, as a dotted line's
+// steps do.
+static bool on_own_line(merge_ctx *c, const shclw_node *n) {
+	size_t k = 0;
+	shclw_string *names = shclw_names(c->p, n->path.p, &k);
+	bool found = false;
+	c->oom = c->oom || !names;
+	for (size_t i = 0; names && i < k && !found && !c->oom; i++) {
+		char *child = shclw_child(c->p, n->path.p, names[i].p, names[i].n, NULL);
+		size_t m = 0;
+		shclw_node *kids = child ? shclw_each(c->p, child, &m) : NULL;
+		c->oom = c->oom || !kids;
+		for (size_t j = 0; kids && j < m; j++) {
+			found = found || kids[j].line == n->line;
+		}
+		free(kids);
+		free(child);
+	}
+	free(names);
+	return found;
+}
+
+static void see_probe(merge_ctx *c, const walk_item *from, const shclw_node *n, shclw_string name) {
+	size_t line = n->line;
+	bool in = line > 0 && line <= c->n_lines;
+	if (!in || !c->folded[line]) {
+		if (in && c->at[line]) {
+			push_walk(c, n->path.p, n->path.n, c->at[line]);
+		}
+		return;
+	}
+	char pre[48];
+	int pn = probe_name(line, pre, sizeof pre);
+	size_t pl = pn > 0 ? (size_t)pn : 0;
+	bool prefixed = name.n >= pl;
+	for (size_t i = 0; prefixed && i < pl; i++) {
+		char ch = name.p[i];
+		prefixed = (ch >= 'A' && ch <= 'Z' ? (char)(ch - 'A' + 'a') : ch) == pre[i];
+	}
+	if (prefixed) {
+		name.p += pl;
+		name.n -= pl;
+	}
+	char *child = shclw_child(c->d, from->orig, name.p, name.n, NULL);
+	size_t m = 0;
+	shclw_node *ks = child ? shclw_each(c->d, child, &m) : NULL;
+	c->oom = c->oom || !ks;
+	const shclw_node *kept = NULL;
+	for (size_t i = 0; ks && i < m; i++) {
+		const shclw_node *k = &ks[i];
+		bool same = k->value.n == n->value.n && (k->value.n == 0 || memcmp(k->value.p, n->value.p, k->value.n) == 0);
+		if (same && k->line > 0 && k->line < line && (!kept || k->line > kept->line)) {
+			kept = k;
+		}
+	}
+	if (kept && !c->oom) {
+		// A dotted line folds each step; only its last one is the copy.
+		if (!on_own_line(c, n)) {
+			add_merge(c, kept, line);
+		}
+		push_walk(c, n->path.p, n->path.n, kept->path.p);
+	}
+	free(ks);
+	free(child);
+}
+
+// The probe: each line on no node, with no error, that starts with a name has
+// the name made unique, so a second parse keeps that copy apart.
+static char *probe_text(merge_ctx *c, const char *text, size_t len, const bool *bad, size_t *out_len,
+                        size_t *n_folded) {
+	*out_len = 0;
+	*n_folded = 0;
+	if (c->n_lines >= (SIZE_MAX - len) / 48) {
+		return NULL;
+	}
+	char *out = (char *)malloc(len + c->n_lines * 48 + 1);
+	if (!out) {
+		return NULL;
+	}
+	size_t w = 0;
+	size_t pos = 0;
+	for (size_t line = 1; line <= c->n_lines; line++) {
+		const char *nl = pos < len ? (const char *)memchr(text + pos, '\n', len - pos) : NULL;
+		size_t end = nl ? (size_t)(nl - text) : len;
+		size_t body = pos;
+		while (body < end && (text[body] == ' ' || text[body] == '\t')) {
+			body++;
+		}
+		unsigned char ch = body < end ? (unsigned char)text[body] : 0;
+		bool quote = ch == '"' || ch == '\'';
+		bool letter = ch >= 0x80 || (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z');
+		size_t cut = quote ? body + 1 : body;
+		memcpy(out + w, text + pos, cut - pos);
+		w += cut - pos;
+		if (!c->at[line] && !bad[line] && (quote || letter)) {
+			int pn = probe_name(line, out + w, 48);
+			w += pn > 0 ? (size_t)pn : 0;
+			c->folded[line] = true;
+			(*n_folded)++;
+		}
+		memcpy(out + w, text + cut, end - cut);
+		w += end - cut;
+		if (end < len) {
+			out[w++] = '\n';
+		}
+		pos = end + 1;
+	}
+	out[w] = '\0';
+	*out_len = w;
+	return out;
+}
+
+static void merges_in(merge_ctx *c, const shclw_i_source *src) {
+	c->n_lines = 1;
+	for (size_t i = 0; i < src->len; i++) {
+		c->n_lines += src->text[i] == '\n';
+	}
+	c->at = (char **)calloc(c->n_lines + 1, sizeof(char *));
+	c->folded = (bool *)calloc(c->n_lines + 1, sizeof(bool));
+	bool *bad = (bool *)calloc(c->n_lines + 1, sizeof(bool));
+	c->d = shclw_parse(src->text, src->len);
+	c->oom = !c->at || !c->folded || !bad || !c->d;
+	if (!c->oom) {
+		push_walk(c, "", 0, NULL);
+		walk_from(c, c->d, see_loaded);
+	}
+	size_t nd = 0;
+	shclw_diag *ds = c->oom ? NULL : shclw_diags(c->d, &nd);
+	c->oom = c->oom || !ds;
+	for (size_t i = 0; ds && i < nd; i++) {
+		if (ds[i].severity == SHCLW_SEV_ERROR && ds[i].line <= c->n_lines) {
+			bad[ds[i].line] = true;
+		}
+	}
+	free(ds);
+	size_t plen = 0;
+	size_t n_folded = 0;
+	char *probe = c->oom ? NULL : probe_text(c, src->text, src->len, bad, &plen, &n_folded);
+	c->oom = c->oom || !probe;
+	if (!c->oom && n_folded > 0) {
+		c->p = shclw_parse(probe, plen);
+		c->oom = !c->p;
+		if (!c->oom) {
+			push_walk(c, "", 0, "");
+			walk_from(c, c->p, see_probe);
+		}
+	}
+	while (c->n_stack > 0) {
+		c->n_stack--;
+		free(c->stack[c->n_stack].path);
+		free(c->stack[c->n_stack].orig);
+	}
+	free(probe);
+	free(bad);
+	for (size_t i = 0; c->at && i <= c->n_lines; i++) {
+		free(c->at[i]);
+	}
+	free((void *)c->at);
+	free(c->folded);
+	shclw_free(c->d);
+	shclw_free(c->p);
+	c->at = NULL;
+	c->folded = NULL;
+	c->d = NULL;
+	c->p = NULL;
+}
+
+static int by_merge(const void *a, const void *b) {
+	const merge_acc *x = (const merge_acc *)a;
+	const merge_acc *y = (const merge_acc *)b;
+	if (x->layer != y->layer) {
+		return x->layer < y->layer ? -1 : 1;
+	}
+	if (x->lines[0] != y->lines[0]) {
+		return x->lines[0] < y->lines[0] ? -1 : 1;
+	}
+	size_t n = x->path_len < y->path_len ? x->path_len : y->path_len;
+	int r = memcmp(x->path, y->path, n);
+	return r ? r : (x->path_len > y->path_len) - (x->path_len < y->path_len);
+}
+
+static int by_size_t(const void *a, const void *b) {
+	size_t x = *(const size_t *)a;
+	size_t y = *(const size_t *)b;
+	return (x > y) - (x < y);
+}
+
+shclw_merge *shclw_i_merges_of(const shclw_i_source *srcs, size_t n_srcs, size_t *count) {
+	*count = 0;
+	merge_ctx c;
+	memset(&c, 0, sizeof c);
+	for (size_t i = 0; i < n_srcs && !c.oom; i++) {
+		c.layer = srcs[i].layer;
+		merges_in(&c, &srcs[i]);
+	}
+	size_t bytes = 0;
+	bool ok = !c.oom && c.n_acc < SIZE_MAX / 8 / sizeof(shclw_merge);
+	if (ok) {
+		bytes = c.n_acc * sizeof(shclw_merge);
+		for (size_t i = 0; ok && i < c.n_acc; i++) {
+			qsort(c.acc[i].lines, c.acc[i].n_lines, sizeof(size_t), by_size_t);
+			ok = c.acc[i].n_lines < SIZE_MAX / 8 / sizeof(size_t) && c.acc[i].path_len < SIZE_MAX / 8;
+			bytes += c.acc[i].n_lines * sizeof(size_t);
+		}
+	}
+	size_t chars = 0;
+	for (size_t i = 0; ok && i < c.n_acc; i++) {
+		chars += c.acc[i].path_len + 1;
+		ok = chars < SIZE_MAX / 4 && bytes < SIZE_MAX / 4;
+	}
+	if (ok && c.n_acc > 1) {
+		qsort(c.acc, c.n_acc, sizeof *c.acc, by_merge);
+	}
+	size_t units = (bytes + chars) / sizeof(shclw_merge) + 1;
+	shclw_merge *out = ok ? (shclw_merge *)calloc(units, sizeof(shclw_merge)) : NULL;
+	if (out) {
+		size_t *lines = (size_t *)(out + c.n_acc);
+		size_t nl = 0;
+		for (size_t i = 0; i < c.n_acc; i++) {
+			nl += c.acc[i].n_lines;
+		}
+		char *text = (char *)(lines + nl);
+		for (size_t i = 0; i < c.n_acc; i++) {
+			const merge_acc *m = &c.acc[i];
+			memcpy(lines, m->lines, m->n_lines * sizeof(size_t));
+			memcpy(text, m->path, m->path_len + 1);
+			// As in shclw_i_copy_nodes, the analyzer loses the sums above.
+			// NOLINTBEGIN(clang-analyzer-security.ArrayBound)
+			out[i].path.p = text;
+			out[i].path.n = m->path_len;
+			out[i].lines = lines;
+			out[i].n_lines = m->n_lines;
+			out[i].layer = m->layer;
+			// NOLINTEND(clang-analyzer-security.ArrayBound)
+			lines += m->n_lines;
+			text += m->path_len + 1;
+		}
+		*count = c.n_acc;
+	}
+	for (size_t i = 0; i < c.n_acc; i++) {
+		free(c.acc[i].path);
+		free(c.acc[i].lines);
+	}
+	free(c.acc);
+	free(c.stack);
+	return out;
+}
+
+shclw_kind shclw_i_check_mode(const char *path, unsigned mode, shclw_error *err) {
+	if (mode & ~0777u) {
+		char why[64];
+		(void)snprintf(why, sizeof why, "mode %#o is more than permission bits", mode);
+		return shclw_i_fail(err, SHCLW_ERR_BAD_VALUE, path, why, 0);
+	}
+	return shclw_i_ok(err);
+}
+
+static shclw_kind exists(const char *path, shclw_error *err) {
+	return shclw_i_fail(err, SHCLW_ERR_EXISTS, path, "already there; nothing written", 0);
+}
+
+static shclw_kind create_failed(const char *path, int e, shclw_error *err) {
+	return shclw_i_fail(err, e == ENOENT ? SHCLW_ERR_NOT_FOUND : SHCLW_ERR_IO, path, strerror(e), e);
+}
+
+// A name beside path for the new text: the folder, then at most 64 bytes of
+// the base, cut where a character starts, as shcl cuts its temp names.
+static char *temp_name(const char *path, int attempt) {
+	const char *slash = strrchr(path, '/');
+#ifdef _WIN32
+	const char *back = strrchr(path, '\\');
+	if (back && (!slash || back > slash)) {
+		slash = back;
+	}
+#endif
+	size_t dlen = slash ? (size_t)(slash - path) + 1 : 0;
+	const char *base = path + dlen;
+	size_t cut = strlen(base);
+	if (cut > 64) {
+		cut = 64;
+		while (cut > 0 && ((unsigned char)base[cut] & 0xC0) == 0x80) {
+			cut--;
+		}
+	}
+	size_t n = dlen + cut + 64;
+	char *tmp = (char *)malloc(n);
+	if (!tmp) {
+		return NULL;
+	}
+	// A local's address differs between threads racing in one process.
+#ifdef _WIN32
+	long pid = (long)GetCurrentProcessId();
+#else
+	long pid = (long)getpid();
+#endif
+	(void)snprintf(tmp, n, "%.*s.%.*s.new%ld.%lx.%d", (int)dlen, path, (int)cut, base, pid,
+	               (unsigned long)(uintptr_t)&attempt, attempt);
+	return tmp;
+}
+
+#ifdef _WIN32
+
+// Writes data to a new file and syncs it. Returns 0 or an errno.
+static int write_new_file(const char *path, const char *data, size_t len) {
+	FILE *f = fopen(path, "wbx");
+	if (!f) {
+		return errno == EEXIST ? EEXIST : (errno ? errno : EIO);
+	}
+	int e = fwrite(data, 1, len, f) == len && fflush(f) == 0 && _commit(_fileno(f)) == 0 ? 0 : EIO;
+	if (fclose(f) != 0 && !e) {
+		e = EIO;
+	}
+	if (e) {
+		(void)remove(path); // ours, made just above
+	}
+	return e;
+}
+
+// Windows moves a file into place only when nothing is there, without a hard
+// link. There's no Unix mode to give it.
+shclw_kind shclw_i_create_new(const char *path, const char *data, size_t len, unsigned mode, shclw_error *err) {
+	shclw_kind k = shclw_i_check_mode(path, mode, err);
+	if (k != SHCLW_OK) {
+		return k;
+	}
+	char *tmp = NULL;
+	int e = EEXIST;
+	for (int attempt = 0; attempt < 8 && e == EEXIST; attempt++) {
+		free(tmp);
+		tmp = temp_name(path, attempt);
+		if (!tmp) {
+			return shclw_i_fail(err, SHCLW_ERR_NO_MEMORY, path, NULL, 0);
+		}
+		e = write_new_file(tmp, data, len);
+	}
+	if (e) {
+		free(tmp);
+		return create_failed(path, e, err);
+	}
+	if (MoveFileExA(tmp, path, MOVEFILE_WRITE_THROUGH)) {
+		free(tmp);
+		return shclw_i_ok(err);
+	}
+	DWORD w = GetLastError();
+	(void)remove(tmp);
+	free(tmp);
+	if (w == ERROR_ALREADY_EXISTS || w == ERROR_FILE_EXISTS) {
+		return exists(path, err);
+	}
+	return create_failed(path, w == ERROR_PATH_NOT_FOUND ? ENOENT : EIO, err);
+}
+
+#else
+
+// Writes data, sets mode, syncs, and closes fd. Returns 0 or an errno.
+static int fill(int fd, const char *data, size_t len, unsigned mode) {
+	int e = 0;
+	while (len > 0) {
+		ssize_t n = write(fd, data, len);
+		if (n < 0) {
+			if (errno == EINTR) {
+				continue;
+			}
+			e = errno;
+			break;
+		}
+		data += n;
+		len -= (size_t)n;
+	}
+	if (!e && mode && fchmod(fd, (mode_t)mode) != 0) {
+		e = errno;
+	}
+	if (!e && fsync(fd) != 0) {
+		e = errno;
+	}
+	if (close(fd) != 0 && !e) {
+		e = errno;
+	}
+	return e;
+}
+
+// One with a mode is born private, and gets its mode exactly in fill, past
+// the umask.
+static int open_new(const char *path, unsigned mode) {
+	return open(path, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, mode ? 0600 : 0666);
+}
+
+static void sync_dir(const char *path) {
+	const char *slash = strrchr(path, '/');
+	char *dir = slash ? shclw_i_dup(path, (size_t)(slash - path) + 1, NULL) : NULL;
+	int fd = open(dir ? dir : ".", O_RDONLY | O_CLOEXEC);
+	free(dir);
+	if (fd >= 0) {
+		(void)fsync(fd); // some filesystems can't; the file itself is synced
+		(void)close(fd);
+	}
+}
+
+// shclw_i_create_new without a temp, for a filesystem with no hard links. A
+// crash part way leaves part of the file.
+static shclw_kind create_in_place(const char *path, const char *data, size_t len, unsigned mode, shclw_error *err) {
+	int fd = open_new(path, mode);
+	if (fd < 0) {
+		return errno == EEXIST ? exists(path, err) : create_failed(path, errno, err);
+	}
+	int e = fill(fd, data, len, mode);
+	if (e) {
+		(void)unlink(path); // ours, made just above
+		return create_failed(path, e, err);
+	}
+	sync_dir(path);
+	return shclw_i_ok(err);
+}
+
+static bool no_links(int e) {
+#if EOPNOTSUPP != ENOTSUP
+	if (e == EOPNOTSUPP) {
+		return true;
+	}
+#endif
+	return e == EPERM || e == ENOTSUP || e == ENOSYS;
+}
+
+// The text is synced under a temp name and hard-linked into place, so the
+// name never holds part of it, and of 2 creates at once exactly one wins.
+shclw_kind shclw_i_create_new(const char *path, const char *data, size_t len, unsigned mode, shclw_error *err) {
+	shclw_kind k = shclw_i_check_mode(path, mode, err);
+	if (k != SHCLW_OK) {
+		return k;
+	}
+	char *tmp = NULL;
+	int fd = -1;
+	for (int attempt = 0; attempt < 8 && fd < 0; attempt++) {
+		free(tmp);
+		tmp = temp_name(path, attempt);
+		if (!tmp) {
+			return shclw_i_fail(err, SHCLW_ERR_NO_MEMORY, path, NULL, 0);
+		}
+		fd = open_new(tmp, mode);
+		if (fd < 0 && errno != EEXIST) {
+			break;
+		}
+	}
+	if (fd < 0) {
+		int e = errno;
+		free(tmp);
+		return create_failed(path, e, err);
+	}
+	int e = fill(fd, data, len, mode);
+	if (!e && link(tmp, path) != 0) {
+		e = errno;
+		(void)unlink(tmp);
+		free(tmp);
+		if (e == EEXIST) {
+			return exists(path, err);
+		}
+		return no_links(e) ? create_in_place(path, data, len, mode, err) : create_failed(path, e, err);
+	}
+	(void)unlink(tmp);
+	free(tmp);
+	if (e) {
+		return create_failed(path, e, err);
+	}
+	sync_dir(path);
+	return shclw_i_ok(err);
+}
+
+#endif

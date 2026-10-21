@@ -16,8 +16,9 @@ import (
 // listed here, and a new edit until it's in edits too, so the
 // several-instances tests below reach it. Rust's ShclDoc has the same set.
 var docMethods = map[string]string{
-	"Text": "read", "Canonical": "read", "Write": "read", "Rewrites": "read",
-	"Diags": "read", "Errors": "read", "Check": "read", "DropDeclared": "read",
+	"Text": "read", "Canonical": "read", "Write": "read", "WriteWith": "read", "ReadOnly": "read", "Rewrites": "read",
+	"Diags": "read", "Errors": "read", "Unused": "read", "Merged": "read",
+	"Check": "read", "DropDeclared": "read",
 	"Int": "read", "Float": "read", "Bool": "read", "Str": "read",
 	"Strs": "read", "Ints": "read", "Floats": "read", "Raw": "read",
 	"GetInt": "read", "GetFloat": "read", "GetBool": "read", "GetStr": "read",

@@ -149,7 +149,7 @@ fn replace_read_changed() {
 		plain,
 	)
 	.expect_err("changed before");
-	assert_eq!(e.kind, ErrKind::Io);
+	assert_eq!(e.kind, ErrKind::Changed);
 	assert!(!called, "backup made for a file that changed");
 	assert_eq!(read(Path::new(&t.path)), WAS);
 
@@ -160,7 +160,7 @@ fn replace_read_changed() {
 		Ok(name)
 	};
 	let e = replace_read(&t.path, WAS, NOW, edit, plain).expect_err("changed during backup");
-	assert_eq!(e.kind, ErrKind::Io);
+	assert_eq!(e.kind, ErrKind::Changed);
 	assert_eq!(read(Path::new(&t.path)), "a: 3\n");
 	assert_eq!(names(&t.dir), ["c.shcl"]);
 }
@@ -403,7 +403,7 @@ fn open_upgrade_edited_meanwhile() {
 	fs::write(&path, CLEAN_2X).unwrap();
 	let mut d = shclw::v3::open(&p).expect("open");
 	fs::write(&path, "tags: x, y\n").unwrap();
-	assert_eq!(d.write(&p).err().map(|e| e.kind), Some(ErrKind::Io));
+	assert_eq!(d.write(&p).err().map(|e| e.kind), Some(ErrKind::Changed));
 	assert_eq!(read(&path), "tags: x, y\n");
 	assert_eq!(names(dir), ["c.shcl"]);
 	assert_eq!(d.backup_name(), "");

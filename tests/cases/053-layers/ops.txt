@@ -1,0 +1,53 @@
+# Defaults, a site file, the user file, then this run's command line, lowest
+# first (2026101512024156).
+layers	=port: 80\nname: app\ntags: [a, b, c]\nnote: ```\ndefault text\n```\ndb:\n\thost: localhost\n\tpool: 2\n	site.shcl	doc.shcl	=port: 1\n
+get	int	port
+get	str	name
+get	strs	tags
+get	raw	note
+get	str	db.host
+get	int	db.pool
+names	db
+diags
+errors
+text
+rewrites
+# Edits go to the user file, and the command line still wins reads.
+put	int	port	5
+get	int	port
+put	int	db.pool	3
+get	int	db.pool
+remove	name
+get	str	name
+comment	db	from the user
+syntax	tags	[y, z]
+get	strs	tags
+text
+write	doc.shcl
+files
+# A missing site file is skipped, and a missing user file is made by the
+# first write.
+layers	=a: 1\n	nosite.shcl	new.shcl
+get	int	a
+text
+put	int	b	2
+write	new.shcl
+files
+# With no file layer, edits go to the last one.
+layers	=a: 1\n	=a: 2\nc: 3\n
+put	int	a	4
+get	int	a
+text
+# A newer user file reads, but can't be saved over.
+layers	site.shcl	toonew.shcl
+get	int	port
+get	int	a
+readonly
+write	toonew.shcl
+# A newer lower layer reads too, and the user file still saves.
+layers	toonew.shcl	nosite.shcl	new.shcl
+readonly
+get	int	a
+# A refused layer's lines say which layer they're in.
+layers	=a: 1\n	old.shcl	doc.shcl
+diags

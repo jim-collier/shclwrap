@@ -1,0 +1,45 @@
+> write	secret.shcl	mode=0600
+ok
+| a: 1
+> mode	secret.shcl
+0600
+> write	open.shcl	create	mode=0666
+ok
+| a: 1
+> mode	open.shcl
+0666
+> write	secret.shcl	mode=0644
+ok
+| a: 1
+> mode	secret.shcl
+0600
+> open	secret.shcl
+ok
+> put	int	a	4
+ok
+> write	secret.shcl	mode=0644
+ok
+| a: 4
+> mode	secret.shcl
+0600
+> write	secret.shcl	force	mode=0644
+ok
+| a: 4
+> mode	secret.shcl
+0600
+> layers	=a: 1\n	user.shcl
+ok
+> write	user.shcl	mode=0640
+ok
+> mode	user.shcl
+0640
+> write	sticky.shcl	mode=01644
+error badvalue
+> write	sticky.shcl	mode=9
+error badvalue
+> files
+doc.shcl
+open.shcl
+ops.txt
+secret.shcl
+user.shcl

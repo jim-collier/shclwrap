@@ -80,6 +80,8 @@ typedef enum {
 	SHCLW_ERR_AMBIGUOUS,
 	SHCLW_ERR_BACKUP_TAKEN,
 	SHCLW_ERR_NO_READ_BACK,
+	SHCLW_ERR_CHANGED,
+	SHCLW_ERR_EXISTS,
 	SHCLW_ERR_NO_MEMORY
 } shclw_kind;
 
@@ -97,12 +99,40 @@ typedef struct {
 	size_t n;
 } shclw_string;
 
+// layer is the 1-based place in shclw_open_layers' list of the layer the line
+// is in, or 0 for a document that isn't layered.
 typedef struct {
 	size_t line;
 	shclw_severity severity;
 	shclw_string code;
 	shclw_string message;
+	size_t layer;
 } shclw_diag;
+
+// A line in a loaded document. layer is as in shclw_diag.
+typedef struct {
+	size_t line;
+	size_t layer;
+} shclw_spot;
+
+// A name shcl kept one copy of, since a later copy had the same name and value
+// and was folded into it. lines has the kept copy's line, then each later
+// copy's. path reads the kept copy, as a shclw_node's does, and layer is as in
+// shclw_diag.
+typedef struct {
+	shclw_string path;
+	const size_t *lines;
+	size_t n_lines;
+	size_t layer;
+} shclw_merge;
+
+// One layer for shclw_open_layers: a file, or with file NULL, text the program
+// has, such as its defaults or this run's command line.
+typedef struct {
+	const char *file;
+	const char *text;
+	size_t len;
+} shclw_layer;
 
 // A read with its status. Check status before trusting value: an array that
 // reads as SHCLW_BAD_TYPE still has its items, with 0 for the bad ones. line
@@ -178,8 +208,9 @@ shclw_doc *shclw_new(void);
 shclw_doc *shclw_parse(const char *text, size_t len);
 // Fails only at SHCLW_STRICT, with SHCLW_ERR_STRICT. *doc is set either way.
 shclw_kind shclw_parse_with(const char *text, size_t len, shclw_strictness level, shclw_doc **doc, shclw_error *err);
-// Reads and parses a file. A missing file is SHCLW_ERR_NOT_FOUND, and one
-// written for a newer format SHCLW_ERR_TOO_NEW. An older file is upgraded in
+// Reads and parses a file. A missing file is SHCLW_ERR_NOT_FOUND. One written
+// for a newer format is read as this shcl reads it, and is read-only:
+// shclw_write on it is SHCLW_ERR_TOO_NEW. An older file is upgraded in
 // memory, as shclw_upgrade with from 0 does, and shclw_upgraded_from says so.
 // Nothing is written until shclw_write, and the first save over the file
 // backs it up. A 2.x file that reads two ways is SHCLW_ERR_AMBIGUOUS, and one shcl
@@ -189,6 +220,17 @@ shclw_kind shclw_parse_with(const char *text, size_t len, shclw_strictness level
 shclw_kind shclw_open(const char *path, shclw_doc **doc, shclw_error *err);
 // level applies to the upgraded text.
 shclw_kind shclw_open_with(const char *path, shclw_strictness level, shclw_doc **doc, shclw_error *err);
+// Reads n layers in order, lowest first, such as defaults, then a site file,
+// then the user's, and reads as their merge: a later layer's value, array, or
+// raw block takes the place of a lower one's, and blocks merge name by name,
+// as shcl_merge does. A missing file is skipped. Edits and saves go to the
+// last file layer, so shclw_text, shclw_write, and the rest are that layer's,
+// and a save writes only it. Text layers after it, such as this run's command
+// line, still win reads. Each file is opened as shclw_open does, and the first
+// error is returned, with *doc the empty document shclw_open gives, its
+// diagnostics with their layer set. shclw_diags gives every layer's, in layer
+// order. Free *doc either way.
+shclw_kind shclw_open_layers(const shclw_layer *layers, size_t n, shclw_doc **doc, shclw_error *err);
 // The format shclw_open upgraded the file from, or 0 when it didn't upgrade
 // it. Reads, lines, diagnostics, and the text are all of the upgraded text.
 int64_t shclw_upgraded_from(shclw_doc *d);
@@ -206,10 +248,33 @@ char *shclw_canonical(shclw_doc *d, size_t *len);
 // Format line can't go in, since an edit made after shclw_info_block or
 // shclw_stamp_format. After a good save it gives back the memory earlier
 // edits left behind. The first save over a file shclw_open upgraded backs up
-// the original first, as shclw_upgrade_file does, and leaves a file that
-// changed since it was read alone with SHCLW_ERR_IO. A save with no Format
-// line has 2.x's info block swapped for the current one where it sat.
+// the original first, as shclw_upgrade_file does. A save over the file
+// shclw_open read leaves it alone with SHCLW_ERR_CHANGED when it changed on
+// disk since, and a document read from a newer format is SHCLW_ERR_TOO_NEW.
+// A save with no Format line has 2.x's info block swapped for the current one
+// where it sat.
 shclw_kind shclw_write(shclw_doc *d, const char *path, shclw_error *err);
+// What a save does. Zeroed is a plain shclw_write. force writes over the file
+// shclw_open read even when it changed on disk since. It doesn't write over a
+// file in a newer format.
+//
+// create writes only where nothing is there yet, and is SHCLW_ERR_EXISTS
+// otherwise, even with 2 programs creating the file at once. It never
+// replaces, so there's no changed check for force to skip.
+//
+// mode is the permission bits a file this save creates gets, exactly, with no
+// umask. 0 is a plain create's 0666 less the umask. A file that's already
+// there keeps its own mode. Windows ignores it.
+typedef struct {
+	bool force;
+	bool create;
+	unsigned mode;
+} shclw_write_opts;
+// shclw_write with options, which may be NULL.
+shclw_kind shclw_write_with(shclw_doc *d, const char *path, const shclw_write_opts *opts, shclw_error *err);
+// Whether the document was read from a newer format, which shclw_write
+// refuses with SHCLW_ERR_TOO_NEW.
+bool shclw_read_only(shclw_doc *d);
 // Gives back what earlier edits left behind, as a good shclw_write does, for a
 // program that edits a lot between saves. C only, since Go and Rust free it
 // themselves.
@@ -226,6 +291,16 @@ bool shclw_rewrites(shclw_doc *d);
 shclw_diag *shclw_diags(shclw_doc *d, size_t *n);
 // How many of them are errors.
 size_t shclw_errors(shclw_doc *d);
+// The lines the load couldn't use, which are the lines with an error, once
+// each, by layer then line. Not the 2.0 errors a refused shclw_open leaves in
+// shclw_diags, since Go and Rust have those on the error. Caller frees. NULL
+// only when memory ran out.
+shclw_spot *shclw_unused(shclw_doc *d, size_t *n);
+// Each name the load kept one copy of, since a later copy had the same name
+// and value, with every copy's line. On a layered document it's each layer's
+// own, and not what the layers' merge folded. One block; caller frees. NULL
+// only when memory ran out.
+shclw_merge *shclw_merged(shclw_doc *d, size_t *n);
 // d checked against a schema document. Caller frees the block. NULL only when
 // memory ran out.
 shclw_diag *shclw_check(shclw_doc *d, shclw_doc *schema, size_t *n);
@@ -265,7 +340,7 @@ typedef struct {
 shclw_kind shclw_upgrade(const char *text, size_t len, int64_t from, shclw_upgraded **out, shclw_error *err);
 // shclw_upgrade on a file. When it changes the file it first copies the
 // original beside it. A file that changed after it was read is left alone with
-// SHCLW_ERR_IO, and a failed write leaves the original in place.
+// SHCLW_ERR_CHANGED, and a failed write leaves the original in place.
 shclw_kind shclw_upgrade_file(const char *path, int64_t from, shclw_upgraded **out, shclw_error *err);
 
 // Puts the info block at the end of what the save writes, or with on false
@@ -347,7 +422,9 @@ size_t shclw_remove(shclw_doc *d, const char *path);
 
 // The shcl document underneath. On 3.0 a shclw read gives shcl's read memory
 // back, so a result from shcl's own read calls on it is good only until the
-// next shclw call.
+// next shclw call. On a layered document it's the merge, built again after
+// each edit, so a change made on it is gone after the next one, and never
+// saved.
 shcl_doc *shclw_inner(shclw_doc *d);
 
 // A whole file, which has to be UTF-8. A missing one is SHCLW_ERR_NOT_FOUND.

@@ -1,0 +1,68 @@
+> open	newer.shcl
+ok
+> readonly
+true
+> get	int	a
+Good	1	1
+> get	str	b.c
+Good	3	two
+> put	int	a	2
+ok
+> get	int	a
+Good	1	2
+> write	newer.shcl
+error toonew
+> write	copy.shcl
+error toonew
+> write	newer.shcl	force
+error toonew
+> files
+doc.shcl
+newer.shcl
+ops.txt
+site.shcl
+> info	on
+error toonew
+> stamp
+error toonew
+> open	newer.shcl	strict
+ok
+> readonly
+true
+> parse
+ok
+> readonly
+true
+> write	copy.shcl
+error toonew
+> layers	newer.shcl	user.shcl
+ok
+> readonly
+false
+> get	int	a
+Good	1	1
+> put	int	a	3
+ok
+> write	user.shcl
+ok
+| a: 3
+> layers	site.shcl	newer.shcl
+ok
+> readonly
+true
+> get	str	site
+Good	1	yes
+> get	int	a
+Good	1	1
+> write	newer.shcl
+error toonew
+> files
+doc.shcl
+newer.shcl
+ops.txt
+site.shcl
+user.shcl
+> open	site.shcl
+ok
+> readonly
+false

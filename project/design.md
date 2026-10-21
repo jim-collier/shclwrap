@@ -6,7 +6,7 @@
 <!-- TOC ignore:true -->
 # Design
 
-Status: draft, 2026-10-15. Go, Rust, and C are built over shcl 3.0, with 2.0 built in for the upgrade's check. 3.0 is the floor. Python and shcl 4 are in the backlog.
+Status: draft, 2026-10-15. Go, Rust, C, and Python are built over shcl 3.0, with 2.0 built in for the upgrade's check. 3.0 is the floor. shcl 4 is in the backlog.
 
 <!-- TOC ignore:true -->
 ## Table of contents
@@ -69,11 +69,11 @@ Status: draft, 2026-10-15. Go, Rust, and C are built over shcl 3.0, with 2.0 bui
 
 ### Non-goals
 
-- Covering all of shcl. Raw blocks, datetimes, durations, sizes, merging, and schema generation stay with shcl, through `Inner()`.
+- Covering all of shcl. Raw blocks, datetimes, durations, sizes, merging past `OpenLayers`, and schema generation stay with shcl, through `Inner()`.
 
 - Building on shcl 1.2 or 2.0. A program on either moves to 3.0 when it moves onto the wrapper.
 
-- Hiding the file format change. A file written for a newer format than the bound shcl's is `ErrTooNew`. An older one is upgraded, and `UpgradedFrom` tells the program so.
+- Hiding the file format change. A file written for a newer format than the bound shcl's opens read-only, and `Write` on it is `ErrTooNew`. An older one is upgraded, and `UpgradedFrom` tells the program so.
 
 - Publishing to a package registry.
 
@@ -94,6 +94,7 @@ Status: draft, 2026-10-15. Go, Rust, and C are built over shcl 3.0, with 2.0 bui
 | Go       | `source/go/shclw`, plus `shclw3`       | import path: `.../source/go/shclw3`
 | Rust     | `source/rust`, crate `shclw`           | feature `shcl3`, then module `shclw::v3`
 | C        | `source/c`, `shclw.h`, plus `shclw3.c` | the `shcl.h` the build includes, which has to be 3.0
+| Python   | `source/python`, module `shclw`        | the `shcl.py` found when it loads, which has to be 3.0
 
 - Go can't import one package or another by condition inside one file, so each shcl version gets its own small package. They have the same calls, checked by the compiler against the `shclw.Doc` interface. The shared types and the ops runner are in `shclw`.
 
@@ -107,7 +108,7 @@ Status: draft, 2026-10-15. Go, Rust, and C are built over shcl 3.0, with 2.0 bui
 
 ## API
 
-Go names are listed. Rust uses the same words in snake case, and `ShclDoc` has them as methods. C uses snake case with a `shclw_` prefix, and takes the document first: `shclw_int(d, "port", 8080)`, `shclw_get_str(d, path)`.
+Go names are listed. Rust uses the same words in snake case, and `ShclDoc` has them as methods. Python uses Rust's words, except that a read with a fallback ends in `_or`, as in `int_or("port", 8080)`, so no method takes a builtin's name. `Upgraded.From` is `from_`, and Python raises `shclw.Error` where Go returns one. C uses snake case with a `shclw_` prefix, and takes the document first: `shclw_int(d, "port", 8080)`, `shclw_get_str(d, path)`.
 
 ### Loading and saving
 
@@ -116,15 +117,20 @@ Go names are listed. Rust uses the same words in snake case, and `ShclDoc` has t
 | `New()`                   | An empty document.
 | `Parse(text)`             | Never fails. Problems are in `Diags()`.
 | `ParseWith(text, level)`  | `Loose`, `Standard`, or `Strict`. Only `Strict` fails, with `ErrStrict`.
-| `Open(path)`              | Reads and parses a file, and upgrades an older one in memory. A missing file is `ErrNotFound`, and a newer format is `ErrTooNew`.
+| `Open(path)`              | Reads and parses a file, and upgrades an older one in memory. A missing file is `ErrNotFound`, and a newer format opens read-only.
 | `OpenWith(path, level)`   | `Open` at a strictness.
+| `OpenLayers(layers...)`   | Reads defaults, a site file, a user file, and so on, lowest first, as one document. Edits and saves go to the last file.
 | `d.Text()`                | The document as it would be saved.
 | `d.Canonical()`           | The document in canonical form.
-| `d.Write(path)`           | Saves `Text()` atomically. The first one over a file `Open` upgraded backs it up first.
+| `d.Write(path)`           | Saves `Text()` atomically. The first one over a file `Open` upgraded backs it up first. Over a file that changed on disk since `Open` read it, it's `ErrChanged`.
+| `d.WriteWith(path, opts)` | `Write` with `WriteOpts`. `Force` writes over a file that changed, `Create` writes only a new file, and `Mode` is a new file's mode.
+| `d.ReadOnly()`            | Whether the document came from a newer format, which `Write` refuses.
 | `d.Rewrites()`            | Whether `Write` puts the canonical form in place of the lines the document was loaded from.
 | `d.UpgradedFrom()`        | The format `Open` upgraded the file from, or 0.
 | `d.BackupName()`          | Where the first `Write` over an upgraded file put the original, or empty.
 | `d.Diags()`, `d.Errors()` | The load's diagnostics, and how many are errors.
+| `d.Unused()`              | The lines the load couldn't use, once each.
+| `d.Merged()`              | Each name shcl kept one copy of, with the lines of every copy.
 | `d.Check(schema)`         | Validates against a schema document.
 | `schema.DropDeclared(ds)` | Drops the repeat hints for keys the schema says repeat.
 
@@ -136,17 +142,68 @@ Go names are listed. Rust uses the same words in snake case, and `ShclDoc` has t
 
 - `Open` upgrades a file the way `Upgrade` does with `from` 0, adn nothing is written until a `Write`.
 	- A file with no Format line that has 2.x's `#` info block is taken as 2.x. Otherwise one that loads clean on 3.0 is taken as current. One that loads with errors is taken as 2.x when shcl 2.0 reads it clean, and upgraded. One that 2.0 has errors on too is taken as current, with 3.0's errors in `Diags`, and a strict `Open` fails on it with `ErrStrict` as usual.
-	- A file its Format line or its 2.x block marks as 2.x is `ErrRefused` with 2.0's errors when 2.0 has errors on it. A 2.x file that reads two ways is `ErrAmbiguous`. Either way the document is empty, as for `ErrTooNew`. In C the empty document's `shclw_diags` has 2.0's errors.
+	- A file its Format line or its 2.x block marks as 2.x is `ErrRefused` with 2.0's errors when 2.0 has errors on it. A 2.x file that reads two ways is `ErrAmbiguous`. Either way the document is empty. In C the empty document's `shclw_diags` has 2.0's errors.
 	- A file whose Format line names 3 is current, errors and all, and skips the upgrade.
 	- Reads, `Lines`, `Diags`, and `Text` are all of the upgraded text, and the strictness applies to it.
-	- The first `Write` over the file backs up the original as `UpgradeFile` does, with the same name and `ErrBackupTaken`. Over the file means the path `Open` read, or the same file by another name. A `Write` anywhere else makes no backup, and later ones over the file make none either. A file that changed since `Open` read it is left alone with `ErrIO`.
+	- The first `Write` over the file backs up the original as `UpgradeFile` does, with the same name and `ErrBackupTaken`. Over the file means the path `Open` read, or the same file by another name. A `Write` anywhere else makes no backup, and later ones over the file make none either. A file that changed since `Open` read it is left alone with `ErrChanged`, and no backup is made.
 	- `Rewrites` is true until that first `Write`, since it replaces the original's lines.
 	- `Parse` never upgrades. Text has no file to back up, and `Upgrade` is there for it.
 	- A program whose files can't say they're older converts them ahead of time with `UpgradeFile(path, 2)`. To only read one, it passes `Upgrade(text, 2)`'s text to `Parse`.
 
+- A file whose Format line names a newer format opens read-only (2026101513330014). It reads as 3.0 reads it, with 3.0's errors in `Diags`, and the strictness applies as usual.
+	- `ReadOnly` says so, and `Write` refuses it anywhere with `ErrTooNew`, since a 3.0 save would write the newer file's lines as 3.0 sees them under a Format line that says otherwise. `Force` doesn't change that. Edits still work in memory, and so does `Text`.
+	- It's the text that decides, so `Parse` of such text is read-only too. `Upgrade` and `UpgradeFile` still refuse it with `ErrTooNew`.
+	- Before this, `Open` refused such a file. A program that never writes, like Folderkite, can now read one.
+
+- A `Write` over the file `Open` read first checks it still holds what `Open` read, byte for byte, and leaves it alone with `ErrChanged` when it doesn't (2026101513330017). After a good `Write` over it, the check is against what that `Write` left.
+	- It's the same check the upgrade's backup makes, before the backup and again right before the rename. It's a check and not a lock, so another program's save in the moment between the last check and the rename is still lost. It catches the usual case, 2 programs that each read, edit, and save a while apart.
+	- Content only, not size or mtime, so a file saved again with the same bytes counts as unchanged, and a touch alone doesn't count. The document keeps the text it read to compare, about the file's size in memory.
+	- Over the file means the path `Open` read, or the same file by another name. A `Write` anywhere else isn't checked.
+	- A layered document's user file that wasn't there at load has to still not be there. Another program that made it meanwhile is `ErrChanged`.
+	- `Parse` and `New` documents read no file, so there's nothing to check.
+	- `WriteWith(path, WriteOpts{Force: true})` skips the check, for a program that means to replace whatever is there. On an upgraded file the first `Write` still backs up the original `Open` read. Rust takes `&WriteOpts { force: true, ..WriteOpts::default() }`, Python `write(path, force=True)`, and C a `shclw_write_opts` or NULL.
+
+- `WriteOpts{Create: true}` writes only where nothing is there yet, and is `ErrExists` otherwise (2026101513330015). Of 2 programs creating one file at once, exactly one gets it, and the file is all of that one's text.
+	- The text goes to a temp file beside it, synced, which is then hard-linked to the name and removed. A link fails when the name is taken, so the name never holds part of a file, and there's no moment between a check and the write. That's what Radixmill does. On Windows C moves the temp into place without replacing, which fails the same way, and Go, Rust, and Python link there too, as NTFS has hard links.
+	- A filesystem with no hard links, such as FAT, gets an exclusive create of the name itself. The one-winner rule holds, but a crash part way leaves part of a file, which then blocks the next create.
+	- Anything at the name counts, a dangling symlink too.
+	- It never replaces, so there's no changed check, and `Force` has nothing to skip. A document `Open` read refuses with `ErrExists` over its own file, unless that file was removed since. A read-only document is still `ErrTooNew`, and nothing is backed up.
+	- Rust and Python have it as `create`, and C as the `create` field.
+
+- `WriteOpts{Mode: 0o600}` is the permission bits a file this `Write` creates gets, exactly, past the umask (2026101513330016). It's born private and set by chmod before it's in place, so it's never readable to anyone the mode leaves out.
+	- A file that's already there keeps its own mode, as every save keeps it, since shcl's atomic write copies the old file's mode to the new one. So a program that wants an existing file's mode changed calls chmod itself.
+	- A file a `Write` with no mode creates gets 0666 less the umask, as any create does. So does one made through a symlink that points at nothing yet, since the name is taken and shcl's write follows the link.
+	- More than permission bits, such as setuid or sticky, is `ErrBadValue`, and nothing is written.
+	- Windows has no Unix modes and ignores it.
+	- In Go and C a mode of 0 means none was given. Rust takes `mode: Some(0o600)`, and Python `mode=0o600`.
+
 - A save whose text has no Format line has 2.x's `#` info block swapped for the current one, with its Format line, where the old one sat (2026101513330010). That's `Write`, `Text`, and `Canonical`.
 	- It's the upgrade's swap, with the same block finder, so a block's text inside a raw body doesn't count. The lines end as the file's did.
 	- So a 2.x file read with `Parse` and saved names format 3, and the next `Open` reads what the program had.
+
+- `OpenLayers` reads its layers lowest first, such as built-in defaults, then a site file, then the user's file, and the document reads as their merge (2026101512024156). A layer is a file, or text the program has, like its defaults or this run's command line.
+	- A later layer's value, array, or raw block takes the place of a lower one's, whole. Blocks merge name by name, so a user file that sets `db.pool` keeps the site's `db.host`. It's shcl's own merge.
+	- A missing file is skipped, since a site or user file that isn't there is normal. Any other error opening a file is returned as `Open` returns it, with an empty document.
+	- A layer in a newer format opens as `Open` opens it. A lower one reads, and a user file makes the document read-only.
+	- Edits and saves go to the last file layer, the user's file. `Text`, `Canonical`, `Write`, `Rewrites`, `InfoBlock`, `StampFormat`, `UpgradedFrom`, and `BackupName` are that layer's, so a save writes what the user's file had plus the edits, and nothing from below. A missing user file is made by the first `Write`. With no file layer, the last layer takes the edits.
+	- Text layers after the last file, like a command line, still win reads, and are never saved.
+	- Reads, `Each`, `Lines`, `Check`, and `Inner` are of the merge, built again after each edit, so a removed key reads as the layer below has it. A line number is the line in whichever layer the value came from.
+	- `Diags` and `Errors` are every layer's, in layer order. `Diag.Layer` is the layer's place in the list, from 1, and 0 on a document that isn't layered.
+	- An edit takes its path as the edit layer reads it. So an index from `Each`, `First`, or `Last` on the merge can name another instance, or none, where a lower layer has the same key.
+	- Rust takes `&[Layer::Text(..), Layer::File(..)]`. C's `shclw_open_layers` takes an array of `shclw_layer`, each a `file`, or with `file` NULL, a `text` and `len`.
+
+- `Unused` is the lines with an error, once each, in order, as a list of `Spot`s, each a `Line` and a `Layer` as `Diag` has them (2026101513330018). It's for a warning like "lines 4 and 9 were skipped".
+	- An error on no line has no line to give, so it's left out.
+	- A strict load that fails still has its document, and `Unused` says the same on it.
+	- In C it leaves out the 2.0 errors a refused `shclw_open` keeps in `shclw_diags`, since Go and Rust have those on the error and not on the document.
+
+- `Merged` lists each copy of a name shcl folded into an earlier one, since the 2 had the same name and value (2026101513330009). shcl's H002 hint says so only when the copies are apart, so 2 blocks next to each other fold without a word, and the second one's instance is gone.
+	- Each `Merge` has the kept copy's `Path`, as `Each` gives it, adn `Lines`, the kept copy's line and then each later copy's. A third copy adds a line to the same `Merge`.
+	- Every level of a folded block is listed, as H002 does. A block with a child block that folded too gives 2.
+	- A dotted line like `db.user: u` that only reopens `db` isn't a copy of `db`, so it isn't listed. A dotted line that writes `db.host` again with the same value is a copy of `db.host`.
+	- A repeated key with another value isn't folded. It reads as `Multiple`, and `Lines` lists it.
+	- Both say what the load found, so an edit doesn't change them. On a layered document they're each layer's own, with `Layer` set, and the folding the layers' own merge does is left out, since that's what layering is for.
+	- `Merged` parses the loaded text twice more when it's called, so it costs about 2 loads.
 
 - C also has `shclw_compact`, for a program that edits a lot between saves. [Decisions](#decisions) says why.
 
@@ -223,7 +280,7 @@ Go names are listed. Rust uses the same words in snake case, and `ShclDoc` has t
 	- `from` 2 says the file is known to be from shcl 2.x or older. The file can't say so itself, so only the program can.
 	- `UpgradeFile` copies the original beside it first, and `Backup` names the copy.
 	- `UpgradeFile` reads the file once. The 2.0 check, the conversion, and the backup all use that text.
-	- A file that changed since that read is left alone with `ErrIO`. It's checked before the backup and again right before the write. That's a check and not a lock, so an edit in the moment between the last check and the rename is still lost.
+	- A file that changed since that read is left alone with `ErrChanged`. It's checked before the backup and again right before the write. That's a check and not a lock, so an edit in the moment between the last check and the rename is still lost.
 	- The new text goes to a temp file that's renamed into place, so a failed write leaves the original. If a failed replace left nothing at the path, the backup is moved back. The backup is removed whenever the original is still there, and only kept, and named in the error, when it can't be put back.
 	- A file whose Format line names a newer format is `ErrTooNew`, as `Upgrade` says, and anything that isn't a regular file is `ErrIO`.
 	- A file its Format line, its 2.x block, or `from` 2 marks as 2.x, and that shcl 2.0 reports errors on, is `ErrRefused`, with those errors in the error's `Diags`. Nothing is written and no backup is made. 2.0 read such a line the way it repaired it, or not at all, and a raw block that never closes took the rest of the file. The upgrade would make a clean file out of it that means something else.
@@ -231,6 +288,7 @@ Go names are listed. Rust uses the same words in snake case, and `ShclDoc` has t
 	- 1.2 read values the same way, but read names as typed, as 3.0 does. A name 2.0 read with an escape resolved can't be renamed, so it's refused, unless the file's Format line names 1.
 	- A value that still reads differently, or such a name, is `ErrRefused`, with the lines in `Diags`. Nothing is written.
 	- That check needs shcl 2.0, so the 3.0 adapter builds it in too. In Rust the `shcl3` feature turns on the `shcl2` dependency.
+	- In Python, 2.0's `shcl.py` is kept beside the wrapper as `_shclw_shcl2.py` and loads under that name, since both are `shcl`.
 	- In C, 2.0's `shcl.h` and 3.0's declare the same names, so 2.0's goes in 2 files of its own with each call renamed. The C upgrade gives 2.0's errors in its result, `shclw_upgraded`, since C's error has no list.
 	- 2.x's `#` info block is swapped for the current one where it sits, in a file with no Format line. shcl leaves a clean file's block alone, and puts the new block at the end of a file it writes out again.
 	- When shcl writes a CRLF file out again with LF only, the upgrade puts the CRLF back, unless that would change a value.
@@ -256,7 +314,7 @@ Go names are listed. Rust uses the same words in snake case, and `ShclDoc` has t
 
 ### Errors
 
-- One error type, `*shclw.Error` in Go and `shclw::Error` in Rust, with a kind a program can act on: `NotFound`, `IO`, `Strict`, `Refused`, `BadPath`, `BadValue`, `TooNew`, `Unsupported`, `Ambiguous`, `BackupTaken`, and `NoReadBack`.
+- One error type, `*shclw.Error` in Go, `shclw::Error` in Rust, and `shclw.Error` in Python, with a kind a program can act on: `NotFound`, `IO`, `Strict`, `Refused`, `BadPath`, `BadValue`, `TooNew`, `Unsupported`, `Ambiguous`, `BackupTaken`, `NoReadBack`, `Changed`, and `Exists`.
 
 - `Refused` is a save that would drop lines the load couldn't use, which 3.0 refuses. It's also an upgrade of a 2.x file that shcl 2.0 reports errors on.
 
@@ -279,7 +337,7 @@ Each row has a test, either a shared case or an API test.
 | `Names` with a name given twice          | Lists it once per line.                                     | Lists it once. Names match without ASCII case only, as in shcl, so `É` and `é` are 2.
 | A put that doesn't read back the same    | Says ok.                                                    | Reads every put back. A mismatch is `NoReadBack`, with the edit left in place.
 | `PutSyntax` text with a trailing comment | Drops the comment and says ok.                              | `NoReadBack`, with the edit left in place.
-| Opening a newer format's file            | 3.0 reads it, with a hint.                                  | `ErrTooNew`. A Format line in a raw body doesn't count, as in 3.0.
+| Opening a newer format's file            | 3.0 reads it, with a hint.                                  | Read-only, and `Write` is `ErrTooNew`. A Format line in a raw body doesn't count, as in 3.0.
 | Opening a 1.2 or 2.0 file                | 3.0 reads it by its own rules, with errors.                 | `Open` upgrades it in memory, and the first `Write` backs up the original.
 | Upgrading a 2.x file 2.0 had errors on   | 3.0 writes a clean file, with nothing lost and no error.    | Refuses with `ErrRefused` and leaves the file alone. With nothing to mark the file as 2.x, it's current.
 | A 2.x backslash escape in a value        | 3.0 keeps it as typed, and reads it as text.                | The upgrade writes it so 3.0 reads what 2.x read.
@@ -305,7 +363,9 @@ An ops script is one op per line, with fields split by tabs. `\t`, `\n`, `\r`, a
 | `parse [loose\|standard\|strict]`       | `ok` or `error strict`, and the document is reloaded
 | `text`, `canonical`                     | the document, one `\|`-prefixed line per line
 | `rewrites`                              | `true` or `false`, from `Rewrites`
-| `diags`, `errors`                       | each diagnostic as line, severity, code, and message, or the count
+| `diags`, `errors`                       | each diagnostic as line, severity, code, and message, or the count. A layer's line is `LAYER:LINE`.
+| `unused`                                | how many lines, then each one
+| `merged`                                | each merge's path, then its lines, one merge per line
 | `get TYPE PATH`                         | status, line, and the value. Arrays print a count, then the items.
 | `or TYPE PATH FALLBACK...`              | the value or the fallback
 | `has`, `count`, `line`, `names`         | the answer for PATH
@@ -319,8 +379,12 @@ An ops script is one op per line, with fields split by tabs. `\t`, `\n`, `\r`, a
 | `info on\|off`, `stamp`                 | `ok` or `error KIND`, from `InfoBlock` and `StampFormat`
 | `check FILE [all\|drop]`                | the schema check, with the load's own diagnostics for `all`, and then dropped ones for `drop`
 | `format`, `upgrade [FROM]`              | the format number, or the upgrade's result and text
-| `write FILE`                            | `ok` and the saved file, or `error KIND`
+| `write FILE [force] [create] [mode=M]`  | `ok` and the saved file, or `error KIND`. The flags are `WriteOpts`'s, with M in octal.
+| `mode FILE`                             | the file's permission bits, in octal
+| `readonly`                              | `true` or `false`, from `ReadOnly`
+| `scribble FILE TEXT`                    | `ok` once TEXT is in FILE, written as another program would
 | `open FILE [loose\|standard\|strict]`   | `ok`, or `error KIND` and the error's diagnostics, and the document is reloaded
+| `layers SPEC...`                        | `open` for `OpenLayers`. Each SPEC is a file name, or `=` and a text layer's text.
 | `upgraded`                              | `UpgradedFrom` and `BackupName`, then the backup's text
 | `files`                                 | the names in the folder
 
@@ -332,7 +396,7 @@ An ops script is one op per line, with fields split by tabs. `\t`, `\n`, `\r`, a
 
 - Floats print the same in every language: the shortest digits that read back exactly, positional from 1e-5 to 1e17, otherwise with an exponent. When 2 spellings of that length are equally close, the even one wins, as in Go.
 
-- `check`, `write`, `open`, and `files` only work in the folder the driver is given, and refuse a name with a path in it. A case's own files are in that folder, `doc.shcl` among them. The time in a backup's name prints as `STAMP`.
+- `check`, `write`, `scribble`, `open`, and `files` only work in the folder the driver is given, and refuse a name with a path in it. A case's own files are in that folder, `doc.shcl` among them. The time in a backup's name prints as `STAMP`.
 
 ## Testing
 
@@ -350,14 +414,14 @@ An ops script is one op per line, with fields split by tabs. `\t`, `\n`, `\r`, a
 
 - Every feature and every fix gets a case, or a line in an existing one.
 
-- C runs the same cases through its driver with `cicd/c_cases.py`, op by op against the same want files.
+- C runs the same cases through its driver with `cicd/c_cases.py`, op by op against the same want files. Python runs them the same way, with `--lang Python` and its driver, `source/python/shclw_drive.py`.
 
 ### Fuzzing
 
 - `cicd/fuzz.py` makes a document and an ops script from each seed, with a generator that knows each format's syntax. Half of the generated documents are in the 1.2 and 2.0 syntax, as old programs wrote them, so the upgrade sees them. A quarter of the documents are mutated copies of the case documents instead.
 	- Each driver gets the document as `doc.shcl` in its own folder. A quarter of the scripts `open` it first and end by saving over it twice, so an old one is upgraded in memory and backed up.
 
-- Each case runs through the Go, Rust, and C drivers on the same shcl version. Rust's and C's outputs must match Go's byte for byte, apart from the time 3.0 stamps on a line it comments out. None may crash, and a put that says ok must read back the same. A float read that says `Good` must not give infinity or NaN. A `first` or `last` read must not say `Multiple`, and has to be on the first or last line `lines` gave for that path. An edit that says ok must have found one instance at every step of its path that exists, counted just before it. The text right after an `info on` that says ok ends with the block naming the version's format, holds one block where the document had no block text in a raw body, and a second `info on` doesn't change it.
+- Each case runs through the Go, Rust, C, and Python drivers on the same shcl version. Rust's, C's, and Python's outputs must match Go's byte for byte, apart from the time 3.0 stamps on a line it comments out. None may crash, and a put that says ok must read back the same. A float read that says `Good` must not give infinity or NaN. A `first` or `last` read must not say `Multiple`, and has to be on the first or last line `lines` gave for that path. An edit that says ok must have found one instance at every step of its path that exists, counted just before it. The text right after an `info on` that says ok ends with the block naming the version's format, holds one block where the document had no block text in a raw body, and a second `info on` doesn't change it.
 
 - It runs for a wall-clock budget, and a failing seed is saved with its document, script, and each driver's output. If too few reads find a value, the run fails, since a generator that stopped making readable documents would pass forever.
 
@@ -365,7 +429,9 @@ An ops script is one op per line, with fields split by tabs. `\t`, `\n`, `\r`, a
 
 - Go's own fuzzer runs `Run` on random documents and scripts against every version, looking for panics.
 
-- `cicd/cicd.bash` runs format, lint, tests, the C leak checks, and both fuzzers. `--ci` runs format check, lint, and tests, and is the pre-push hook. `--quick` leaves out the C sanitizers, analyzers, and leak checks, and anything that needs the network, and fuzzes for 10s.
+- `cicd/cicd.bash` runs format, lint, tests, the C leak checks, and both fuzzers. `--ci` runs format check, lint, and tests, and is the pre-push hook. `--quick` leaves out the C sanitizers, analyzers, and leak checks, and anything that needs the network, and fuzzes for 10s. `--leakcheck` adds the leak checks to either, and `--no-leakcheck` drops them from any run. `--dry-run` shows the stages a mix of flags picks.
+
+- A run removes its own scratch folder. It keeps what the next run reuses: the C container's home with CodeQL's compiled queries, the pinned headers, and the C image. It drops a cached header no pin names, an older C image no container uses, docker's dangling build cache after a rebuild, and leak reports from before the latest leak run. The newest 10 sets of fuzz failures are kept.
 
 ## Sharing the code
 
@@ -374,6 +440,8 @@ An ops script is one op per line, with fields split by tabs. `\t`, `\n`, `\r`, a
 - Rust: a git dependency on this repo with one feature on, or a copy of `source/rust/src`.
 
 - C: a copy of `shclw.h`, `shclw_adapter.h`, `shclw.c`, `info.c`, and `shclw3.c`, plus `run.c` for ops scripts. The program builds `shcl.h`'s own implementation once, as shcl asks. It also takes the `shclw3_v2` files and shcl 2.0's `shcl.h`.
+
+- Python: a copy of `shclw.py` and `_shclw_shcl2.py`, which is shcl 2.0's `shcl.py` kept byte for byte and checked against its pin. shcl 3.0 is a `shcl.py` beside them, or the installed one, in that order. Anything older is refused when the module loads, by `FORMAT_MAJOR`, which no binding had before 3.0.
 
 - A fix made in a copy goes back here, with a case, so every program gets it.
 
@@ -409,8 +477,8 @@ An ops script is one op per line, with fields split by tabs. `\t`, `\n`, `\r`, a
 	- `UpgradedFrom` and `BackupName` say what happened, rather than an `Upgraded` value on the document. Its text would be the document's own, and its count of unsure lines is from `UpgradeFile`, for a program that wants it ahead of time.
 	- `Rewrites` is true until the first `Write` over the file, since that one replaces every line the file had.
 	- The backup goes on the first `Write` over the file `Open` read, by path or the same file by another name, rather than on any `Write`. A copy saved somewhere else replaces nothing.
-	- It uses `UpgradeFile`'s backup and replace code, so a file that changed since `Open` read it is `ErrIO`, and the backup name and `ErrBackupTaken` are the same.
-	- An `Open` that's refused or ambiguous gives an empty document, as for `ErrTooNew`, rather than the original read by 3.0's rules. In C, 2.0's errors are that document's diagnostics, since C's error has no list.
+	- It uses `UpgradeFile`'s backup and replace code, so a file that changed since `Open` read it is `ErrChanged`, and the backup name and `ErrBackupTaken` are the same.
+	- An `Open` that's refused or ambiguous gives an empty document rather than the original read by 3.0's rules. In C, 2.0's errors are that document's diagnostics, since C's error has no list.
 	- Rust's `write` takes `&mut self`, since it records the backup.
 
 - With `from` 0, a file with no Format line that has 2.x's `#` info block is taken as 2.x, rather than as current (2026101513330010). No 3.0 writer makes that block, and Quillroute checked for it the same way.
@@ -418,7 +486,7 @@ An ops script is one op per line, with fields split by tabs. `\t`, `\n`, `\r`, a
 
 - `UpgradeFile` on 3.0 does its own read, backup, and write with shcl's parts, rather than call shcl's `UpgradeFile`. shcl's reads the file again after the wrapper's 2.0 check, so an edit in between was converted with no check.
 
-- A file that changed under `UpgradeFile` is `ErrIO`, as shcl reports it, rather than a kind of its own.
+- A file that changed under `UpgradeFile` was `ErrIO`, as shcl reports it, rather than a kind of its own. Since `Write` checks every save over the file it read, it's `ErrChanged` in both (2026101513330017), so a program handles one kind for one thing.
 
 - `Rewrites` is a call made before `Write`, rather than a second result from `Write`. It sits beside `Text` and `Canonical`, a program can put it in a plan before anything is written, and `Write` keeps one result in every language.
 
@@ -468,6 +536,41 @@ An ops script is one op per line, with fields split by tabs. `\t`, `\n`, `\r`, a
 	- 2.0 ends the program when memory runs out, where 3.0 has a hook for that.
 
 - The C upgrade gives one block, `shclw_upgraded`, and shcl 2.0's errors on a refused file are in it, rather than on the error. `shclw_error` is a fixed struct the caller never frees, and a list on it would need freeing after any call that can fail.
+
+- Layered loading uses shcl's own merge, rather than one of the wrapper's (2026101512024156). It's what Cobblevale calls today, and its rules are the ones a reader expects: a value, an array, or a raw block in a higher layer replaces the lower one's whole, and blocks merge by name. A merge of the wrapper's own would be one more set of rules to keep the same in 3 languages and in step with shcl. Other merging is still a non-goal, reached through `Inner()`.
+
+- Each layer stays its own document, and edits and saves go to the last file layer. The merge is built again after each edit. Saving the merge would copy the defaults and the site file into the user's file, and a later change to either would never show. Mossrealm and Cobblevale both keep the user layer apart and save only it. Building again costs a merge of every layer per edit, which is small for config files, and it's how a removed key comes to read as the layer below has it.
+	- Text layers after the last file are this run's, so a command line can be a layer without being saved, as Mossrealm's 4th layer is.
+	- The layers below stay as they were read, so saving only what differs from them (2026101513330030) can build on this.
+
+- A missing layer file is skipped. Any other error stops the load, as `Open` does, rather than leave that layer out. Leaving out a broken site file would hide it, and leaving out a user file that's too new would let the next save write over it.
+
+- A diagnostic names its layer by its place in the list, `Layer`, rather than by a name. The program already has the list, C gets no string to free, and a document that isn't layered gives the same diagnostics as before.
+
+- `Unused` and `Merged` are calls beside `Diags`, rather than fields filled in at load (2026101513330018, 2026101513330009). A field would cost every load the work, `Merged`'s two parses most of all, and a call matches `Diags`.
+	- The lines are a list of `Spot`s rather than plain numbers, as the upgrade's are, since a layered document's line needs its layer to mean anything.
+
+- `Unused` is every error's line, rather than only the lines shcl dropped from a canonical save (its `LostCount`). A line kept as written but read as nothing is still a line the program didn't get. Wovenshell builds its list from the errors too, and leaves out line 0, an error about the whole file.
+
+- `Merged` finds a folded copy by its line: it's on no node, and has no error. Each such line that starts with a name gets that name made unique, and the text is parsed again, so the copy stands alone, at the line it came from, under the same parent. The kept copy is then the one before it, under that parent, with the same name and value. shcl would be the better place for this, since its parser sees each fold happen, but it has no call for it, and H002 leaves the next-to-each-other case out on purpose. A call in shcl can replace this later with the same results.
+	- Writing the parser's rules again in each wrapper was the other choice. It would have to know raw blocks, lists, and dotted paths to tell a copy from a line that only looks like one. The second parse gets that from shcl.
+	- A raw block's body line that looks like a copy is left alone. Its renamed name is still raw text, so no node shows up at its line.
+
+- A newer file opens read-only rather than failing with `ErrTooNew` (2026101513330014). A program that only reads gets its settings, and one that writes finds out at `Write`, with the same `ErrTooNew` it got from `Open` before. Returning the document beside an `ErrTooNew` from `Open` was the other choice. It would keep every caller that stops on any error as it was, but `OpenLayers` would then need its own rule to skip that one error.
+	- `Write` refuses with `ErrTooNew` and not a new kind, since that's the reason, and programs already handle it.
+
+- `ErrChanged` is a kind of its own, where the upgrade's backup used `ErrIO` for the same thing before (2026101513330017). A program can act on it, by reading again and redoing its edit, which it can't on a disk error. `UpgradeFile` and the first `Write` over an upgraded file give it too now.
+	- The check is on by default, since a lost save is worse than a refused one. `Force` turns it off for one `Write`.
+	- It compares the text `Open` read, rather than a hash or size and mtime. It's exact, it was already there for the backup, and the cost is a copy of a config file. An mtime can stay the same across 2 saves in one tick, or change with nothing new.
+	- `WriteOpts` is a struct so the create-only Write (2026101513330015) and a file mode (2026101513330016) can be fields on it later.
+
+- Create-only is a link of a synced temp file, rather than an exclusive create of the name (2026101513330015). The exclusive create alone has the one-winner rule, but a reader or a crash can catch the file half written. A filesystem with no hard links falls back to the exclusive create, rather than refusing, since a save that fails on a USB stick is worse than one that's not atomic there.
+	- A taken name is `ErrExists`, a kind of its own, since a program acts on it, by reading the file that's there.
+
+- `Mode` is exact, set by chmod past the umask, rather than masked by it (2026101513330016). A program taht asks for 0600 means 0600, and a umask can only take bits away anyway, so masking would change nothing for 0600 and surprise anyone who asked for 0644 under a umask of 077.
+	- It applies only to a file the `Write` creates, as the mode of `open(2)` does. An existing file keeps its mode, which shcl's atomic write already did, so a program never changes a file's mode by saving it.
+
+- There's no `OpenLayersWith` yet. A program that wants strict layers checks `Errors()`, which counts every layer.
 
 - C's `shclw_drop_declared` takes the document and drops hints from its own diagnostics, rather than taking a list as Go and Rust do. shcl's C binding has only that form, and the match is on hint text that shcl builds inside itself.
 

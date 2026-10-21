@@ -1,0 +1,3 @@
+## _shclw_shcl2.py is shcl 2.0's own file, kept byte for byte.
+extend = "../../cicd/ruff.toml"
+extend-exclude = ["_shclw_shcl2.py"]

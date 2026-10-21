@@ -225,9 +225,11 @@ static void test_errors(void) {
 
 	const char newer[] = "k: 1\n##    Format   9\n";
 	put_file("newer.shcl", newer, sizeof newer - 1);
-	CHECK(shclw_open(in_scratch("newer.shcl"), &d, &err) == SHCLW_ERR_TOO_NEW);
+	// A newer file opens read-only.
+	CHECK(shclw_open(in_scratch("newer.shcl"), &d, &err) == SHCLW_OK && shclw_read_only(d));
+	CHECK(shclw_int(d, "k", 0) == 1);
+	CHECK(shclw_write(d, in_scratch("newer.shcl"), &err) == SHCLW_ERR_TOO_NEW);
 	CHECK(strstr(err.msg, "format 9") != NULL);
-	CHECK(shclw_int(d, "k", 0) == 0);
 	shclw_free(d);
 
 	const char good[] = "k: 1\n";
@@ -933,8 +935,8 @@ static void test_replace_read(void) {
 		bool ok = false;
 		switch (i) {
 		case 0: ok = k == SHCLW_OK && name && file_is(path, now) && file_is(name, was); break;
-		case 1: ok = k == SHCLW_ERR_IO && !t.backed_up && file_is(path, was) && count_dir(dir) == 1; break;
-		case 2: ok = k == SHCLW_ERR_IO && file_is(path, "a: 3\n") && count_dir(dir) == 1; break;
+		case 1: ok = k == SHCLW_ERR_CHANGED && !t.backed_up && file_is(path, was) && count_dir(dir) == 1; break;
+		case 2: ok = k == SHCLW_ERR_CHANGED && file_is(path, "a: 3\n") && count_dir(dir) == 1; break;
 		case 3: ok = k == SHCLW_ERR_BACKUP_TAKEN && file_is(path, was) && count_dir(dir) == 1; break;
 		case 4: ok = k == SHCLW_ERR_IO && strstr(err.msg, "boom") && file_is(path, was) && count_dir(dir) == 1; break;
 		case 5:
@@ -1113,7 +1115,7 @@ static void test_open_upgrade(void) {
 	write_mode(path, clean2x, 0644);
 	CHECK(shclw_open(path, &d, NULL) == SHCLW_OK);
 	write_mode(path, "tags: x, y\n", 0644);
-	CHECK(shclw_write(d, path, &err) == SHCLW_ERR_IO && file_is(path, "tags: x, y\n") && count_dir(dir) == 1);
+	CHECK(shclw_write(d, path, &err) == SHCLW_ERR_CHANGED && file_is(path, "tags: x, y\n") && count_dir(dir) == 1);
 	name = shclw_backup_name(d, NULL);
 	CHECK(name && name[0] == '\0');
 	free(name);
@@ -1319,6 +1321,83 @@ static void test_upgrade_raced(void) {
 	drop_dir(root);
 }
 
+static char *racer_text(int i) {
+	char line[16];
+	int n = snprintf(line, sizeof line, "v: %d\n", i);
+	char *t = (char *)malloc((size_t)n * 5000 + 1);
+	if (!t) {
+		return NULL;
+	}
+	for (int k = 0; k < 5000; k++) {
+		memcpy(t + (size_t)k * (size_t)n, line, (size_t)n);
+	}
+	t[(size_t)n * 5000] = '\0';
+	return t;
+}
+
+// Of several processes creating one name at once, exactly one wins, and the
+// file is all of the winner's text, at its mode.
+static void test_create_raced(void) {
+	enum { racers = 8 };
+	char root[4200];
+	make_dir(root, sizeof root, "create-raced");
+	for (int round = 0; round < 20; round++) {
+		char dir[8192], path[8300];
+		char sub[16];
+		(void)snprintf(sub, sizeof sub, "%d", round);
+		path_in(dir, sizeof dir, root, sub);
+		CHECK(mkdir(dir, 0755) == 0);
+		path_in(path, sizeof path, dir, "a.shcl");
+		int gate[2] = {-1, -1};
+		if (pipe(gate) != 0) {
+			CHECK(false);
+			break;
+		}
+		pid_t pids[racers];
+		for (int i = 0; i < racers; i++) {
+			pids[i] = fork();
+			if (pids[i] == 0) {
+				char go;
+				(void)close(gate[1]);
+				(void)read(gate[0], &go, 1); // EOF once the parent closes its end
+				char *t = racer_text(i);
+				shclw_kind k = t ? shclw_i_create_new(path, t, strlen(t), 0600, NULL) : SHCLW_ERR_NO_MEMORY;
+				_exit(k == SHCLW_OK ? 0 : k == SHCLW_ERR_EXISTS ? 1 : 2);
+			}
+		}
+		(void)close(gate[0]);
+		(void)close(gate[1]);
+		int won = -1;
+		for (int i = 0; i < racers; i++) {
+			int st = 0;
+			CHECK(pids[i] > 0 && waitpid(pids[i], &st, 0) == pids[i] && WIFEXITED(st));
+			int code = WEXITSTATUS(st);
+			CHECK(code == 0 || code == 1);
+			if (code == 0) {
+				CHECK(won < 0);
+				won = i;
+			}
+		}
+		CHECK(won >= 0);
+		char *want = racer_text(won < 0 ? 0 : won);
+		CHECK(want && file_is(path, want));
+		free(want);
+		struct stat st;
+		CHECK(stat(path, &st) == 0 && (st.st_mode & 0777) == 0600);
+		int entries = 0;
+		DIR *d = opendir(dir);
+		for (struct dirent *e = d ? readdir(d) : NULL; e; e = readdir(d)) {
+			entries += strcmp(e->d_name, ".") != 0 && strcmp(e->d_name, "..") != 0;
+		}
+		if (d) {
+			(void)closedir(d);
+		}
+		CHECK(entries == 1);
+		drop_dir(dir);
+	}
+	drop_dir(root);
+}
+
 // An edit after InfoBlock that names a newer format leaves Text without the
 // block, and Write refuses, writing nothing. One naming an older format is
 // refused at the call.
@@ -1424,6 +1503,7 @@ int main(void) {
 	test_upgrade();
 	test_upgrade_file();
 	test_upgrade_raced();
+	test_create_raced();
 	test_open_upgrade();
 	test_write_swaps_old_block();
 	test_open_fails_both();

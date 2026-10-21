@@ -6,6 +6,7 @@ package shclw
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"math"
 	"os"
 	"path/filepath"
@@ -78,6 +79,21 @@ func (r *runner) op(f []string) {
 		r.diags(d.Diags())
 	case "errors":
 		r.out(strconv.Itoa(d.Errors()))
+	case "unused":
+		spots := d.Unused()
+		out := make([]string, len(spots))
+		for i, sp := range spots {
+			out[i] = spotText(sp.Line, sp.Layer)
+		}
+		r.out(counted(len(out), strings.Join(out, "\t")))
+	case "merged":
+		for _, m := range d.Merged() {
+			out := []string{esc(m.Path)}
+			for _, n := range m.Lines {
+				out = append(out, spotText(n, m.Layer))
+			}
+			r.out(strings.Join(out, "\t"))
+		}
 	case "get":
 		r.out(r.get(arg(1), arg(2)))
 	case "or":
@@ -133,9 +149,17 @@ func (r *runner) op(f []string) {
 	case "upgrade":
 		r.upgrade(arg(1))
 	case "write":
-		r.write(arg(1))
+		r.write(arg(1), rest(2))
+	case "readonly":
+		r.out(strconv.FormatBool(d.ReadOnly()))
+	case "scribble":
+		r.scribble(arg(1), arg(2))
+	case "mode":
+		r.mode(arg(1))
 	case "open":
 		r.open(arg(1), arg(2))
+	case "layers":
+		r.layers(rest(1))
 	case "upgraded":
 		r.upgraded()
 	case "files":
@@ -180,6 +204,29 @@ func (r *runner) open(name, level string) {
 	}
 	r.doc = doc
 	r.out("ok")
+}
+
+// layers takes file names, and text for a text layer after a "=".
+func (r *runner) layers(specs []string) {
+	layers := make([]Layer, len(specs))
+	for i, spec := range specs {
+		if text, ok := strings.CutPrefix(spec, "="); ok {
+			layers[i].Text = text
+			continue
+		}
+		path, ok := r.file(spec)
+		if !ok {
+			return
+		}
+		layers[i].File = path
+	}
+	doc, err := r.lib.OpenLayers(layers...)
+	r.doc = doc
+	r.result(err)
+	var e *Error
+	if errors.As(err, &e) {
+		r.diags(e.Diags)
+	}
 }
 
 func (r *runner) upgraded() {
@@ -236,8 +283,16 @@ func (r *runner) result(err error) {
 
 func (r *runner) diags(ds []Diag) {
 	for _, d := range ds {
-		r.out(fmt.Sprintf("%d\t%s\t%s\t%s", d.Line, d.Severity, d.Code, esc(d.Message)))
+		r.out(fmt.Sprintf("%s\t%s\t%s\t%s", spotText(d.Line, d.Layer), d.Severity, d.Code, esc(d.Message)))
 	}
+}
+
+// spotText is a line, with its layer in front on a layered document.
+func spotText(line, layer int) string {
+	if layer > 0 {
+		return strconv.Itoa(layer) + ":" + strconv.Itoa(line)
+	}
+	return strconv.Itoa(line)
 }
 
 // block prints multi-line text one line per output line, so a golden file
@@ -380,12 +435,31 @@ func (r *runner) upgrade(from string) {
 	r.block(u.Text)
 }
 
-func (r *runner) write(name string) {
+func (r *runner) write(name string, flags []string) {
 	path, ok := r.file(name)
 	if !ok {
 		return
 	}
-	if err := r.doc.Write(path); err != nil {
+	var o WriteOpts
+	for _, flag := range flags {
+		switch {
+		case flag == "force":
+			o.Force = true
+		case flag == "create":
+			o.Create = true
+		case strings.HasPrefix(flag, "mode="):
+			m, err := strconv.ParseUint(strings.TrimPrefix(flag, "mode="), 8, 32)
+			if err != nil {
+				r.out("error badvalue")
+				return
+			}
+			o.Mode = fs.FileMode(m)
+		default:
+			r.out("error badvalue")
+			return
+		}
+	}
+	if err := r.doc.WriteWith(path, o); err != nil {
 		r.result(err)
 		return
 	}
@@ -396,6 +470,34 @@ func (r *runner) write(name string) {
 	}
 	r.out("ok")
 	r.block(text)
+}
+
+// mode prints a file's permission bits.
+func (r *runner) mode(name string) {
+	path, ok := r.file(name)
+	if !ok {
+		return
+	}
+	st, err := os.Stat(path)
+	if err != nil {
+		r.result(&Error{Kind: ErrIO, Path: path, Err: err})
+		return
+	}
+	r.out(fmt.Sprintf("%04o", uint32(st.Mode().Perm())))
+}
+
+// scribble writes text to a file as another program would, behind the
+// document's back.
+func (r *runner) scribble(name, text string) {
+	path, ok := r.file(name)
+	if !ok {
+		return
+	}
+	if err := os.WriteFile(path, []byte(text), 0o644); err != nil {
+		r.result(&Error{Kind: ErrIO, Path: path, Err: err})
+		return
+	}
+	r.out("ok")
 }
 
 // file keeps a script's file names inside RunOptions.Dir.

@@ -76,15 +76,44 @@ func (s Severity) String() string {
 }
 
 // Diag is one diagnostic from a load or a schema check. Line is 1-based.
+// Layer is the 1-based place in OpenLayers' list of the layer the line is
+// in, or 0 for a document that isn't layered.
 type Diag struct {
 	Line     int
 	Severity Severity
 	Code     string
 	Message  string
+	Layer    int
 }
 
 func (d Diag) String() string {
+	if d.Layer > 0 {
+		return fmt.Sprintf("layer %d line %d: %s %s", d.Layer, d.Line, d.Code, d.Message)
+	}
 	return fmt.Sprintf("line %d: %s %s", d.Line, d.Code, d.Message)
+}
+
+// Spot is a line in a loaded document. Layer is as in Diag.
+type Spot struct {
+	Line  int
+	Layer int
+}
+
+// Merge is a name shcl kept one copy of, since a later copy had the same
+// name and value and was folded into it. Lines is the kept copy's line, then
+// each later copy's. Path reads the kept copy, as a Node.Path does, and Layer
+// is as in Diag.
+type Merge struct {
+	Path  string
+	Lines []int
+	Layer int
+}
+
+// Layer is one layer for OpenLayers: a file, or with File empty, Text the
+// program has, such as its defaults or this run's command line.
+type Layer struct {
+	File string
+	Text string
 }
 
 // Got is a read with its status. Check Status before trusting Value: an
@@ -123,6 +152,8 @@ const (
 	ErrAmbiguous
 	ErrBackupTaken
 	ErrNoReadBack
+	ErrChanged
+	ErrExists
 )
 
 func (k ErrKind) String() string {
@@ -149,6 +180,10 @@ func (k ErrKind) String() string {
 		return "backuptaken"
 	case ErrNoReadBack:
 		return "noreadback"
+	case ErrChanged:
+		return "changed"
+	case ErrExists:
+		return "exists"
 	}
 	return "unknown"
 }
@@ -198,15 +233,37 @@ type Upgraded struct {
 	Backup  string
 }
 
+// WriteOpts change what a Write does. The zero value is a plain Write.
+//
+// Force writes over the file Open read even when it changed on disk since.
+// It doesn't write over a file in a newer format.
+//
+// Create writes only where nothing is there yet, and is ErrExists otherwise,
+// even with 2 programs creating the file at once. It never replaces, so
+// there's no changed check for Force to skip.
+//
+// Mode is the permission bits a file this Write creates gets, exactly, with
+// no umask. 0 is a plain create's 0666 less the umask. A file that's already
+// there keeps its own mode. Windows has no such bits and ignores it.
+type WriteOpts struct {
+	Force  bool
+	Create bool
+	Mode   fs.FileMode
+}
+
 // Doc is what every adapter's document does. Programs use the adapter's
 // own *Doc; this interface is how shared code, like Run, drives any of them.
 type Doc interface {
 	Text() string
 	Canonical() string
 	Write(path string) error
+	WriteWith(path string, o WriteOpts) error
+	ReadOnly() bool
 	Rewrites() bool
 	Diags() []Diag
 	Errors() int
+	Unused() []Spot
+	Merged() []Merge
 	Check(schema Doc) []Diag
 	DropDeclared(diags []Diag) []Diag
 
@@ -259,6 +316,7 @@ type Lib struct {
 	Parse       func(text string) Doc
 	ParseWith   func(text string, s Strictness) (Doc, error)
 	OpenWith    func(path string, s Strictness) (Doc, error)
+	OpenLayers  func(layers ...Layer) (Doc, error)
 	FormatOf    func(text string) int
 	Upgrade     func(text string, from int) (Upgraded, error)
 }
@@ -510,6 +568,11 @@ func ReadText(path string) (string, error) {
 	return "", &Error{Kind: ErrIO, Path: path, Err: err}
 }
 
+// Changed is the error for a file that changed on disk since it was read.
+func Changed(path string) error {
+	return &Error{Kind: ErrChanged, Path: path, Msg: "changed since it was read; nothing written"}
+}
+
 // Unchanged is whether path still holds was, byte for byte.
 func Unchanged(path, was string) bool {
 	b, err := os.ReadFile(path)
@@ -525,7 +588,7 @@ func Unchanged(path, was string) bool {
 // names it.
 func ReplaceRead(path, was, data string, backup func() (string, error), write func(path, data string) error) (string, error) {
 	changed := func() error {
-		return &Error{Kind: ErrIO, Path: path, Msg: "changed since it was read; nothing written"}
+		return Changed(path)
 	}
 	if !Unchanged(path, was) {
 		return "", changed()
@@ -622,3 +685,135 @@ func assembleFloat(neg bool, digits string, exp int) string {
 	}
 	return b.String()
 }
+
+// UnusedOf is the lines with an error in ds, once each, by layer then line.
+// An error on no line, such as one about the whole file, has no line to give.
+func UnusedOf(ds []Diag) []Spot {
+	out := []Spot{}
+	for _, g := range ds {
+		if g.Severity == SevError && g.Line > 0 {
+			out = append(out, Spot{Line: g.Line, Layer: g.Layer})
+		}
+	}
+	slices.SortFunc(out, func(a, b Spot) int {
+		if a.Layer != b.Layer {
+			return cmp.Compare(a.Layer, b.Layer)
+		}
+		return cmp.Compare(a.Line, b.Line)
+	})
+	return slices.Compact(out)
+}
+
+// MergesOf finds the copies shcl folded into an earlier one in text, apart
+// or not (shcl's H002 only says so when they're apart). A folded copy's line
+// is on no node, so each such line gets its name made unique and the text
+// is parsed again, where the copy then stands alone (design.md, Decisions).
+func MergesOf(text string, parse func(string) Doc, layer int) []Merge {
+	d := parse(text)
+	at := map[int]string{}
+	var walk func(Doc, string, func(string, string, Node) bool)
+	walk = func(x Doc, path string, see func(string, string, Node) bool) {
+		for _, name := range x.Names(path) {
+			for _, n := range x.Each(x.Child(path, name)) {
+				if see(path, name, n) {
+					walk(x, n.Path, see)
+				}
+			}
+		}
+	}
+	walk(d, "", func(_, _ string, n Node) bool {
+		if n.Line > 0 {
+			at[n.Line] = n.Path
+		}
+		return true
+	})
+	bad := map[int]bool{}
+	for _, g := range d.Diags() {
+		if g.Severity == SevError {
+			bad[g.Line] = true
+		}
+	}
+	lines := strings.Split(text, "\n")
+	probe := slices.Clone(lines)
+	folded := map[int]bool{}
+	for i, l := range lines {
+		n := i + 1
+		if _, ok := at[n]; ok || bad[n] {
+			continue
+		}
+		body := strings.TrimLeft(l, " \t")
+		if body == "" {
+			continue
+		}
+		indent, c := l[:len(l)-len(body)], body[0]
+		switch {
+		case c == '"' || c == '\'':
+			probe[i] = indent + body[:1] + probeName(n) + body[1:]
+		case c >= 0x80 || 'a' <= c|0x20 && c|0x20 <= 'z':
+			probe[i] = indent + probeName(n) + body
+		default:
+			continue
+		}
+		folded[n] = true
+	}
+	if len(folded) == 0 {
+		return []Merge{}
+	}
+	p := parse(strings.Join(probe, "\n"))
+	out := []Merge{}
+	slot := map[string]int{}
+	// orig is the path in d of the node a probe node stands for.
+	orig := map[string]string{"": ""}
+	walk(p, "", func(parent, name string, n Node) bool {
+		if !folded[n.Line] {
+			o, ok := at[n.Line]
+			orig[n.Path] = o
+			return ok
+		}
+		up, ok := orig[parent]
+		if !ok {
+			return false
+		}
+		if pre := probeName(n.Line); strings.HasPrefix(asciiLower(name), pre) {
+			name = name[len(pre):]
+		}
+		var kept Node
+		for _, k := range d.Each(d.Child(up, name)) {
+			if k.Value == n.Value && k.Line < n.Line && k.Line > kept.Line {
+				kept = k
+			}
+		}
+		if kept.Line == 0 {
+			return false
+		}
+		orig[n.Path] = kept.Path
+		// A dotted line folds each step; only its last one is the copy.
+		for _, c := range p.Names(n.Path) {
+			for _, k := range p.Each(p.Child(n.Path, c)) {
+				if k.Line == n.Line {
+					return true
+				}
+			}
+		}
+		i, ok := slot[kept.Path]
+		if !ok {
+			i = len(out)
+			slot[kept.Path] = i
+			out = append(out, Merge{Path: kept.Path, Lines: []int{kept.Line}, Layer: layer})
+		}
+		out[i].Lines = append(out[i].Lines, n.Line)
+		return true
+	})
+	for i := range out {
+		slices.Sort(out[i].Lines)
+	}
+	slices.SortFunc(out, func(a, b Merge) int {
+		if a.Lines[0] != b.Lines[0] {
+			return cmp.Compare(a.Lines[0], b.Lines[0])
+		}
+		return strings.Compare(a.Path, b.Path)
+	})
+	return out
+}
+
+func probeName(line int) string { return "shclwprobe" + strconv.Itoa(line) + "x" }

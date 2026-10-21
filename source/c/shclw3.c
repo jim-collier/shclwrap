@@ -24,8 +24,10 @@
 #include <stdlib.h>
 #include <string.h>
 
-// The file shclw_open upgraded, kept until the first shclw_write over it backs
-// it up. text is what the file held, and backup the copy's name once made.
+// The file shclw_open read, as it was then, so shclw_write can tell it changed
+// since. After a save over it, it's what that save left. from is the format
+// shclw_open upgraded it from, or 0, and backup the original's copy once the
+// first save over it made one.
 typedef struct {
 	int64_t from;
 	char *path;
@@ -33,26 +35,51 @@ typedef struct {
 	char *text;
 	size_t len;
 	char *backup;
-} upgraded_file;
+	bool gone; // a shclw_open_layers user file that wasn't there
+} read_file;
 
 struct shclw_doc {
 	shcl_doc *d;
 	shclw_i_info info;
 	bool stamp;
-	upgraded_file *up;
+	read_file *file;
+	// The newer format the text names, which makes it read-only.
+	int64_t newer;
 	// shcl 2.0's errors on a file shclw_open refused, which Go and Rust put on
 	// the error.
 	shclw_diag *refused;
 	size_t n_refused;
+	// What shclw_open_layers read, NULL for a file that wasn't there. d is
+	// then their merge, built again after each edit, and edits and saves go
+	// to layers[edit].
+	shclw_doc **layers;
+	size_t n_layers, edit;
+	// The text as loaded, for shclw_merged.
+	char *src;
+	size_t src_len;
 };
 
-static void free_upgraded(upgraded_file *up) {
-	if (up) {
-		free(up->path);
-		free(up->text);
-		free(up->backup);
-		free(up);
+static void free_read(read_file *f) {
+	if (f) {
+		free(f->path);
+		free(f->text);
+		free(f->backup);
+		free(f);
 	}
+}
+
+// path's record with no text yet, or NULL when memory ran out.
+static read_file *new_read(const char *path) {
+	read_file *f = (read_file *)calloc(1, sizeof *f);
+	char *name = shclw_i_dup(path, strlen(path), NULL);
+	if (!f || !name) {
+		free(f);
+		free(name);
+		return NULL;
+	}
+	f->path = name;
+	f->id = shclw_i_file_id_of(path);
+	return f;
 }
 
 static shclw_status status_of(shcl_status s) {
@@ -105,13 +132,21 @@ shclw_kind shclw_parse_with(const char *text, size_t len, shclw_strictness level
 	d->d = shcl_parse_keep_lines(text ? text : "", text ? len : 0, level_of(level));
 	d->info = SHCLW_I_INFO_AS_IS;
 	d->stamp = false;
-	d->up = NULL;
+	d->file = NULL;
 	d->refused = NULL;
 	d->n_refused = 0;
-	if (!d->d) {
+	d->layers = NULL;
+	d->n_layers = 0;
+	d->edit = 0;
+	d->src = shclw_i_dup(text ? text : "", text ? len : 0, &d->src_len);
+	if (!d->d || !d->src) {
+		shcl_free(d->d);
+		free(d->src);
 		free(d);
 		return shclw_i_fail(err, SHCLW_ERR_NO_MEMORY, NULL, NULL, 0);
 	}
+	int64_t format = shclw_format_of(text, text ? len : 0);
+	d->newer = format > SHCLW_FORMAT_MAJOR ? format : 0;
 	*doc = d;
 	if (shcl_strict_failed(d->d)) {
 		char why[64];
@@ -133,15 +168,9 @@ shclw_kind shclw_open_with(const char *path, shclw_strictness level, shclw_doc *
 	char *text = NULL;
 	size_t len = 0;
 	shclw_kind kind = shclw_read_text(path, &text, &len, err);
-	if (kind == SHCLW_OK) {
-		int64_t format = shclw_format_of(text, len);
-		if (format > SHCLW_FORMAT_MAJOR) {
-			kind = too_new(err, path, format);
-		}
-	}
-	// A file naming this format is current, so it skips the upgrade's parse.
+	// A file naming this format or a newer one skips the upgrade's parse.
 	shclw_upgraded *u = NULL;
-	if (kind == SHCLW_OK && shclw_format_of(text, len) != SHCLW_FORMAT_MAJOR) {
+	if (kind == SHCLW_OK && shclw_format_of(text, len) < SHCLW_FORMAT_MAJOR) {
 		kind = upgrade(text, len, 0, path, &u, err);
 	}
 	if (kind != SHCLW_OK) {
@@ -153,33 +182,25 @@ shclw_kind shclw_open_with(const char *path, shclw_strictness level, shclw_doc *
 		free(u);
 		return *doc ? kind : shclw_i_fail(err, SHCLW_ERR_NO_MEMORY, path, NULL, 0);
 	}
-	upgraded_file *up = NULL;
+	read_file *f = new_read(path);
+	if (!f) {
+		free(u);
+		free(text);
+		return shclw_i_fail(err, SHCLW_ERR_NO_MEMORY, path, NULL, 0);
+	}
+	f->text = text;
+	f->len = len;
 	if (u && u->changed) {
-		up = (upgraded_file *)malloc(sizeof *up);
-		char *name = shclw_i_dup(path, strlen(path), NULL);
-		if (!up || !name) {
-			free(up);
-			free(name);
-			free(u);
-			free(text);
-			return shclw_i_fail(err, SHCLW_ERR_NO_MEMORY, path, NULL, 0);
-		}
-		up->from = u->from;
-		up->path = name;
-		up->id = shclw_i_file_id_of(path);
-		up->text = text;
-		up->len = len;
-		up->backup = NULL;
+		f->from = u->from;
 		kind = shclw_parse_with(u->text.p, u->text.n, level, doc, NULL);
 	} else {
 		kind = shclw_parse_with(text, len, level, doc, NULL);
-		free(text);
 	}
 	free(u);
 	if (*doc) {
-		(*doc)->up = up;
+		(*doc)->file = f;
 	} else {
-		free_upgraded(up);
+		free_read(f);
 	}
 	switch (kind) {
 	case SHCLW_OK: return shclw_i_ok(err);
@@ -192,19 +213,113 @@ shclw_kind shclw_open_with(const char *path, shclw_strictness level, shclw_doc *
 	}
 }
 
-void shclw_free(shclw_doc *d) {
+// A layer is never layered itself, so this goes one level down.
+static void free_doc(shclw_doc *d) {
 	if (d) {
 		shcl_free(d->d);
-		free_upgraded(d->up);
+		free_read(d->file);
 		free(d->refused);
+		free(d->src);
 		free(d);
 	}
 }
 
-int64_t shclw_upgraded_from(shclw_doc *d) { return d->up ? d->up->from : 0; }
+void shclw_free(shclw_doc *d) {
+	if (d) {
+		for (size_t i = 0; i < d->n_layers; i++) {
+			free_doc(d->layers[i]);
+		}
+		free((void *)d->layers);
+		free_doc(d);
+	}
+}
+
+shclw_doc *shclw_i_top(shclw_doc *d) { return d->layers ? d->layers[d->edit] : d; }
+
+// Lower layers never change, but a merge changes its base, so it starts over.
+static shclw_kind remerge(shclw_doc *d, shclw_error *err) {
+	shcl_doc *m = shcl_new();
+	if (!m) {
+		return shclw_i_fail(err, SHCLW_ERR_NO_MEMORY, NULL, NULL, 0);
+	}
+	for (size_t i = 0; i < d->n_layers; i++) {
+		if (d->layers[i]) {
+			shcl_merge(m, d->layers[i]->d);
+		}
+	}
+	shcl_free(d->d);
+	d->d = m;
+	return shclw_i_ok(err);
+}
+
+shclw_kind shclw_i_edited(shclw_doc *d, shclw_error *err) { return d->layers ? remerge(d, err) : shclw_i_ok(err); }
+
+shclw_kind shclw_open_layers(const shclw_layer *layers, size_t n, shclw_doc **doc, shclw_error *err) {
+	*doc = shclw_new();
+	if (!*doc) {
+		return shclw_i_fail(err, SHCLW_ERR_NO_MEMORY, NULL, NULL, 0);
+	}
+	if (n == 0) {
+		return shclw_i_ok(err);
+	}
+	shclw_doc *d = *doc;
+	d->layers = (shclw_doc **)calloc(n, sizeof *d->layers);
+	if (!d->layers) {
+		return shclw_i_fail(err, SHCLW_ERR_NO_MEMORY, NULL, NULL, 0);
+	}
+	d->n_layers = n;
+	d->edit = n - 1;
+	for (size_t i = n; i-- > 0;) {
+		if (layers[i].file) {
+			d->edit = i;
+			break;
+		}
+	}
+	for (size_t i = 0; i < n; i++) {
+		shclw_doc *x = NULL;
+		shclw_kind k = SHCLW_OK;
+		if (!layers[i].file) {
+			x = shclw_parse(layers[i].text, layers[i].len);
+			k = x ? SHCLW_OK : shclw_i_fail(err, SHCLW_ERR_NO_MEMORY, NULL, NULL, 0);
+		} else {
+			k = shclw_open(layers[i].file, &x, err);
+			if (k == SHCLW_ERR_NOT_FOUND) {
+				shclw_free(x);
+				x = i == d->edit ? shclw_new() : NULL;
+				if (x) {
+					x->file = new_read(layers[i].file);
+					if (x->file) {
+						x->file->gone = true;
+					} else {
+						shclw_free(x);
+						x = NULL;
+					}
+				}
+				k = x || i != d->edit ? shclw_i_ok(err) : shclw_i_fail(err, SHCLW_ERR_NO_MEMORY, NULL, NULL, 0);
+			}
+		}
+		if (k != SHCLW_OK) {
+			// The empty document shclw_open gave, with 2.0's errors on it.
+			shclw_free(d);
+			*doc = x ? x : shclw_new();
+			for (size_t j = 0; x && j < x->n_refused; j++) {
+				x->refused[j].layer = i + 1;
+			}
+			return *doc ? k : shclw_i_fail(err, SHCLW_ERR_NO_MEMORY, NULL, NULL, 0);
+		}
+		d->layers[i] = x;
+	}
+	return remerge(d, err);
+}
+
+int64_t shclw_upgraded_from(shclw_doc *d) {
+	d = shclw_i_top(d);
+	return d->file ? d->file->from : 0;
+}
 
 char *shclw_backup_name(shclw_doc *d, size_t *len) {
-	const char *name = d->up && d->up->backup ? d->up->backup : "";
+	d = shclw_i_top(d);
+	const char *name = d->file && d->file->backup ? d->file->backup : "";
 	return shclw_i_dup(name, strlen(name), len);
 }
 
@@ -323,14 +438,19 @@ static char *finish(shclw_doc *d, shcl_str s, size_t *len) {
 }
 
 char *shclw_text(shclw_doc *d, size_t *len) {
+	d = shclw_i_top(d);
 	// Without the lines kept, this is the canonical form.
 	return finish(d, shcl_to_text_keep_lines(d->d, NULL), len);
 }
 
-char *shclw_canonical(shclw_doc *d, size_t *len) { return finish(d, shcl_to_canonical(d->d), len); }
+char *shclw_canonical(shclw_doc *d, size_t *len) {
+	d = shclw_i_top(d);
+	return finish(d, shcl_to_canonical(d->d), len);
+}
 
 bool shclw_rewrites(shclw_doc *d) {
-	if (d->up && !d->up->backup) {
+	d = shclw_i_top(d);
+	if (d->file && d->file->from && !d->file->backup) {
 		return true;
 	}
 	int kept = 0;
@@ -356,16 +476,21 @@ static shclw_kind try_info(shclw_doc *d, shclw_i_info info, bool stamp, shclw_er
 }
 
 shclw_kind shclw_info_block(shclw_doc *d, bool on, shclw_error *err) {
+	d = shclw_i_top(d);
 	return try_info(d, on ? SHCLW_I_INFO_ON : SHCLW_I_INFO_OFF, d->stamp, err);
 }
 
-shclw_kind shclw_stamp_format(shclw_doc *d, shclw_error *err) { return try_info(d, d->info, true, err); }
+shclw_kind shclw_stamp_format(shclw_doc *d, shclw_error *err) {
+	d = shclw_i_top(d);
+	return try_info(d, d->info, true, err);
+}
 
 typedef struct {
 	const char *path;
 	const char *text;
 	size_t len;
 	int64_t from;
+	unsigned mode; // for a file the save creates
 } replacing;
 
 static shclw_kind keep_original(void *ctx, char **name, shclw_error *err) {
@@ -397,9 +522,18 @@ static shclw_kind write_new(void *ctx, const char *path, const char *data, size_
 	return shclw_i_fail(err, SHCLW_ERR_IO, path, shcl_write_status_name(why), errno);
 }
 
-// shcl's atomic save, with a missing folder as SHCLW_ERR_NOT_FOUND.
+// shcl's atomic save, with a missing folder as SHCLW_ERR_NOT_FOUND. ctx is
+// NULL or a replacing, whose mode goes on a file the save creates. One that's
+// there keeps its own, as shcl's atomic write keeps it.
 static shclw_kind save(void *ctx, const char *path, const char *data, size_t len, shclw_error *err) {
-	(void)ctx;
+	unsigned mode = ctx ? ((const replacing *)ctx)->mode : 0;
+	if (mode && shclw_i_missing(path)) {
+		shclw_kind k = shclw_i_create_new(path, data, len, mode, err);
+		if (k != SHCLW_ERR_EXISTS) {
+			return k;
+		}
+		// made in the meantime
+	}
 	shcl_write_status why = SHCL_WRITE_OK;
 	errno = 0;
 	if (shcl_write_file_atomic(path, data, len, &why)) {
@@ -411,6 +545,59 @@ static shclw_kind save(void *ctx, const char *path, const char *data, size_t len
 }
 
 shclw_kind shclw_write(shclw_doc *d, const char *path, shclw_error *err) {
+	return shclw_write_with(d, path, NULL, err);
+}
+
+bool shclw_read_only(shclw_doc *d) { return shclw_i_top(d)->newer > 0; }
+
+// Writes text over the file shclw_open read, unless it changed since. Only the
+// moment between the last check and the rename is left open (design.md,
+// Loading and saving).
+static shclw_kind replace(read_file *f, const char *path, const char *text, size_t len, const shclw_write_opts *o,
+                          shclw_error *err) {
+	// The first save over a file shclw_open upgraded keeps the original.
+	replacing r = {path, f->text, f->len, f->from, o->mode};
+	char *now = NULL;
+	size_t now_len = 0;
+	const char *was = f->text;
+	size_t was_len = f->len;
+	if (o->force) {
+		if (shclw_read_text(path, &now, &now_len, NULL) != SHCLW_OK) {
+			return save(&r, path, text, len, err);
+		}
+		was = now;
+		was_len = now_len;
+	} else if (f->gone) {
+		if (!shclw_i_missing(path)) {
+			return shclw_i_fail(err, SHCLW_ERR_CHANGED, path, "changed since it was read; nothing written", 0);
+		}
+		return save(&r, path, text, len, err);
+	}
+	shclw_i_replacer how = {f->from && !f->backup ? keep_original : NULL, save, &r};
+	char *name = NULL;
+	shclw_kind k = shclw_i_replace_read(path, was, was_len, text, len, &how, &name, err);
+	free(now);
+	if (name) {
+		free(f->backup);
+		f->backup = name;
+	}
+	return k;
+}
+
+shclw_kind shclw_write_with(shclw_doc *d, const char *path, const shclw_write_opts *opts, shclw_error *err) {
+	d = shclw_i_top(d);
+	if (d->newer) {
+		return too_new(err, path, d->newer);
+	}
+	shclw_write_opts o;
+	memset(&o, 0, sizeof o);
+	if (opts) {
+		o = *opts;
+	}
+	shclw_kind k = shclw_i_check_mode(path, o.mode, err);
+	if (k != SHCLW_OK) {
+		return k;
+	}
 	int kept = 0;
 	shcl_str s = shcl_to_text_keep_lines(d->d, &kept);
 	size_t lost = shcl_lost_count(d->d);
@@ -422,26 +609,28 @@ shclw_kind shclw_write(shclw_doc *d, const char *path, shclw_error *err) {
 	}
 	char *text = NULL;
 	size_t len = 0;
-	shclw_kind k = saved(d, s.p ? s.p : "", s.p ? s.n : 0, path, &text, &len, err);
+	k = saved(d, s.p ? s.p : "", s.p ? s.n : 0, path, &text, &len, err);
 	shcl_reads_release(d->d);
 	if (k != SHCLW_OK) {
 		return k;
 	}
-	upgraded_file *up = d->up;
-	if (up && !up->backup && shclw_i_same_file(path, up->path, up->id)) {
-		// The first save over a file shclw_open upgraded keeps the original.
-		replacing r = {path, up->text, up->len, up->from};
-		shclw_i_replacer how = {keep_original, save, &r};
-		k = shclw_i_replace_read(path, up->text, up->len, text, len, &how, &up->backup, err);
-		if (k == SHCLW_OK) {
-			free(up->text);
-			up->text = NULL;
-			up->len = 0;
-		}
+	read_file *f = d->file;
+	bool over = f && shclw_i_same_file(path, f->path, f->id);
+	replacing plain = {path, NULL, 0, 0, o.mode};
+	if (o.create) {
+		k = shclw_i_create_new(path, text, len, o.mode, err);
 	} else {
-		k = save(NULL, path, text, len, err);
+		k = over ? replace(f, path, text, len, &o, err) : save(&plain, path, text, len, err);
 	}
-	free(text);
+	if (over && k == SHCLW_OK) {
+		free(f->text);
+		f->text = text;
+		f->len = len;
+		f->gone = false;
+		f->id = shclw_i_file_id_of(path);
+	} else {
+		free(text);
+	}
 	if (k == SHCLW_OK) {
 		// A save is where a program is done with a round of edits, and what
 		// they replaced stays in shcl's write memory until this
@@ -453,11 +642,54 @@ shclw_kind shclw_write(shclw_doc *d, const char *path, shclw_error *err) {
 
 static shclw_diag diag_of(size_t line, shcl_severity sev, const char *code, shcl_str msg) {
 	shclw_diag g = {
-		line, sev == SHCL_SEV_ERROR ? SHCLW_SEV_ERROR : SHCLW_SEV_HINT, {code, strlen(code)}, {msg.p, msg.n}};
+		line, sev == SHCL_SEV_ERROR ? SHCLW_SEV_ERROR : SHCLW_SEV_HINT, {code, strlen(code)}, {msg.p, msg.n}, 0};
 	return g;
 }
 
+static shclw_diag *own_diags(shclw_doc *d, size_t *n);
+static size_t own_errors(shclw_doc *d) { return d->refused ? d->n_refused : shcl_error_count(d->d); }
+
+// Every layer's, in layer order, each with its layer.
+static shclw_diag *layer_diags(shclw_doc *d, size_t *n) {
+	shclw_diag **each = (shclw_diag **)calloc(d->n_layers, sizeof(shclw_diag *));
+	size_t *counts = (size_t *)calloc(d->n_layers, sizeof(size_t));
+	size_t total = 0;
+	bool ok = each && counts;
+	for (size_t i = 0; ok && i < d->n_layers; i++) {
+		if (d->layers[i]) {
+			each[i] = own_diags(d->layers[i], &counts[i]);
+			ok = each[i] != NULL;
+			total += counts[i];
+		}
+	}
+	shclw_diag *views =
+		ok && total < SIZE_MAX / sizeof(shclw_diag) ? (shclw_diag *)shclw_i_alloc(total * sizeof(shclw_diag)) : NULL;
+	shclw_diag *out = NULL;
+	if (views) {
+		size_t at = 0;
+		for (size_t i = 0; i < d->n_layers; i++) {
+			for (size_t j = 0; each[i] && j < counts[i]; j++) {
+				views[at] = each[i][j];
+				views[at++].layer = i + 1;
+			}
+		}
+		out = shclw_i_copy_diags(views, total, n);
+		free(views);
+	}
+	for (size_t i = 0; each && i < d->n_layers; i++) {
+		free(each[i]);
+	}
+	free((void *)each);
+	free(counts);
+	return out;
+}
+
 shclw_diag *shclw_diags(shclw_doc *d, size_t *n) {
+	*n = 0;
+	return d->layers ? layer_diags(d, n) : own_diags(d, n);
+}
+
+static shclw_diag *own_diags(shclw_doc *d, size_t *n) {
 	*n = 0;
 	if (d->refused) {
 		return shclw_i_copy_diags(d->refused, d->n_refused, n);
@@ -477,7 +709,52 @@ shclw_diag *shclw_diags(shclw_doc *d, size_t *n) {
 	return out;
 }
 
-size_t shclw_errors(shclw_doc *d) { return d->refused ? d->n_refused : shcl_error_count(d->d); }
+shclw_spot *shclw_unused(shclw_doc *d, size_t *n) {
+	*n = 0;
+	size_t k = 0;
+	shclw_diag *ds = d->refused ? NULL : shclw_diags(d, &k);
+	if (!d->refused && !ds) {
+		return NULL;
+	}
+	shclw_spot *out = shclw_i_unused_of(ds, k, n);
+	free(ds);
+	return out;
+}
+
+shclw_merge *shclw_merged(shclw_doc *d, size_t *n) {
+	*n = 0;
+	if (!d->layers) {
+		shclw_i_source one = {d->src, d->src_len, 0};
+		return shclw_i_merges_of(&one, 1, n);
+	}
+	shclw_i_source *srcs = (shclw_i_source *)calloc(d->n_layers, sizeof(shclw_i_source));
+	if (!srcs) {
+		return NULL;
+	}
+	size_t k = 0;
+	for (size_t i = 0; i < d->n_layers; i++) {
+		if (d->layers[i]) {
+			srcs[k].text = d->layers[i]->src;
+			srcs[k].len = d->layers[i]->src_len;
+			srcs[k].layer = i + 1;
+			k++;
+		}
+	}
+	shclw_merge *out = shclw_i_merges_of(srcs, k, n);
+	free(srcs);
+	return out;
+}
+
+size_t shclw_errors(shclw_doc *d) {
+	if (d->layers) {
+		size_t n = 0;
+		for (size_t i = 0; i < d->n_layers; i++) {
+			n += d->layers[i] ? own_errors(d->layers[i]) : 0;
+		}
+		return n;
+	}
+	return own_errors(d);
+}
 
 shclw_diag *shclw_check(shclw_doc *d, shclw_doc *schema, size_t *n) {
 	*n = 0;
@@ -800,7 +1077,15 @@ shclw_kind shclw_i_set(shclw_doc *d, const char *path, const shclw_i_value *v, s
 	return set_err(err, path, st);
 }
 
+static shclw_kind put_syntax(shclw_doc *d, const char *path, const char *text, size_t len, shclw_error *err);
+
 shclw_kind shclw_put_syntax(shclw_doc *d, const char *path, const char *text, size_t len, shclw_error *err) {
+	shclw_kind k = put_syntax(shclw_i_top(d), path, text, len, err);
+	shclw_kind m = shclw_i_edited(d, NULL);
+	return m == SHCLW_OK ? k : shclw_i_fail(err, m, path, NULL, 0);
+}
+
+static shclw_kind put_syntax(shclw_doc *d, const char *path, const char *text, size_t len, shclw_error *err) {
 	if (!text) {
 		text = "";
 		len = 0;
@@ -840,10 +1125,19 @@ shclw_kind shclw_put_syntax(shclw_doc *d, const char *path, const char *text, si
 }
 
 shclw_kind shclw_comment(shclw_doc *d, const char *path, const char *text, size_t len, shclw_error *err) {
-	return set_err(err, path, shcl_set_comment(d->d, path, strlen(path), text ? text : "", text ? len : 0));
+	shclw_doc *top = shclw_i_top(d);
+	shclw_kind k = set_err(err, path, shcl_set_comment(top->d, path, strlen(path), text ? text : "", text ? len : 0));
+	shclw_kind m = shclw_i_edited(d, NULL);
+	return m == SHCLW_OK ? k : shclw_i_fail(err, m, path, NULL, 0);
 }
 
-size_t shclw_remove(shclw_doc *d, const char *path) { return shcl_remove(d->d, path, strlen(path)); }
+// A layered document whose merge can't be built again for want of memory
+// keeps the one it had.
+size_t shclw_remove(shclw_doc *d, const char *path) {
+	size_t n = shcl_remove(shclw_i_top(d)->d, path, strlen(path));
+	(void)shclw_i_edited(d, NULL);
+	return n;
+}
 
 // shcl 2.0's errors, copied out of its document as they come.
 typedef struct {
@@ -877,7 +1171,7 @@ static void keep_old(void *ctx, size_t line, const char *code, const char *msg, 
 		l->oom = true;
 		return;
 	}
-	shclw_diag g = {line, SHCLW_SEV_ERROR, {c, code_len}, {m, msg_len}};
+	shclw_diag g = {line, SHCLW_SEV_ERROR, {c, code_len}, {m, msg_len}, 0};
 	l->v[l->n++] = g;
 }
 
@@ -1311,7 +1605,7 @@ shclw_kind shclw_upgrade_file(const char *path, int64_t from, shclw_upgraded **o
 		free(u);
 		return k;
 	}
-	replacing r = {path, text, len, u->from};
+	replacing r = {path, text, len, u->from, 0};
 	shclw_i_replacer how = {keep_original, write_new, &r};
 	char *backup = NULL;
 	k = shclw_i_replace_read(path, text, len, u->text.p, u->text.n, &how, &backup, err);

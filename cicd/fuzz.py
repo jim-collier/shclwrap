@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 ## Purpose: Fuzzes the wrappers against each other. Each case is a document
-##	plus an ops script, made from one seed, run through the Go, Rust, and
-##	C drivers with the same shcl version. The outputs must match Go's byte
+##	plus an ops script, made from one seed, run through the Go, Rust, C,
+##	and Python drivers with the same shcl version. The outputs must match Go's byte
 ##	for byte, and a value that was put must read back the same.
 ## Copyright © 2026 Jim Collier [ID: 2უNაɘ«҂թȹɤξπ๙¿ձϖ]
 ## SPDX-License-Identifier: MIT
@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import os
 import random
 import re
 import shutil
@@ -239,6 +240,8 @@ def gen_case(seed: int, corpus: list[str]) -> Case:
 						"rewrites",
 						"diags",
 						"errors",
+						"unused",
+						"merged",
 						"format",
 						f"upgrade\t{rng.choice(('', '2', '3'))}",
 						f"parse\t{rng.choice(('loose', 'standard', 'strict'))}",
@@ -457,6 +460,8 @@ def main() -> int:
 	ap.add_argument("--go", required=True, help="Go driver binary")
 	ap.add_argument("--rust", required=True, help="Rust driver binary")
 	ap.add_argument("--c", default=None, help="C driver binary, with {v} where its shcl version goes")
+	ap.add_argument("--python", default=None, help="Python driver script, run with this python3")
+	ap.add_argument("--python-path", default=None, help="the folder with shcl 3.0's shcl.py, for the Python driver")
 	ap.add_argument("--seconds", type=float, default=30.0, help="wall-clock budget")
 	ap.add_argument("--seed", type=int, default=None, help="first seed; default is from the clock")
 	ap.add_argument("--count", type=int, default=0, help="stop after this many cases; 0 is no limit")
@@ -465,9 +470,13 @@ def main() -> int:
 	ap.add_argument("--out", type=Path, required=True, help="where failing cases go")
 	args = ap.parse_args()
 	# C is built once per version, so its path has the version in it.
-	drivers = {"go": args.go, "rust": args.rust}
+	drivers = {"go": [args.go], "rust": [args.rust]}
 	if args.c:
-		drivers["c"] = args.c
+		drivers["c"] = [args.c]
+	if args.python:
+		drivers["python"] = [sys.executable, args.python]
+		if args.python_path:
+			os.environ["PYTHONPATH"] = args.python_path
 
 	first = args.seed if args.seed is not None else int(time.time())
 	corpus = load_corpus(args.cases)
@@ -483,7 +492,11 @@ def main() -> int:
 			doc_path.write_text(case.doc)
 			runs = {
 				name: run_driver(
-					[cmd.replace("{v}", str(case.version))], case.version, doc_path, args.work / name, case.script
+					[c.replace("{v}", str(case.version)) for c in cmd],
+					case.version,
+					doc_path,
+					args.work / name,
+					case.script,
 				)
 				for name, cmd in drivers.items()
 			}

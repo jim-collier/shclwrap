@@ -65,6 +65,11 @@ shclw_kind shclw_i_verify_put(shclw_doc *d, const char *path, const shclw_i_valu
 // The adapter's half of a put: the set alone, with no read-back. shclw.c
 // checks the value first and reads it back after.
 shclw_kind shclw_i_set(shclw_doc *d, const char *path, const shclw_i_value *v, shclw_error *err);
+// Where edits and saves go: the edit layer of a layered document, or d.
+shclw_doc *shclw_i_top(shclw_doc *d);
+// Builds a layered document's merge again after an edit to its edit layer. A
+// no-op on any other document.
+shclw_kind shclw_i_edited(shclw_doc *d, shclw_error *err);
 // Go's VerifySyntax. alone has the text set at "k", and line is "k: text"
 // parsed.
 shclw_kind shclw_i_verify_syntax(shclw_doc *d, const char *path, shclw_doc *alone, shclw_doc *line, shclw_error *err);
@@ -74,6 +79,17 @@ shclw_string *shclw_i_dedupe_names(const shclw_string *names, size_t n, size_t *
 // Copies of the nodes in one block, each string with a NUL after it.
 shclw_node *shclw_i_copy_nodes(const shclw_node *nodes, size_t n, size_t *count);
 
+// The error lines in diags, once each, by layer then line. Caller frees.
+shclw_spot *shclw_i_unused_of(const shclw_diag *diags, size_t n, size_t *count);
+// One loaded text for shclw_i_merges_of, with the layer its lines are in.
+typedef struct {
+	const char *text;
+	size_t len;
+	size_t layer;
+} shclw_i_source;
+// Go's MergesOf over each source in turn, in one block the caller frees. NULL
+// only when memory ran out.
+shclw_merge *shclw_i_merges_of(const shclw_i_source *srcs, size_t n_srcs, size_t *count);
 // Copies of the diagnostics in one block, each string with a NUL after it.
 shclw_diag *shclw_i_copy_diags(const shclw_diag *diags, size_t n, size_t *count);
 
@@ -81,6 +97,15 @@ shclw_diag *shclw_i_copy_diags(const shclw_diag *diags, size_t n, size_t *count)
 // backup may be NULL for none. NULL only when memory ran out.
 shclw_upgraded *shclw_i_upgraded(const char *text, size_t len, int64_t from, bool changed, size_t unsure,
                                  const char *backup, const shclw_diag *diags, size_t n_diags);
+
+// Nothing at path, not even a dangling link.
+bool shclw_i_missing(const char *path);
+// SHCLW_ERR_BAD_VALUE for a shclw_write_opts mode with more than permission
+// bits in it.
+shclw_kind shclw_i_check_mode(const char *path, unsigned mode, shclw_error *err);
+// Writes data to path only when nothing is there, and is SHCLW_ERR_EXISTS
+// otherwise (design.md, Loading and saving).
+shclw_kind shclw_i_create_new(const char *path, const char *data, size_t len, unsigned mode, shclw_error *err);
 
 // Something at path that isn't a regular file, such as a FIFO or a device.
 bool shclw_i_irregular(const char *path);

@@ -17,6 +17,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #ifdef _WIN32
 #include <io.h>
 #else
@@ -553,6 +554,15 @@ static void text(runner *r, bool canonical) {
 	free(t);
 }
 
+// A line, with its layer in front on a layered document.
+static void put_spot(buf *b, size_t line, size_t layer) {
+	if (layer) {
+		put_size(b, layer);
+		putc_(b, ':');
+	}
+	put_size(b, line);
+}
+
 // Prints and frees ds.
 static void print_diags(runner *r, shclw_diag *ds, size_t n) {
 	if (!ds) {
@@ -560,7 +570,7 @@ static void print_diags(runner *r, shclw_diag *ds, size_t n) {
 		return;
 	}
 	for (size_t i = 0; i < n; i++) {
-		put_size(&r->out, ds[i].line);
+		put_spot(&r->out, ds[i].line, ds[i].layer);
 		putc_(&r->out, '\t');
 		puts_(&r->out, shclw_severity_name(ds[i].severity));
 		putc_(&r->out, '\t');
@@ -600,7 +610,30 @@ static void write_(runner *r, const fields *f) {
 	if (!path) {
 		return;
 	}
-	shclw_kind k = shclw_write(r->doc, path, NULL);
+	shclw_write_opts o;
+	memset(&o, 0, sizeof o);
+	bool bad = false;
+	for (size_t i = 2; i < f->n && !bad; i++) {
+		const char *flag = f->v[i];
+		if (!strcmp(flag, "force")) {
+			o.force = true;
+		} else if (!strcmp(flag, "create")) {
+			o.create = true;
+		} else if (!strncmp(flag, "mode=", 5) && flag[5] >= '0' && flag[5] <= '7') {
+			char *end = NULL;
+			unsigned long m = strtoul(flag + 5, &end, 8);
+			bad = *end != '\0' || m > 07777777;
+			o.mode = (unsigned)m;
+		} else {
+			bad = true;
+		}
+	}
+	if (bad) {
+		free(path);
+		line_out(r, "error badvalue");
+		return;
+	}
+	shclw_kind k = shclw_write_with(r->doc, path, &o, NULL);
 	char *saved = NULL;
 	size_t n = 0;
 	if (k == SHCLW_OK) {
@@ -614,6 +647,39 @@ static void write_(runner *r, const fields *f) {
 	line_out(r, "ok");
 	block(r, saved, n);
 	free(saved);
+}
+
+// A file's permission bits.
+static void mode(runner *r, const fields *f) {
+	char *path = file(r, arg(f, 1));
+	if (!path) {
+		return;
+	}
+	struct stat st;
+	int rc = stat(path, &st);
+	free(path);
+	if (rc != 0) {
+		line_out(r, "error io");
+		return;
+	}
+	char bits[8];
+	(void)snprintf(bits, sizeof bits, "%04o", (unsigned)st.st_mode & 0777u);
+	line_out(r, bits);
+}
+
+// Writes text to a file as another program would, behind the document's back.
+static void scribble(runner *r, const fields *f) {
+	char *path = file(r, arg(f, 1));
+	if (!path) {
+		return;
+	}
+	const char *text = arg(f, 2);
+	size_t n = strlen(text);
+	FILE *out = fopen(path, "wb");
+	bool ok = out && fwrite(text, 1, n, out) == n;
+	ok = (out && fclose(out) == 0) && ok;
+	free(path);
+	line_out(r, ok ? "ok" : "error io");
 }
 
 static void print_doc_diags(runner *r, shclw_doc *d) {
@@ -672,6 +738,54 @@ static void open_(runner *r, const fields *f) {
 	shclw_free(r->doc);
 	r->doc = doc;
 	r->level = s;
+}
+
+// File names, and text for a text layer after a "=".
+static void layers_(runner *r, const fields *f) {
+	size_t n = f->n > 1 ? f->n - 1 : 0;
+	shclw_layer *ls = (shclw_layer *)calloc(n ? n : 1, sizeof *ls);
+	char **paths = (char **)calloc(n ? n : 1, sizeof *paths);
+	bool ok = ls && paths;
+	if (!ok) {
+		nomem(&r->out);
+	}
+	for (size_t i = 0; ok && i < n; i++) {
+		if (arg(f, i + 1)[0] == '=') {
+			ls[i].text = arg(f, i + 1) + 1;
+			ls[i].len = arg_len(f, i + 1) - 1;
+			continue;
+		}
+		paths[i] = file(r, arg(f, i + 1));
+		ok = paths[i] != NULL;
+		ls[i].file = paths[i];
+	}
+	shclw_doc *doc = NULL;
+	if (ok) {
+		shclw_kind k = shclw_open_layers(ls, n, &doc, NULL);
+		if (doc) {
+			result(r, k);
+		}
+		if (doc && k != SHCLW_OK) {
+			// Go and Rust have the diagnostics on the error, not the document.
+			print_doc_diags(r, doc);
+			shclw_free(doc);
+			doc = shclw_new();
+		}
+		if (doc) {
+			free(r->src);
+			r->src = NULL;
+			shclw_free(r->doc);
+			r->doc = doc;
+			r->level = SHCLW_STANDARD;
+		} else {
+			nomem(&r->out);
+		}
+	}
+	for (size_t i = 0; paths && i < n; i++) {
+		free(paths[i]);
+	}
+	free((void *)paths);
+	free(ls);
 }
 
 // name with STAMP in place of the time in a backup's name.
@@ -1063,9 +1177,49 @@ static void op_errors(runner *r, const fields *f) {
 	put_size(&r->out, shclw_errors(r->doc));
 	nl(&r->out);
 }
+static void op_unused(runner *r, const fields *f) {
+	(void)f;
+	size_t n = 0;
+	shclw_spot *spots = shclw_unused(r->doc, &n);
+	if (!spots) {
+		nomem(&r->out);
+		return;
+	}
+	put_size(&r->out, n);
+	for (size_t i = 0; i < n; i++) {
+		putc_(&r->out, '\t');
+		put_spot(&r->out, spots[i].line, spots[i].layer);
+	}
+	nl(&r->out);
+	free(spots);
+}
+static void op_merged(runner *r, const fields *f) {
+	(void)f;
+	size_t n = 0;
+	shclw_merge *ms = shclw_merged(r->doc, &n);
+	if (!ms) {
+		nomem(&r->out);
+		return;
+	}
+	for (size_t i = 0; i < n; i++) {
+		esc(&r->out, ms[i].path.p, ms[i].path.n);
+		for (size_t j = 0; j < ms[i].n_lines; j++) {
+			putc_(&r->out, '\t');
+			put_spot(&r->out, ms[i].lines[j], ms[i].layer);
+		}
+		nl(&r->out);
+	}
+	free(ms);
+}
 static void op_get(runner *r, const fields *f) { get(r, arg(f, 1), arg(f, 2)); }
 static void op_or(runner *r, const fields *f) { or_(r, f); }
 static void op_write(runner *r, const fields *f) { write_(r, f); }
+static void op_readonly(runner *r, const fields *f) {
+	(void)f;
+	line_out(r, shclw_read_only(r->doc) ? "true" : "false");
+}
+static void op_scribble(runner *r, const fields *f) { scribble(r, f); }
+static void op_mode(runner *r, const fields *f) { mode(r, f); }
 static void op_rewrites(runner *r, const fields *f) {
 	(void)f;
 	line_out(r, shclw_rewrites(r->doc) ? "true" : "false");
@@ -1090,6 +1244,7 @@ static void op_format(runner *r, const fields *f) {
 }
 static void op_upgrade(runner *r, const fields *f) { upgrade(r, arg(f, 1)); }
 static void op_open(runner *r, const fields *f) { open_(r, f); }
+static void op_layers(runner *r, const fields *f) { layers_(r, f); }
 static void op_upgraded(runner *r, const fields *f) {
 	(void)f;
 	upgraded(r);
@@ -1111,6 +1266,8 @@ static const struct {
 	{"rewrites",  op_rewrites},
 	{"diags",     op_diags},
 	{"errors",    op_errors},
+	{"unused",    op_unused},
+	{"merged",    op_merged},
 	{"get",       op_get},
 	{"or",        op_or},
 	{"has",       op_has},
@@ -1133,8 +1290,12 @@ static const struct {
 	{"upgrade",   op_upgrade},
 	{"write",     op_write},
 	{"open",      op_open},
+	{"layers",    op_layers},
 	{"upgraded",  op_upgraded},
 	{"files",     op_files},
+	{"readonly",  op_readonly},
+	{"scribble",  op_scribble},
+	{"mode",      op_mode},
 };
 // clang-format on
 

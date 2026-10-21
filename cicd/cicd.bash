@@ -8,9 +8,9 @@
 ##	   0. remote sync (fast-forward from upstream before anything is built)
 ##	   1. format (in place; check-only under --ci)
 ##	   2. lint (go vet, staticcheck, clippy, clang-tidy, gcc-15, shellcheck, ruff)
-##	   3. tests (shared cases in every language)
+##	   3. tests (shared cases in every language, Python's included)
 ##	   4. leak checks (CodeQL, CTU analysis, and the heaptrack soak, for C)
-##	   5. fuzz (Rust and C against Go from generated cases, plus Go's own fuzzer)
+##	   5. fuzz (Rust, C, and Python against Go from generated cases, plus Go's own fuzzer)
 ##	- Syntax:
 ##	  cicd/cicd.bash [options]
 ##	  With no options it runs every stage.
@@ -19,21 +19,26 @@
 ##	   --quick         the fast checks only, in about a minute. No remote sync,
 ##	                   C analyzers, sanitizers, or leak checks, and a short fuzz.
 ##	                   Nothing that needs the network. C is skipped when a pinned
-##	                   shcl.h isn't cached yet.
-##	   --leakcheck     add the leak checks to --ci or --quick
+##	                   shcl.h isn't cached yet, and Python when shcl.py isn't.
+##	   --leakcheck     add the leak checks to --ci or --quick. Needs the network.
 ##	   --no-leakcheck  skip the leak checks
 ##	   -q, --quiet     no preflight block and no prompt
 ##	   -y, --yes       no prompt
 ##	   --no-sync       skip the remote sync stage
 ##	   --no-fuzz       skip the fuzz stage
+##	   --dry-run       show which stages would run, and stop
 ##	   -h, --help      show this help
 ##	- Fuzz budgets, in seconds: SHCLW_FUZZ_SECONDS (default 60, 10 with --quick)
 ##	  for Rust and C against Go, and SHCLW_GOFUZZ_SECONDS (default 30, 0 with --quick)
-##	  for Go's fuzzer. Failing fuzz cases go to cicd/artifacts/fuzz/.
+##	  for Go's fuzzer. Failing fuzz cases go to cicd/artifacts/fuzz/, and the
+##	  newest 10 sets are kept.
 ##	- Test scratch goes under $TMPDIR, in a folder the run makes and removes.
 ##	- C builds against the shcl.h pinned in source/c/shcl-pins.env, fetched by
 ##	  commit into cicd/cache/ and checked by sha256. It takes 2.0's too, for
-##	  the upgrade check.
+##	  the upgrade check. A cached header no pin names is dropped.
+##	- Python runs against the shcl.py pinned in source/python/shcl-pins.env,
+##	  fetched the same way. Its 2.0 copy, _shclw_shcl2.py, is checked against
+##	  its pin. Nothing is installed; PYTHONPATH points at the cache.
 
 ##	History: At bottom of script.
 
@@ -49,6 +54,7 @@ here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 root="$(cd "${here}/.." && pwd)"
 source "${here}/tool-pins.env"
 source "${root}/source/c/shcl-pins.env"
+source "${root}/source/python/shcl-pins.env"
 source "${here}/utility/include/gfs-rotate.bash"
 stamp="$(date +%Y%m%d-%H%M%S)"
 
@@ -58,7 +64,7 @@ export PATH="${HOME}/.cargo/bin:${PATH}"
 ## Half the cores, since a workstation is usually running something else.
 cpuCap=$(( $(nproc 2>/dev/null || echo 2) / 2 )); if ((cpuCap < 1)); then cpuCap=1; fi
 
-doCi=0; doQuick=0; doLeakcheck=""; doQuiet=0; assumeYes=0; doSync=1; doFuzz=1
+doCi=0; doQuick=0; doLeakcheck=""; doQuiet=0; assumeYes=0; doSync=1; doFuzz=1; dryRun=0
 while (($#)); do case "$1" in
 	--ci)       doCi=1; doFuzz=0; shift ;;
 	--quick)    doQuick=1; doSync=0; shift ;;
@@ -68,6 +74,7 @@ while (($#)); do case "$1" in
 	-y|--yes)   assumeYes=1; shift ;;
 	--no-sync)  doSync=0; shift ;;
 	--no-fuzz)  doFuzz=0; shift ;;
+	--dry-run)  dryRun=1; shift ;;
 	-h|--help)  sed -n '/^##	- Purpose:/,/^##	History:/p' "${BASH_SOURCE[0]}" | sed '$d; s/^##	\{0,1\}//'; exit 0 ;;
 	*) echo "unknown option: $1 (try --help)" >&2; exit 2 ;;
 esac; done
@@ -97,13 +104,14 @@ fCheckPin(){   ## fCheckPin NAME PINNED ACTUAL
 
 ## Fetches the pinned shcl.h into the gitignored cache and checks its sha256.
 ## Under --quick it only checks, and returns 1 when the header isn't cached.
+## --leakcheck needs the network anyway, so it fetches.
 fShclHeader(){   ## fShclHeader REV SHA256
 	local rev="$1" sum="$2"
 	local dir="${root}/cicd/cache/shcl-c/${rev}"
 	local got=""
 	if [[ -f "${dir}/shcl.h" ]]; then got="$(sha256sum "${dir}/shcl.h" | cut -d' ' -f1)"; fi
 	if [[ "${got}" != "${sum}" ]]; then
-		if ((doQuick)); then fEcho "WARNING: shcl.h at ${rev} isn't cached, and --quick doesn't fetch; skipping C"; return 1; fi
+		if ((doQuick && ! doLeakcheck)); then fEcho "WARNING: shcl.h at ${rev} isn't cached, and --quick doesn't fetch; skipping C"; return 1; fi
 		mkdir -p "${dir}"
 		curl -fsSL --retry 2 -o "${dir}/shcl.h.part" "https://raw.githubusercontent.com/yottacore/shcl/${rev}/source/c/shcl.h" \
 			|| fDie "couldn't fetch shcl.h at ${rev}"
@@ -114,21 +122,54 @@ fShclHeader(){   ## fShclHeader REV SHA256
 	return 0
 }
 
-## The run's scratch folder, with a marker so cleanup only ever removes its own.
-work="${TMPDIR:-/tmp}/test_shclw_${stamp}$(printf '%02d' $((RANDOM % 100)))"
-fCleanup(){
-	if [[ -f "${work}/.shclw-cicd-owned" ]]; then rm -rf -- "${work}"; fi
+## Fetches the pinned shcl.py the way fShclHeader fetches shcl.h, and checks
+## the 2.0 copy beside the wrapper. Returns 1 under --quick when it isn't cached.
+fShclPy(){
+	local dir="${root}/cicd/cache/shcl-py/${SHCL3_PY_REV}"
+	local got=""
+	got="$(sha256sum "${root}/source/python/_shclw_shcl2.py" | cut -d' ' -f1)"
+	[[ "${got}" == "${SHCL2_PY_SHA256}" ]] || fDie "source/python/_shclw_shcl2.py has sha256 ${got}, and ${SHCL2_PY_SHA256} is pinned"
+	got=""
+	if [[ -f "${dir}/shcl.py" ]]; then got="$(sha256sum "${dir}/shcl.py" | cut -d' ' -f1)"; fi
+	if [[ "${got}" != "${SHCL3_PY_SHA256}" ]]; then
+		if ((doQuick && ! doLeakcheck)); then fEcho "WARNING: shcl.py at ${SHCL3_PY_REV} isn't cached, and --quick doesn't fetch; skipping Python"; return 1; fi
+		mkdir -p "${dir}"
+		curl -fsSL --retry 2 -o "${dir}/shcl.py.part" "https://raw.githubusercontent.com/yottacore/shcl/${SHCL3_PY_REV}/source/python/shcl.py" \
+			|| fDie "couldn't fetch shcl.py at ${SHCL3_PY_REV}"
+		got="$(sha256sum "${dir}/shcl.py.part" | cut -d' ' -f1)"
+		[[ "${got}" == "${SHCL3_PY_SHA256}" ]] || fDie "shcl.py at ${SHCL3_PY_REV} has sha256 ${got}, and ${SHCL3_PY_SHA256} is pinned"
+		mv -f "${dir}/shcl.py.part" "${dir}/shcl.py"
+	fi
 	return 0
 }
-trap fCleanup EXIT
 
-## Tee the whole run to a rotated log, for cicd/utility/lint-report.bash.
-logDir="${root}/cicd/artifacts/lint"
-mkdir -p "${logDir}"
-exec > >(tee "${logDir}/run_${stamp}.log") 2>&1
-gfs_rotate "${logDir}" run log >/dev/null 2>&1 || true
+## Drops cached headers no pin names any more. The folder goes too, unless it holds anything else.
+fShclHeader_Prune(){
+	local dir rev
+	for dir in "${root}/cicd/cache/shcl-c"/*/; do
+		rev="${dir%/}"; rev="${rev##*/}"
+		[[ -d "${dir}" && "${rev}" =~ ^[0-9a-f]{40}$ && "${rev}" != "${SHCL2_REV}" && "${rev}" != "${SHCL3_REV}" ]] || continue
+		rm -f -- "${dir}shcl.h" "${dir}shcl.h.part"
+		if rmdir -- "${dir}" 2>/dev/null; then fEcho "Dropped the cached shcl.h at ${rev}, which no pin names"; fi
+	done
+	return 0
+}
 
-if ((! doQuiet)); then
+## Keeps the newest 10 sets of fuzz failures. Only folders a run marked as its own go.
+fFuzzFail_Prune(){
+	local dir i
+	local -a owned=()
+	for dir in "${root}/cicd/artifacts/fuzz"/*/; do
+		if [[ -f "${dir}.shclw-cicd-owned" ]]; then owned+=("${dir%/}"); fi
+	done
+	for ((i = 0; i < ${#owned[@]} - 10; i++)); do
+		if [[ -f "${owned[i]}/.shclw-cicd-owned" ]]; then rm -rf -- "${owned[i]}"; fi
+	done
+	return 0
+}
+
+fPreflight(){
+	local mode
 	fEcho_Clean
 	fEcho_Clean "shclwrap local CI/CD"
 	fEcho_Clean
@@ -141,9 +182,29 @@ if ((! doQuiet)); then
 	fEcho_Clean "Mode .........: ${mode}"
 	fEcho_Clean "Remote sync ..: $( ((doSync)) && echo 'fast-forward when behind; abort when diverged' || echo '(skipped)')"
 	fEcho_Clean "Leak checks ..: $( ((doLeakcheck)) && echo 'CodeQL, CTU, heaptrack soak' || echo '(skipped)')"
-	fEcho_Clean "Fuzz .........: $( ((doFuzz)) && echo "${fuzzSecs}s Rust and C against Go, ${goFuzzSecs}s Go fuzzer" || echo '(skipped)')"
+	fEcho_Clean "Fuzz .........: $( ((doFuzz)) && echo "${fuzzSecs}s Rust, C, and Python against Go, ${goFuzzSecs}s Go fuzzer" || echo '(skipped)')"
 	fEcho_Clean "CPU cap ......: ${cpuCap}"
 	fEcho_Clean "Scratch ......: ${work}"
+}
+
+## The run's scratch folder, with a marker so cleanup only ever removes its own.
+work="${TMPDIR:-/tmp}/test_shclw_${stamp}$(printf '%02d' $((RANDOM % 100)))"
+fCleanup(){
+	if [[ -f "${work}/.shclw-cicd-owned" ]]; then rm -rf -- "${work}"; fi
+	return 0
+}
+trap fCleanup EXIT
+
+if ((dryRun)); then fPreflight; fEcho_Clean; exit 0; fi
+
+## Tee the whole run to a rotated log, for cicd/utility/lint-report.bash.
+logDir="${root}/cicd/artifacts/lint"
+mkdir -p "${logDir}"
+exec > >(tee "${logDir}/run_${stamp}.log") 2>&1
+gfs_rotate "${logDir}" run log >/dev/null 2>&1 || true
+
+if ((! doQuiet)); then
+	fPreflight
 	if ((! assumeYes)); then read -r -p "Proceed? (Ctrl+C aborts, Enter continues) " _; fi
 fi
 mkdir -p "${work}" && touch "${work}/.shclw-cicd-owned"
@@ -210,6 +271,10 @@ fEcho "OK: clippy"
 doC=1
 fShclHeader "${SHCL2_REV}" "${SHCL2_SHA256}" || doC=0
 fShclHeader "${SHCL3_REV}" "${SHCL3_SHA256}" || doC=0
+fShclHeader_Prune
+doPy=1
+fShclPy || doPy=0
+pyPath="${root}/cicd/cache/shcl-py/${SHCL3_PY_REV}"
 if ((doC && ! doQuick)); then
 	bash "${here}/c-checks.bash" lint 3 "${work}"
 	fEcho "OK: clang-tidy, gcc-15 at C17, and static analyzers (C over shcl 3)"
@@ -218,8 +283,8 @@ mapfile -t shellFiles < <(find "${root}/cicd" -type f \( -name '*.bash' -o -path
 ((${#shellFiles[@]})) || fDie "shellcheck found no files"
 shellcheck "${shellFiles[@]}"
 fEcho "OK: shellcheck (${#shellFiles[@]} files)"
-ruff check --quiet "${root}/cicd"
-ruff format --check --quiet "${root}/cicd"
+ruff check --quiet "${root}/cicd" "${root}/source/python"
+ruff format --check --quiet "${root}/cicd" "${root}/source/python"
 fEcho "OK: ruff"
 
 #•••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••
@@ -228,6 +293,14 @@ fSection "3/5  Tests"
 fEcho "OK: Go tests"
 (cd "${root}/source/rust" && TMPDIR="${work}" cargo test --quiet -j "${cpuCap}" --all-features)
 fEcho "OK: Rust tests"
+if ((doPy)); then
+	(cd "${root}/source/python" && TMPDIR="${work}" PYTHONPATH="${pyPath}" PYTHONPYCACHEPREFIX="${work}/pycache" python3 -m unittest discover -q -s tests)
+	PYTHONPATH="${pyPath}" PYTHONPYCACHEPREFIX="${work}/pycache" python3 "${here}/c_cases.py" --lang Python --version 3 --cases "${root}/tests/cases" \
+		--drive python3 "${root}/source/python/shclw_drive.py"
+	fEcho "OK: Python tests and shared cases"
+fi
+bash "${here}/flags-test.bash" >/dev/null
+fEcho "OK: cicd flag mixes"
 if ((doC && doQuick)); then
 	bash "${here}/c-checks.bash" quick 3 "${work}"
 	fEcho "OK: gcc-15 at C17, C API tests, and shared cases over shcl 3, plain build"
@@ -255,12 +328,16 @@ if ((doFuzz)); then
 		## In the container, where the C drivers were built. Go's and Rust's run there too.
 		cDrive=shclw-drive; if ((doQuick)); then cDrive=shclw-drive-plain; fi
 		bash "${here}/c-checks.bash" fuzz 3 "${work}" "${cDrive}" --seconds "${fuzzSecs}" || {
-			if [[ -d "${work}/fuzz-fail" ]]; then mkdir -p "${failDir%/*}"; cp -r "${work}/fuzz-fail" "${failDir}"; fi
+			if [[ -d "${work}/fuzz-fail" ]]; then mkdir -p "${failDir%/*}"; cp -r "${work}/fuzz-fail" "${failDir}"; touch "${failDir}/.shclw-cicd-owned"; fFuzzFail_Prune; fi
 			fDie "fuzz found failures; cases are in ${failDir}"
 		}
 	elif ((fuzzSecs > 0)); then
-		python3 "${here}/fuzz.py" --go "${work}/bin/go-drive" --rust "${work}/bin/rust-drive" --seconds "${fuzzSecs}" \
-			--cases "${root}/tests/cases" --work "${work}/fuzz" --out "${failDir}" || fDie "fuzz found failures; cases are in ${failDir}"
+		pyArgs=(); if ((doPy)); then pyArgs=(--python "${root}/source/python/shclw_drive.py" --python-path "${pyPath}"); fi
+		PYTHONPYCACHEPREFIX="${work}/pycache" python3 "${here}/fuzz.py" --go "${work}/bin/go-drive" --rust "${work}/bin/rust-drive" "${pyArgs[@]}" --seconds "${fuzzSecs}" \
+			--cases "${root}/tests/cases" --work "${work}/fuzz" --out "${failDir}" || {
+			if [[ -d "${failDir}" ]]; then touch "${failDir}/.shclw-cicd-owned"; fFuzzFail_Prune; fi
+			fDie "fuzz found failures; cases are in ${failDir}"
+		}
 	fi
 	if ((goFuzzSecs > 0)); then
 		(cd "${root}/source/go" && TMPDIR="${work}" go test ./shclw/ -run '^$' -fuzz=FuzzRun -fuzztime="${goFuzzSecs}s" -parallel "${cpuCap}")
@@ -282,3 +359,5 @@ fEcho_Clean
 ##		- 2026-10-19 JC: --gate is now --ci. --quick runs only the fast checks, and no options runs everything, leak checks included.
 ##		- 2026-10-19 JC: The fuzz runs C too, on all 3 shcl versions.
 ##		- 2026-10-19 JC: shcl 3.0 is the floor. C builds and tests over 3.0 only, and the SHCLW_SHCL pick check is gone.
+##		- 2026-10-21 JC: --dry-run. Drops cached headers no pin names, and keeps the newest 10 fuzz failure sets. --quick --leakcheck fetches headers.
+##		- 2026-10-21 JC: Python: lint, tests, shared cases, and fuzz.

@@ -1,0 +1,35 @@
+db:
+	host: a
+db:
+	pool: 2
+srv:
+	port: 1
+other: 2
+srv:
+	name: x
+net:
+	proxy:
+		host: p
+net:
+	proxy:
+		port: 3
+same: x
+same: x
+t:
+t:
+t:
+db.host: a
+db.user: u
+note: ```
+same: x
+db:
+```
+"q r":
+	a: 1
+"q r":
+	b: 2
+port: 1
+port: 2
+[oops
+	- stray
+tail: 1

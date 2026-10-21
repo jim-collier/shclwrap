@@ -1,0 +1,38 @@
+# A file in a newer format opens, read as shcl 3.0 reads it, and is
+# read-only.
+open	newer.shcl
+readonly
+get	int	a
+get	str	b.c
+put	int	a	2
+get	int	a
+# Write refuses it, over the file or anywhere else, and with force too.
+write	newer.shcl
+write	copy.shcl
+write	newer.shcl	force
+files
+info	on
+stamp
+# Strictness still applies.
+open	newer.shcl	strict
+readonly
+# Parsed text naming a newer format is read-only too.
+parse
+readonly
+write	copy.shcl
+# A newer lower layer reads, and the user file over it saves.
+layers	newer.shcl	user.shcl
+readonly
+get	int	a
+put	int	a	3
+write	user.shcl
+# A newer user file reads over the site's, and Write refuses it.
+layers	site.shcl	newer.shcl
+readonly
+get	str	site
+get	int	a
+write	newer.shcl
+files
+# A file that names this format is never read-only.
+open	site.shcl
+readonly

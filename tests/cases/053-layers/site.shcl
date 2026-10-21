@@ -1,0 +1,8 @@
+# site
+port: 8080
+tags: [x]
+note: ```
+site text
+```
+db:
+	host: db.site
