@@ -11,7 +11,7 @@
 /// The shcl crate underneath, so code using `inner()` can name its types.
 pub use shcl3 as shcl;
 
-use crate::{Diag, ErrKind, Error, Got, Node, Severity, ShclDoc, Status, Strictness, Upgraded, Value};
+use crate::{Diag, ErrKind, Error, Got, Layer, Node, Severity, ShclDoc, Status, Strictness, Upgraded, Value};
 
 /// The shcl release this module wraps.
 pub const SHCL_VERSION: &str = "3.0.0-dev+ea0998fa";
@@ -26,6 +26,16 @@ pub struct Doc {
 	info: crate::Info,
 	stamp: bool,
 	up: Option<UpgradedFile>,
+	lay: Option<Layers>,
+}
+
+/// What `open_layers` read. `d` is then their merge, built again after each
+/// edit, and edits and saves go to `docs[edit]`.
+#[derive(Debug)]
+struct Layers {
+	// None for a file that wasn't there.
+	docs: Vec<Option<Doc>>,
+	edit: usize,
 }
 
 /// The file `open` upgraded, kept until the first write over it backs it up.
@@ -83,6 +93,9 @@ impl crate::Lib for Version {
 	fn open_with(path: &str, level: Strictness) -> Result<Doc, Error> {
 		open_with(path, level)
 	}
+	fn open_layers(layers: &[Layer]) -> Result<Doc, Error> {
+		open_layers(layers)
+	}
 	fn format_of(text: &str) -> u32 {
 		format_of(text)
 	}
@@ -127,7 +140,48 @@ fn doc(d: shcl::Document) -> Doc {
 		info: crate::Info::AsIs,
 		stamp: false,
 		up: None,
+		lay: None,
 	}
+}
+
+/// Reads `layers` in order, lowest first, such as defaults, then a site
+/// file, then the user's, and reads as their merge: a later layer's value,
+/// array, or raw block takes the place of a lower one's, and blocks merge
+/// name by name, as shcl's `merge` does. A missing file is skipped.
+///
+/// Edits and saves go to the last file layer, so `text`, `write`, and the
+/// rest are that layer's, and `write` writes only it. Text layers after it,
+/// such as this run's command line, still win reads. Each file is opened as
+/// `open` does, and the first error is returned. `diags` are every layer's,
+/// with `layer` set (design.md, Decisions).
+pub fn open_layers(layers: &[Layer]) -> Result<Doc, Error> {
+	if layers.is_empty() {
+		return Ok(new());
+	}
+	let edit = layers
+		.iter()
+		.rposition(|l| matches!(l, Layer::File(_)))
+		.unwrap_or(layers.len() - 1);
+	let mut docs = Vec::with_capacity(layers.len());
+	for (i, l) in layers.iter().enumerate() {
+		match *l {
+			Layer::Text(text) => docs.push(Some(parse(text))),
+			Layer::File(path) => match open(path) {
+				Ok(d) => docs.push(Some(d)),
+				Err(e) if e.kind == ErrKind::NotFound => docs.push((i == edit).then(new)),
+				Err(mut e) => {
+					for g in &mut e.diags {
+						g.layer = i + 1;
+					}
+					return Err(e);
+				}
+			},
+		}
+	}
+	let mut d = new();
+	d.lay = Some(Layers { docs, edit });
+	d.remerge();
+	Ok(d)
 }
 
 /// Reads and parses a file. A missing file is `NotFound`, and a file
@@ -310,6 +364,7 @@ fn old_errors(old: &shcl2::Document) -> Option<Error> {
 			severity: Severity::Error,
 			code: d.code,
 			message: d.message.clone(),
+			layer: 0,
 		})
 		.collect();
 	if errs.is_empty() {
@@ -420,6 +475,7 @@ fn carry_diag(line: usize, message: &str) -> Diag {
 		severity: Severity::Error,
 		code: "W002",
 		message: message.to_owned(),
+		layer: 0,
 	}
 }
 
@@ -502,6 +558,38 @@ fn values(text: &str) -> String {
 }
 
 impl Doc {
+	/// Builds the reads' document from the layers again. Lower layers never
+	/// change, but a merge changes its base, so it starts over.
+	fn remerge(&mut self) {
+		let Some(lay) = &self.lay else { return };
+		let mut m = shcl::Document::new();
+		for x in lay.docs.iter().flatten() {
+			m.merge(&x.d);
+		}
+		self.d = m;
+	}
+
+	/// Where edits and saves go: the edit layer of a layered document, or
+	/// the document itself.
+	fn top(&self) -> &Doc {
+		match &self.lay {
+			Some(l) => l.docs[l.edit].as_ref().unwrap_or(self),
+			None => self,
+		}
+	}
+
+	/// Runs an edit on the edit layer, then builds the merge again.
+	fn on_top<T>(&mut self, edit: impl FnOnce(&mut Doc) -> T) -> T {
+		let Some(lay) = &mut self.lay else { return edit(self) };
+		let out = match &mut lay.docs[lay.edit] {
+			Some(top) => edit(top),
+			// open_layers always fills the edit layer.
+			None => unreachable!("no edit layer"),
+		};
+		self.remerge();
+		out
+	}
+
 	/// The save's text before the info block and the Format line.
 	fn lines(&self) -> String {
 		match self.d.to_text_keep_lines() {
@@ -517,13 +605,16 @@ impl Doc {
 		saved(&text, self.info, self.stamp).unwrap_or(text)
 	}
 
-	/// The shcl document underneath, for calls shclw doesn't cover.
+	/// The shcl document underneath, for calls shclw doesn't cover. On a
+	/// layered document it's the merge, which `open_layers` builds again
+	/// after every edit.
 	pub fn inner(&self) -> &shcl::Document {
 		&self.d
 	}
 
 	/// The shcl document underneath, to change it with calls shclw doesn't
-	/// cover.
+	/// cover. On a layered document that's the merge, so a change there is
+	/// gone after the next edit, and never saved.
 	pub fn inner_mut(&mut self) -> &mut shcl::Document {
 		&mut self.d
 	}
@@ -557,11 +648,13 @@ impl Doc {
 
 impl ShclDoc for Doc {
 	fn text(&self) -> String {
-		self.finish(self.lines())
+		let t = self.top();
+		t.finish(t.lines())
 	}
 
 	fn canonical(&self) -> String {
-		self.finish(self.d.to_canonical())
+		let t = self.top();
+		t.finish(t.d.to_canonical())
 	}
 
 	/// Refuses when the load dropped lines the save would lose, the same
@@ -572,6 +665,11 @@ impl ShclDoc for Doc {
 	/// changed since `open` read it is left alone with `Io`, when the write
 	/// would back it up.
 	fn write(&mut self, path: &str) -> Result<(), Error> {
+		if let Some(lay) = &mut self.lay {
+			if let Some(top) = &mut lay.docs[lay.edit] {
+				return top.write(path);
+			}
+		}
 		let (text, kept) = self.d.to_text_keep_lines();
 		let lost = self.d.lost_count();
 		if !kept && lost > 0 {
@@ -604,27 +702,41 @@ impl ShclDoc for Doc {
 	/// `info_block` and `stamp_format` change only their own lines, so they
 	/// don't change the answer.
 	fn rewrites(&self) -> bool {
-		if self.up.as_ref().is_some_and(|u| u.backup.is_empty()) {
+		let s = self.top();
+		if s.up.as_ref().is_some_and(|u| u.backup.is_empty()) {
 			return true;
 		}
-		!self.d.to_text_keep_lines().1
+		!s.d.to_text_keep_lines().1
 	}
 
 	/// Reads, `lines`, `diags`, and `text` are all of the upgraded text.
 	fn upgraded_from(&self) -> u32 {
-		self.up.as_ref().map_or(0, |u| u.from)
+		self.top().up.as_ref().map_or(0, |u| u.from)
 	}
 
 	fn backup_name(&self) -> &str {
-		self.up.as_ref().map_or("", |u| u.backup.as_str())
+		self.top().up.as_ref().map_or("", |u| u.backup.as_str())
 	}
 
+	/// A layered document has every layer's, in layer order, each with its
+	/// `layer`.
 	fn diags(&self) -> Vec<Diag> {
-		diags(self.d.diagnostics())
+		let Some(lay) = &self.lay else {
+			return diags(self.d.diagnostics());
+		};
+		let mut out = Vec::new();
+		for (i, x) in lay.docs.iter().enumerate() {
+			let Some(x) = x else { continue };
+			out.extend(x.diags().into_iter().map(|g| Diag { layer: i + 1, ..g }));
+		}
+		out
 	}
 
 	fn errors(&self) -> usize {
-		self.d.error_count()
+		match &self.lay {
+			Some(lay) => lay.docs.iter().flatten().map(ShclDoc::errors).sum(),
+			None => self.d.error_count(),
+		}
 	}
 
 	fn check(&self, schema: &Doc) -> Vec<Diag> {
@@ -756,6 +868,9 @@ impl ShclDoc for Doc {
 
 	fn put(&mut self, path: &str, v: impl Into<Value>) -> Result<(), Error> {
 		let v = v.into();
+		if self.lay.is_some() {
+			return self.on_top(|t| t.put(path, v));
+		}
 		crate::check_value(path, &v)?;
 		let st = match &v {
 			Value::Int(x) => self.d.set_int(path, *x),
@@ -774,6 +889,9 @@ impl ShclDoc for Doc {
 	}
 
 	fn put_syntax(&mut self, path: &str, text: &str) -> Result<(), Error> {
+		if self.lay.is_some() {
+			return self.on_top(|t| t.put_syntax(path, text));
+		}
 		Doc::set_err(path, self.d.set_literal(path, text))?;
 		let mut alone = new();
 		// A failed set leaves alone empty, which the check reports.
@@ -782,15 +900,18 @@ impl ShclDoc for Doc {
 	}
 
 	fn comment(&mut self, path: &str, text: &str) -> Result<(), Error> {
-		Doc::set_err(path, self.d.set_comment(path, text))
+		self.on_top(|t| Doc::set_err(path, t.d.set_comment(path, text)))
 	}
 
 	fn remove(&mut self, path: &str) -> usize {
-		self.d.remove(path)
+		self.on_top(|t| t.d.remove(path))
 	}
 
 	/// shcl's own `set_banner` leaves an old block above the first field.
 	fn info_block(&mut self, on: bool) -> Result<(), Error> {
+		if self.lay.is_some() {
+			return self.on_top(|t| t.info_block(on));
+		}
 		let info = if on { crate::Info::On } else { crate::Info::Off };
 		crate::finish_info(&self.lines(), info, self.stamp, &info_edit())?;
 		self.info = info;
@@ -798,6 +919,9 @@ impl ShclDoc for Doc {
 	}
 
 	fn stamp_format(&mut self) -> Result<(), Error> {
+		if self.lay.is_some() {
+			return self.on_top(ShclDoc::stamp_format);
+		}
 		crate::finish_info(&self.lines(), self.info, true, &info_edit())?;
 		self.stamp = true;
 		Ok(())
@@ -848,6 +972,7 @@ fn diags(v: &[shcl::Diagnostic]) -> Vec<Diag> {
 			},
 			code: d.code,
 			message: d.message.clone(),
+			layer: 0,
 		})
 		.collect()
 }

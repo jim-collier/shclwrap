@@ -69,7 +69,7 @@ Status: draft, 2026-10-15. Go, Rust, and C are built over shcl 3.0, with 2.0 bui
 
 ### Non-goals
 
-- Covering all of shcl. Raw blocks, datetimes, durations, sizes, merging, and schema generation stay with shcl, through `Inner()`.
+- Covering all of shcl. Raw blocks, datetimes, durations, sizes, merging past `OpenLayers`, and schema generation stay with shcl, through `Inner()`.
 
 - Building on shcl 1.2 or 2.0. A program on either moves to 3.0 when it moves onto the wrapper.
 
@@ -118,6 +118,7 @@ Go names are listed. Rust uses the same words in snake case, and `ShclDoc` has t
 | `ParseWith(text, level)`  | `Loose`, `Standard`, or `Strict`. Only `Strict` fails, with `ErrStrict`.
 | `Open(path)`              | Reads and parses a file, and upgrades an older one in memory. A missing file is `ErrNotFound`, and a newer format is `ErrTooNew`.
 | `OpenWith(path, level)`   | `Open` at a strictness.
+| `OpenLayers(layers...)`   | Reads defaults, a site file, a user file, and so on, lowest first, as one document. Edits and saves go to the last file.
 | `d.Text()`                | The document as it would be saved.
 | `d.Canonical()`           | The document in canonical form.
 | `d.Write(path)`           | Saves `Text()` atomically. The first one over a file `Open` upgraded backs it up first.
@@ -147,6 +148,16 @@ Go names are listed. Rust uses the same words in snake case, and `ShclDoc` has t
 - A save whose text has no Format line has 2.x's `#` info block swapped for the current one, with its Format line, where the old one sat (2026101513330010). That's `Write`, `Text`, and `Canonical`.
 	- It's the upgrade's swap, with the same block finder, so a block's text inside a raw body doesn't count. The lines end as the file's did.
 	- So a 2.x file read with `Parse` and saved names format 3, and the next `Open` reads what the program had.
+
+- `OpenLayers` reads its layers lowest first, such as built-in defaults, then a site file, then the user's file, and the document reads as their merge (2026101512024156). A layer is a file, or text the program has, like its defaults or this run's command line.
+	- A later layer's value, array, or raw block takes the place of a lower one's, whole. Blocks merge name by name, so a user file that sets `db.pool` keeps the site's `db.host`. It's shcl's own merge.
+	- A missing file is skipped, since a site or user file that isn't there is normal. Any other error opening a file is returned as `Open` returns it, with an empty document.
+	- Edits and saves go to the last file layer, the user's file. `Text`, `Canonical`, `Write`, `Rewrites`, `InfoBlock`, `StampFormat`, `UpgradedFrom`, and `BackupName` are that layer's, so a save writes what the user's file had plus the edits, and nothing from below. A missing user file is made by the first `Write`. With no file layer, the last layer takes the edits.
+	- Text layers after the last file, like a command line, still win reads, and are never saved.
+	- Reads, `Each`, `Lines`, `Check`, and `Inner` are of the merge, built again after each edit, so a removed key reads as the layer below has it. A line number is the line in whichever layer the value came from.
+	- `Diags` and `Errors` are every layer's, in layer order. `Diag.Layer` is the layer's place in the list, from 1, and 0 on a document that isn't layered.
+	- An edit takes its path as the edit layer reads it. So an index from `Each`, `First`, or `Last` on the merge can name another instance, or none, where a lower layer has the same key.
+	- Rust takes `&[Layer::Text(..), Layer::File(..)]`. C's `shclw_open_layers` takes an array of `shclw_layer`, each a `file`, or with `file` NULL, a `text` and `len`.
 
 - C also has `shclw_compact`, for a program that edits a lot between saves. [Decisions](#decisions) says why.
 
@@ -305,7 +316,7 @@ An ops script is one op per line, with fields split by tabs. `\t`, `\n`, `\r`, a
 | `parse [loose\|standard\|strict]`       | `ok` or `error strict`, and the document is reloaded
 | `text`, `canonical`                     | the document, one `\|`-prefixed line per line
 | `rewrites`                              | `true` or `false`, from `Rewrites`
-| `diags`, `errors`                       | each diagnostic as line, severity, code, and message, or the count
+| `diags`, `errors`                       | each diagnostic as line, severity, code, and message, or the count. A layer's line is `LAYER:LINE`.
 | `get TYPE PATH`                         | status, line, and the value. Arrays print a count, then the items.
 | `or TYPE PATH FALLBACK...`              | the value or the fallback
 | `has`, `count`, `line`, `names`         | the answer for PATH
@@ -321,6 +332,7 @@ An ops script is one op per line, with fields split by tabs. `\t`, `\n`, `\r`, a
 | `format`, `upgrade [FROM]`              | the format number, or the upgrade's result and text
 | `write FILE`                            | `ok` and the saved file, or `error KIND`
 | `open FILE [loose\|standard\|strict]`   | `ok`, or `error KIND` and the error's diagnostics, and the document is reloaded
+| `layers SPEC...`                        | `open` for `OpenLayers`. Each SPEC is a file name, or `=` and a text layer's text.
 | `upgraded`                              | `UpgradedFrom` and `BackupName`, then the backup's text
 | `files`                                 | the names in the folder
 
@@ -470,6 +482,18 @@ An ops script is one op per line, with fields split by tabs. `\t`, `\n`, `\r`, a
 	- 2.0 ends the program when memory runs out, where 3.0 has a hook for that.
 
 - The C upgrade gives one block, `shclw_upgraded`, and shcl 2.0's errors on a refused file are in it, rather than on the error. `shclw_error` is a fixed struct the caller never frees, and a list on it would need freeing after any call that can fail.
+
+- Layered loading uses shcl's own merge, rather than one of the wrapper's (2026101512024156). It's what Cobblevale calls today, and its rules are the ones a reader expects: a value, an array, or a raw block in a higher layer replaces the lower one's whole, and blocks merge by name. A merge of the wrapper's own would be one more set of rules to keep the same in 3 languages and in step with shcl. Other merging is still a non-goal, reached through `Inner()`.
+
+- Each layer stays its own document, and edits and saves go to the last file layer. The merge is built again after each edit. Saving the merge would copy the defaults and the site file into the user's file, and a later change to either would never show. Mossrealm and Cobblevale both keep the user layer apart and save only it. Building again costs a merge of every layer per edit, which is small for config files, and it's how a removed key comes to read as the layer below has it.
+	- Text layers after the last file are this run's, so a command line can be a layer without being saved, as Mossrealm's 4th layer is.
+	- The layers below stay as they were read, so saving only what differs from them (2026101513330030) can build on this.
+
+- A missing layer file is skipped. Any other error stops the load, as `Open` does, rather than leave that layer out. Leaving out a broken site file would hide it, and leaving out a user file that's too new would let the next save write over it.
+
+- A diagnostic names its layer by its place in the list, `Layer`, rather than by a name. The program already has the list, C gets no string to free, and a document that isn't layered gives the same diagnostics as before.
+
+- There's no `OpenLayersWith` yet. A program that wants strict layers checks `Errors()`, which counts every layer.
 
 - C's `shclw_drop_declared` takes the document and drops hints from its own diagnostics, rather than taking a list as Go and Rust do. shcl's C binding has only that form, and the match is on hint text that shcl builds inside itself.
 

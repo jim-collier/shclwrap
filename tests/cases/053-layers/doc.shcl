@@ -1,0 +1,5 @@
+# mine
+name: Mine
+db:
+	pool: 9
+[oops

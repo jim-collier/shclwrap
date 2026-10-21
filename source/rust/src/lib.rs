@@ -77,18 +77,32 @@ impl fmt::Display for Severity {
 }
 
 /// One diagnostic from a load or a schema check. `line` is 1-based.
+/// `layer` is the 1-based place in `open_layers`' list of the layer the line
+/// is in, or 0 for a document that isn't layered.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Diag {
 	pub line: usize,
 	pub severity: Severity,
 	pub code: &'static str,
 	pub message: String,
+	pub layer: usize,
 }
 
 impl fmt::Display for Diag {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		if self.layer > 0 {
+			write!(f, "layer {} ", self.layer)?;
+		}
 		write!(f, "line {}: {} {}", self.line, self.code, self.message)
 	}
+}
+
+/// One layer for `open_layers`: a file, or text the program has, such as
+/// its defaults or this run's command line.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Layer<'a> {
+	File(&'a str),
+	Text(&'a str),
 }
 
 /// A read with its status. Check `status` before trusting `value`. `text`
@@ -407,6 +421,7 @@ pub trait Lib {
 	/// A load at `level`, with the document back even when it fails.
 	fn parse_keep(text: &str, level: Strictness) -> (Self::Doc, Option<Error>);
 	fn open_with(path: &str, level: Strictness) -> Result<Self::Doc, Error>;
+	fn open_layers(layers: &[Layer]) -> Result<Self::Doc, Error>;
 	fn format_of(text: &str) -> u32;
 	fn upgrade(text: &str, from: u32) -> Result<Upgraded, Error>;
 }
@@ -834,6 +849,7 @@ impl<L: Lib> Runner<'_, L> {
 			"upgrade" => self.upgrade(arg(1)),
 			"write" => self.write(arg(1)),
 			"open" => self.open(arg(1), arg(2)),
+			"layers" => self.layers(&rest(1)),
 			"upgraded" => self.upgraded(),
 			"files" => self.files(),
 			_ => self.say("error unknownop"),
@@ -851,6 +867,34 @@ impl<L: Lib> Runner<'_, L> {
 	fn open(&mut self, name: &str, level: &str) {
 		let Some(path) = self.file(name) else { return };
 		match L::open_with(&path.to_string_lossy(), strictness_of(level)) {
+			Ok(d) => {
+				self.doc = d;
+				self.say("ok");
+			}
+			Err(e) => {
+				self.say(&format!("error {}", e.kind));
+				self.diags(&e.diags);
+				self.doc = L::parse("");
+			}
+		}
+	}
+
+	/// File names, and text for a text layer after a "=".
+	fn layers(&mut self, specs: &[String]) {
+		let mut paths = Vec::with_capacity(specs.len());
+		for spec in specs {
+			if let Some(text) = spec.strip_prefix('=') {
+				paths.push((false, text.to_owned()));
+				continue;
+			}
+			let Some(path) = self.file(spec) else { return };
+			paths.push((true, path.to_string_lossy().into_owned()));
+		}
+		let layers: Vec<Layer> = paths
+			.iter()
+			.map(|(file, s)| if *file { Layer::File(s) } else { Layer::Text(s) })
+			.collect();
+		match L::open_layers(&layers) {
 			Ok(d) => {
 				self.doc = d;
 				self.say("ok");
@@ -906,7 +950,12 @@ impl<L: Lib> Runner<'_, L> {
 
 	fn diags(&mut self, ds: &[Diag]) {
 		for d in ds {
-			self.say(&format!("{}\t{}\t{}\t{}", d.line, d.severity, d.code, esc(&d.message)));
+			let line = if d.layer > 0 {
+				format!("{}:{}", d.layer, d.line)
+			} else {
+				d.line.to_string()
+			};
+			self.say(&format!("{line}\t{}\t{}\t{}", d.severity, d.code, esc(&d.message)));
 		}
 	}
 

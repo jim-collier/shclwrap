@@ -65,6 +65,11 @@ shclw_kind shclw_i_verify_put(shclw_doc *d, const char *path, const shclw_i_valu
 // The adapter's half of a put: the set alone, with no read-back. shclw.c
 // checks the value first and reads it back after.
 shclw_kind shclw_i_set(shclw_doc *d, const char *path, const shclw_i_value *v, shclw_error *err);
+// Where edits and saves go: the edit layer of a layered document, or d.
+shclw_doc *shclw_i_top(shclw_doc *d);
+// Builds a layered document's merge again after an edit to its edit layer. A
+// no-op on any other document.
+shclw_kind shclw_i_edited(shclw_doc *d, shclw_error *err);
 // Go's VerifySyntax. alone has the text set at "k", and line is "k: text"
 // parsed.
 shclw_kind shclw_i_verify_syntax(shclw_doc *d, const char *path, shclw_doc *alone, shclw_doc *line, shclw_error *err);

@@ -76,15 +76,28 @@ func (s Severity) String() string {
 }
 
 // Diag is one diagnostic from a load or a schema check. Line is 1-based.
+// Layer is the 1-based place in OpenLayers' list of the layer the line is
+// in, or 0 for a document that isn't layered.
 type Diag struct {
 	Line     int
 	Severity Severity
 	Code     string
 	Message  string
+	Layer    int
 }
 
 func (d Diag) String() string {
+	if d.Layer > 0 {
+		return fmt.Sprintf("layer %d line %d: %s %s", d.Layer, d.Line, d.Code, d.Message)
+	}
 	return fmt.Sprintf("line %d: %s %s", d.Line, d.Code, d.Message)
+}
+
+// Layer is one layer for OpenLayers: a file, or with File empty, Text the
+// program has, such as its defaults or this run's command line.
+type Layer struct {
+	File string
+	Text string
 }
 
 // Got is a read with its status. Check Status before trusting Value: an
@@ -259,6 +272,7 @@ type Lib struct {
 	Parse       func(text string) Doc
 	ParseWith   func(text string, s Strictness) (Doc, error)
 	OpenWith    func(path string, s Strictness) (Doc, error)
+	OpenLayers  func(layers ...Layer) (Doc, error)
 	FormatOf    func(text string) int
 	Upgrade     func(text string, from int) (Upgraded, error)
 }

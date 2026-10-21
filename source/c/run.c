@@ -560,6 +560,10 @@ static void print_diags(runner *r, shclw_diag *ds, size_t n) {
 		return;
 	}
 	for (size_t i = 0; i < n; i++) {
+		if (ds[i].layer) {
+			put_size(&r->out, ds[i].layer);
+			putc_(&r->out, ':');
+		}
 		put_size(&r->out, ds[i].line);
 		putc_(&r->out, '\t');
 		puts_(&r->out, shclw_severity_name(ds[i].severity));
@@ -672,6 +676,54 @@ static void open_(runner *r, const fields *f) {
 	shclw_free(r->doc);
 	r->doc = doc;
 	r->level = s;
+}
+
+// File names, and text for a text layer after a "=".
+static void layers_(runner *r, const fields *f) {
+	size_t n = f->n > 1 ? f->n - 1 : 0;
+	shclw_layer *ls = (shclw_layer *)calloc(n ? n : 1, sizeof *ls);
+	char **paths = (char **)calloc(n ? n : 1, sizeof *paths);
+	bool ok = ls && paths;
+	if (!ok) {
+		nomem(&r->out);
+	}
+	for (size_t i = 0; ok && i < n; i++) {
+		if (arg(f, i + 1)[0] == '=') {
+			ls[i].text = arg(f, i + 1) + 1;
+			ls[i].len = arg_len(f, i + 1) - 1;
+			continue;
+		}
+		paths[i] = file(r, arg(f, i + 1));
+		ok = paths[i] != NULL;
+		ls[i].file = paths[i];
+	}
+	shclw_doc *doc = NULL;
+	if (ok) {
+		shclw_kind k = shclw_open_layers(ls, n, &doc, NULL);
+		if (doc) {
+			result(r, k);
+		}
+		if (doc && k != SHCLW_OK) {
+			// Go and Rust have the diagnostics on the error, not the document.
+			print_doc_diags(r, doc);
+			shclw_free(doc);
+			doc = shclw_new();
+		}
+		if (doc) {
+			free(r->src);
+			r->src = NULL;
+			shclw_free(r->doc);
+			r->doc = doc;
+			r->level = SHCLW_STANDARD;
+		} else {
+			nomem(&r->out);
+		}
+	}
+	for (size_t i = 0; paths && i < n; i++) {
+		free(paths[i]);
+	}
+	free((void *)paths);
+	free(ls);
 }
 
 // name with STAMP in place of the time in a backup's name.
@@ -1090,6 +1142,7 @@ static void op_format(runner *r, const fields *f) {
 }
 static void op_upgrade(runner *r, const fields *f) { upgrade(r, arg(f, 1)); }
 static void op_open(runner *r, const fields *f) { open_(r, f); }
+static void op_layers(runner *r, const fields *f) { layers_(r, f); }
 static void op_upgraded(runner *r, const fields *f) {
 	(void)f;
 	upgraded(r);
@@ -1133,6 +1186,7 @@ static const struct {
 	{"upgrade",   op_upgrade},
 	{"write",     op_write},
 	{"open",      op_open},
+	{"layers",    op_layers},
 	{"upgraded",  op_upgraded},
 	{"files",     op_files},
 };

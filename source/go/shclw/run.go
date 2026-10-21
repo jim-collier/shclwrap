@@ -136,6 +136,8 @@ func (r *runner) op(f []string) {
 		r.write(arg(1))
 	case "open":
 		r.open(arg(1), arg(2))
+	case "layers":
+		r.layers(rest(1))
 	case "upgraded":
 		r.upgraded()
 	case "files":
@@ -180,6 +182,29 @@ func (r *runner) open(name, level string) {
 	}
 	r.doc = doc
 	r.out("ok")
+}
+
+// layers takes file names, and text for a text layer after a "=".
+func (r *runner) layers(specs []string) {
+	layers := make([]Layer, len(specs))
+	for i, spec := range specs {
+		if text, ok := strings.CutPrefix(spec, "="); ok {
+			layers[i].Text = text
+			continue
+		}
+		path, ok := r.file(spec)
+		if !ok {
+			return
+		}
+		layers[i].File = path
+	}
+	doc, err := r.lib.OpenLayers(layers...)
+	r.doc = doc
+	r.result(err)
+	var e *Error
+	if errors.As(err, &e) {
+		r.diags(e.Diags)
+	}
 }
 
 func (r *runner) upgraded() {
@@ -236,7 +261,11 @@ func (r *runner) result(err error) {
 
 func (r *runner) diags(ds []Diag) {
 	for _, d := range ds {
-		r.out(fmt.Sprintf("%d\t%s\t%s\t%s", d.Line, d.Severity, d.Code, esc(d.Message)))
+		line := strconv.Itoa(d.Line)
+		if d.Layer > 0 {
+			line = strconv.Itoa(d.Layer) + ":" + line
+		}
+		r.out(fmt.Sprintf("%s\t%s\t%s\t%s", line, d.Severity, d.Code, esc(d.Message)))
 	}
 }
 

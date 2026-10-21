@@ -97,12 +97,23 @@ typedef struct {
 	size_t n;
 } shclw_string;
 
+// layer is the 1-based place in shclw_open_layers' list of the layer the line
+// is in, or 0 for a document that isn't layered.
 typedef struct {
 	size_t line;
 	shclw_severity severity;
 	shclw_string code;
 	shclw_string message;
+	size_t layer;
 } shclw_diag;
+
+// One layer for shclw_open_layers: a file, or with file NULL, text the program
+// has, such as its defaults or this run's command line.
+typedef struct {
+	const char *file;
+	const char *text;
+	size_t len;
+} shclw_layer;
 
 // A read with its status. Check status before trusting value: an array that
 // reads as SHCLW_BAD_TYPE still has its items, with 0 for the bad ones. line
@@ -189,6 +200,17 @@ shclw_kind shclw_parse_with(const char *text, size_t len, shclw_strictness level
 shclw_kind shclw_open(const char *path, shclw_doc **doc, shclw_error *err);
 // level applies to the upgraded text.
 shclw_kind shclw_open_with(const char *path, shclw_strictness level, shclw_doc **doc, shclw_error *err);
+// Reads n layers in order, lowest first, such as defaults, then a site file,
+// then the user's, and reads as their merge: a later layer's value, array, or
+// raw block takes the place of a lower one's, and blocks merge name by name,
+// as shcl_merge does. A missing file is skipped. Edits and saves go to the
+// last file layer, so shclw_text, shclw_write, and the rest are that layer's,
+// and a save writes only it. Text layers after it, such as this run's command
+// line, still win reads. Each file is opened as shclw_open does, and the first
+// error is returned, with *doc the empty document shclw_open gives, its
+// diagnostics with their layer set. shclw_diags gives every layer's, in layer
+// order. Free *doc either way.
+shclw_kind shclw_open_layers(const shclw_layer *layers, size_t n, shclw_doc **doc, shclw_error *err);
 // The format shclw_open upgraded the file from, or 0 when it didn't upgrade
 // it. Reads, lines, diagnostics, and the text are all of the upgraded text.
 int64_t shclw_upgraded_from(shclw_doc *d);
@@ -347,7 +369,9 @@ size_t shclw_remove(shclw_doc *d, const char *path);
 
 // The shcl document underneath. On 3.0 a shclw read gives shcl's read memory
 // back, so a result from shcl's own read calls on it is good only until the
-// next shclw call.
+// next shclw call. On a layered document it's the merge, built again after
+// each edit, so a change made on it is gone after the next one, and never
+// saved.
 shcl_doc *shclw_inner(shclw_doc *d);
 
 // A whole file, which has to be UTF-8. A missing one is SHCLW_ERR_NOT_FOUND.

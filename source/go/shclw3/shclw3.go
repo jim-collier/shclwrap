@@ -37,6 +37,7 @@ type (
 	Error      = shclw.Error
 	ErrKind    = shclw.ErrKind
 	Upgraded   = shclw.Upgraded
+	Layer      = shclw.Layer
 )
 
 const (
@@ -61,6 +62,14 @@ type Doc struct {
 	info  shclw.Info
 	stamp bool
 	up    *upgradedFile
+	lay   *layerSet
+}
+
+// layerSet is what OpenLayers read. d is then their merge, rebuilt after
+// each edit, and edits and saves go to docs[edit].
+type layerSet struct {
+	docs []*Doc // nil for a file that wasn't there
+	edit int
 }
 
 // upgradedFile is the file Open upgraded, kept until the first Write over it
@@ -83,6 +92,7 @@ var Lib = shclw.Lib{
 	Parse:       func(text string) shclw.Doc { return Parse(text) },
 	ParseWith:   func(text string, s Strictness) (shclw.Doc, error) { return ParseWith(text, s) },
 	OpenWith:    func(path string, s Strictness) (shclw.Doc, error) { return OpenWith(path, s) },
+	OpenLayers:  func(layers ...Layer) (shclw.Doc, error) { return OpenLayers(layers...) },
 	FormatOf:    FormatOf,
 	Upgrade:     Upgrade,
 }
@@ -155,6 +165,82 @@ func OpenWith(path string, s Strictness) (*Doc, error) {
 		e.Path = path
 	}
 	return d, err
+}
+
+// OpenLayers reads layers in order, lowest first, such as defaults, then a
+// site file, then the user's, and reads as their merge: a later layer's
+// value, array, or raw block takes the place of a lower one's, and blocks
+// merge name by name, as shcl's Merge does. A missing file is skipped.
+//
+// Edits and saves go to the last file layer, so Text, Write, and the rest
+// are that layer's, and Write writes only it. Text layers after it, such as
+// this run's command line, still win reads. Each file is opened as Open
+// does, and the first error is returned with an empty document. Diags are
+// every layer's, with Layer set (design.md, Decisions).
+func OpenLayers(layers ...Layer) (*Doc, error) {
+	if len(layers) == 0 {
+		return New(), nil
+	}
+	l := &layerSet{docs: make([]*Doc, len(layers)), edit: len(layers) - 1}
+	for i := len(layers) - 1; i >= 0; i-- {
+		if layers[i].File != "" {
+			l.edit = i
+			break
+		}
+	}
+	for i, ly := range layers {
+		if ly.File == "" {
+			l.docs[i] = Parse(ly.Text)
+			continue
+		}
+		x, err := Open(ly.File)
+		switch {
+		case shclw.KindOf(err) == shclw.ErrNotFound:
+			if i == l.edit {
+				l.docs[i] = New()
+			}
+		case err != nil:
+			if e, ok := err.(*shclw.Error); ok {
+				for j := range e.Diags {
+					e.Diags[j].Layer = i + 1
+				}
+			}
+			return New(), err
+		default:
+			l.docs[i] = x
+		}
+	}
+	d := &Doc{lay: l}
+	d.remerge()
+	return d, nil
+}
+
+// remerge builds the reads' document from the layers again. Lower layers
+// never change, but a merge changes its base, so it starts over.
+func (d *Doc) remerge() {
+	m := shcl.New()
+	for _, x := range d.lay.docs {
+		if x != nil {
+			m.Merge(x.d)
+		}
+	}
+	d.d = m
+}
+
+// top is where edits and saves go: the edit layer of a layered document,
+// or the document itself.
+func (d *Doc) top() *Doc {
+	if d.lay == nil {
+		return d
+	}
+	return d.lay.docs[d.lay.edit]
+}
+
+// edited rebuilds the merge after an edit to the edit layer.
+func (d *Doc) edited() {
+	if d.lay != nil {
+		d.remerge()
+	}
 }
 
 // FormatOf is the format a file's Format line names, or 0 with none.
@@ -431,15 +517,23 @@ func upgraded(u shcl.Upgraded) Upgraded {
 	return Upgraded{Text: u.Text, From: u.Format, Changed: !u.Current, Unsure: u.Lost, Backup: u.Backup}
 }
 
-// Inner is the shcl document underneath, for calls shclw doesn't cover.
+// Inner is the shcl document underneath, for calls shclw doesn't cover. On
+// a layered document it's the merge, which OpenLayers builds again after
+// every edit.
 func (d *Doc) Inner() *shcl.Document { return d.d }
 
 // Text is the document as it would be saved: its lines as typed, plus the
 // edits, or the canonical form when 3.0 can't keep the lines.
-func (d *Doc) Text() string { return d.finish(d.lines()) }
+func (d *Doc) Text() string {
+	t := d.top()
+	return t.finish(t.lines())
+}
 
 // Canonical is the document in canonical form.
-func (d *Doc) Canonical() string { return d.finish(d.d.ToCanonical()) }
+func (d *Doc) Canonical() string {
+	t := d.top()
+	return t.finish(t.d.ToCanonical())
+}
 
 // lines is the save's text before the info block and the Format line.
 func (d *Doc) lines() string {
@@ -486,6 +580,9 @@ func saved(text string, info shclw.Info, stamp bool) (string, error) {
 // UpgradeFile does, and BackupName names the copy. A file that changed since
 // Open read it is left alone with ErrIO.
 func (d *Doc) Write(path string) error {
+	if d.lay != nil {
+		return d.top().Write(path)
+	}
 	text, kept := d.d.ToTextKeepLines()
 	if lost := d.d.LostCount(); !kept && lost > 0 {
 		return &shclw.Error{Kind: shclw.ErrRefused, Path: path,
@@ -538,6 +635,7 @@ func (up *upgradedFile) over(path string) bool {
 // didn't upgrade it. Reads, Lines, Diags, and Text are all of the upgraded
 // text.
 func (d *Doc) UpgradedFrom() int {
+	d = d.top()
 	if d.up == nil {
 		return 0
 	}
@@ -547,6 +645,7 @@ func (d *Doc) UpgradedFrom() int {
 // BackupName is where the first Write over an upgraded file put the
 // original, or "" before then.
 func (d *Doc) BackupName() string {
+	d = d.top()
 	if d.up == nil {
 		return ""
 	}
@@ -560,6 +659,7 @@ func (d *Doc) BackupName() string {
 // and StampFormat change only their own lines, so they don't change the
 // answer. A file Open upgraded is rewritten until the first Write over it.
 func (d *Doc) Rewrites() bool {
+	d = d.top()
 	if d.up != nil && d.up.backup == "" {
 		return true
 	}
@@ -574,6 +674,7 @@ func (d *Doc) Rewrites() bool {
 // names another format is refused, and so is one that ends in a raw block
 // that never closes.
 func (d *Doc) InfoBlock(on bool) error {
+	d = d.top()
 	info := shclw.InfoOff
 	if on {
 		info = shclw.InfoOn
@@ -589,6 +690,7 @@ func (d *Doc) InfoBlock(on bool) error {
 // unless a comment already names format 3. It refuses what InfoBlock
 // refuses.
 func (d *Doc) StampFormat() error {
+	d = d.top()
 	if _, err := shclw.FinishInfo(d.lines(), d.info, true, infoEdit); err != nil {
 		return err
 	}
@@ -596,11 +698,38 @@ func (d *Doc) StampFormat() error {
 	return nil
 }
 
-// Diags is what the load found.
-func (d *Doc) Diags() []Diag { return diags(d.d.Diagnostics()) }
+// Diags is what the load found. A layered document has every layer's, in
+// layer order, each with its Layer.
+func (d *Doc) Diags() []Diag {
+	if d.lay == nil {
+		return diags(d.d.Diagnostics())
+	}
+	var out []Diag
+	for i, x := range d.lay.docs {
+		if x == nil {
+			continue
+		}
+		for _, g := range x.Diags() {
+			g.Layer = i + 1
+			out = append(out, g)
+		}
+	}
+	return out
+}
 
-// Errors counts error diagnostics.
-func (d *Doc) Errors() int { return d.d.ErrorCount() }
+// Errors counts error diagnostics, in every layer of a layered document.
+func (d *Doc) Errors() int {
+	if d.lay == nil {
+		return d.d.ErrorCount()
+	}
+	n := 0
+	for _, x := range d.lay.docs {
+		if x != nil {
+			n += x.Errors()
+		}
+	}
+	return n
+}
 
 // Check validates the document against a schema document.
 func (d *Doc) Check(schema shclw.Doc) []Diag {
@@ -702,6 +831,10 @@ func (d *Doc) Lines(path string) []int { return shclw.LinesOf(d, path) }
 // strings, ints, and floats. A value that doesn't read back the same is
 // ErrNoReadBack, with the edit left in place.
 func (d *Doc) Put(path string, v any) error {
+	if d.lay != nil {
+		defer d.edited()
+		return d.top().Put(path, v)
+	}
 	val, err := shclw.Normalize(path, v)
 	if err != nil {
 		return err
@@ -733,6 +866,10 @@ func (d *Doc) Put(path string, v any) error {
 // read back as typed, such as one with a trailing comment, is
 // ErrNoReadBack, with the edit left in place.
 func (d *Doc) PutSyntax(path, text string) error {
+	if d.lay != nil {
+		defer d.edited()
+		return d.top().PutSyntax(path, text)
+	}
 	if err := d.setErr(path, d.d.SetLiteral(path, text)); err != nil {
 		return err
 	}
@@ -743,11 +880,18 @@ func (d *Doc) PutSyntax(path, text string) error {
 }
 
 // Comment sets the comment above path.
-func (d *Doc) Comment(path, text string) error { return d.setErr(path, d.d.SetComment(path, text)) }
+func (d *Doc) Comment(path, text string) error {
+	defer d.edited()
+	t := d.top()
+	return t.setErr(path, t.d.SetComment(path, text))
+}
 
 // Remove takes out path and everything under it, and says how many
 // instances went.
-func (d *Doc) Remove(path string) int { return d.d.Remove(path) }
+func (d *Doc) Remove(path string) int {
+	defer d.edited()
+	return d.top().d.Remove(path)
+}
 
 func (d *Doc) setErr(path string, st shcl.SetStatus) error {
 	switch st {

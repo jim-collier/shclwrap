@@ -1,0 +1,105 @@
+> layers	=port: 80\nname: app\ntags: [a, b, c]\nnote: ```\ndefault text\n```\ndb:\n\thost: localhost\n\tpool: 2\n	site.shcl	doc.shcl	=port: 1\n
+ok
+> get	int	port
+Good	1	1
+> get	str	name
+Good	2	Mine
+> get	strs	tags
+Good	3	1	x
+> get	raw	note
+Good	4	site text
+> get	str	db.host
+Good	8	db.site
+> get	int	db.pool
+Good	4	9
+> names	db
+host	pool
+> diags
+3:5	error	E014	malformed line skipped: expected a field name, at column 1
+> errors
+1
+> text
+| # mine
+| name: Mine
+| db:
+| \tpool: 9
+| [oops
+> rewrites
+false
+> put	int	port	5
+ok
+> get	int	port
+Good	1	1
+> put	int	db.pool	3
+ok
+> get	int	db.pool
+Good	4	3
+> remove	name
+1
+> get	str	name
+Good	2	app
+> comment	db	from the user
+ok
+> syntax	tags	[y, z]
+ok
+> get	strs	tags
+Good	0	2	y	z
+> text
+| # from the user
+| db:
+| \tpool: 3
+| [oops
+| 
+| port: 5
+| 
+| tags: [y, z]
+> write	doc.shcl
+ok
+| # from the user
+| db:
+| \tpool: 3
+| [oops
+| 
+| port: 5
+| 
+| tags: [y, z]
+> files
+doc.shcl
+old.shcl
+ops.txt
+site.shcl
+toonew.shcl
+> layers	=a: 1\n	nosite.shcl	new.shcl
+ok
+> get	int	a
+Good	1	1
+> text
+> put	int	b	2
+ok
+> write	new.shcl
+ok
+| b: 2
+> files
+doc.shcl
+new.shcl
+old.shcl
+ops.txt
+site.shcl
+toonew.shcl
+> layers	=a: 1\n	=a: 2\nc: 3\n
+ok
+> put	int	a	4
+ok
+> get	int	a
+Good	1	4
+> text
+| a: 4
+| c: 3
+> layers	site.shcl	toonew.shcl
+error toonew
+> get	int	port
+NotFound	0	0
+> layers	=a: 1\n	old.shcl	doc.shcl
+error refused
+2:3	error	E005	unterminated raw block
+> diags

@@ -451,6 +451,7 @@ shclw_diag *shclw_i_copy_diags(const shclw_diag *diags, size_t n, size_t *count)
 			text += from[k]->n + 1;
 		}
 		out[i].line = diags[i].line;
+		out[i].layer = diags[i].layer;
 		out[i].severity = diags[i].severity;
 	}
 	*count = n;
@@ -635,8 +636,14 @@ shclw_i_value shclw_i_value_of(shclw_i_kind kind, size_t n) {
 }
 
 static shclw_kind put(shclw_doc *d, const char *path, const shclw_i_value *v, shclw_error *err) {
-	shclw_kind k = shclw_i_set(d, path, v, err);
-	return k == SHCLW_OK ? shclw_i_verify_put(d, path, v, err) : k;
+	shclw_doc *top = shclw_i_top(d);
+	shclw_kind k = shclw_i_set(top, path, v, err);
+	if (k == SHCLW_OK) {
+		k = shclw_i_verify_put(top, path, v, err);
+	}
+	// The set is in place even when the read-back failed.
+	shclw_kind m = shclw_i_edited(d, NULL);
+	return m == SHCLW_OK ? k : shclw_i_fail(err, m, path, NULL, 0);
 }
 
 shclw_kind shclw_put_int(shclw_doc *d, const char *path, int64_t v, shclw_error *err) {
