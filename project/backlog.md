@@ -28,7 +28,7 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 - Updates to CICD script flags
 	- ID: 2026101816214270
 	- Type: Enhancement
-	- Status: Waiting on signoff
+	- Status: Waiting on UAT
 	- Priority: High
 	- Opened: 2026-10-18
 	- Opened by: JC
@@ -81,8 +81,8 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 - Builds clean up stale artifacts and side-effects
 	- ID: 2026101916500100
 	- Type: Enhancement
-	- Status: Waiting for testing
-	- Needs local test suite run?: Yes. The leak mode passing under the container's init, once the CodeQL findings from 2026101513330009 and 2026101513330017 are fixed.
+	- Status: Waiting on a partial CICD run
+	- Needs local test suite run?: Yes. The leak mode passing under the container's init, such as `--quick --leakcheck`, once the CodeQL findings from 2026101513330009 and 2026101513330017 are fixed.
 	- Priority: High
 	- Opened: 2026-10-19
 	- Opened by: JC
@@ -163,7 +163,7 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 - Layered loading
 	- ID: 2026101512024156
 	- Type: Feature
-	- Status: Waiting on signoff
+	- Status: Waiting on UAT
 	- Priority: Avg
 	- Opened: 2026-10-15
 	- Opened by: JC
@@ -303,7 +303,7 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 - Open a newer-format file read-only
 	- ID: 2026101513330014
 	- Type: Feature
-	- Status: Waiting for testing
+	- Status: Waiting on automated testing
 	- Needs local test suite run?: Yes, the full run's leak checks (CodeQL, CTU, heaptrack soak), after 2026101513330017's CodeQL finding is fixed.
 	- Needs external testing: Windows, for the C and Rust paths.
 	- Priority: Avg
@@ -329,7 +329,7 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 - Create-only Write
 	- ID: 2026101513330015
 	- Type: Feature
-	- Status: Waiting for testing
+	- Status: Waiting on automated testing
 	- Needs local test suite run?: Yes, the full run's leak checks (CodeQL, CTU, heaptrack soak), after the CodeQL findings from 2026101513330009 and 2026101513330017 are fixed.
 	- Needs external testing: Windows: C's `MoveFileExA` path, Go, Rust, and Python hard links on NTFS, and a FAT or other no-link filesystem for the fallback.
 	- Priority: Avg
@@ -355,7 +355,7 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 - Write with a file mode
 	- ID: 2026101513330016
 	- Type: Feature
-	- Status: Waiting for testing
+	- Status: Waiting on automated testing
 	- Needs local test suite run?: Yes, the full run's leak checks, with 2026101513330015.
 	- Needs external testing: Windows, where the mode is ignored, and case 058's `mode` op prints what Windows has, so that case won't match there.
 	- Priority: Avg
@@ -406,7 +406,7 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 - List the lines a load couldn't use
 	- ID: 2026101513330018
 	- Type: Feature
-	- Status: Waiting for testing
+	- Status: Waiting on a full CICD run
 	- Needs local test suite run?: Yes, the full run's leak checks, after 2026101513330009's CodeQL finding is fixed.
 	- Priority: Avg
 	- Opened: 20261015-133300
@@ -699,6 +699,22 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 				- Without `PYTHONMALLOC=malloc`, ASan can't see inside pymalloc's pools.
 	- Note: The Rust crate has no `unsafe` and no FFI, and only `tests/files.rs` starts threads. The Go module has no cgo, and only one test in `files_test.go` starts a goroutine. The only Python is `cicd/c_cases.py` and `cicd/fuzz.py`, since the Python wrapper isn't started. clippy already runs with `-D warnings` and `clippy::pedantic`, and go vet, staticcheck, and ruff run on every gate. No advisory scan runs yet. cicd runs its tools on the host today, checked against `cicd/tool-pins.env`.
 
+- Run cicd on GitHub's macOS arm64 runners
+	- ID: 2026102307090301
+	- Type: Enhancement
+	- Status: Queued
+	- Priority: Avg
+	- Opened: 2026-10-23
+	- Opened by: JC
+	- Related IDs: 2026101512024174
+	- Requirements:
+		- Run cicd on GitHub's free arm64 macOS runners.
+		- Build, run the tests, and smoke-test the CLI on the built binary.
+	- Notes:
+		- The repo has no GitHub Actions workflow yet.
+		- There's no CLI of its own here. The nearest thing is the ops runners the shared cases drive.
+		- Both local Macs are Intel, so this is the only Apple Silicon run.
+
 - Say which layer a read came from
 	- ID: 2026102114101028
 	- Type: Enhancement
@@ -874,7 +890,7 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 - Python: run from a copied file
 	- ID: 2026101513330050
 	- Type: Feature
-	- Status: Waiting on signoff
+	- Status: Waiting on UAT
 	- Priority: Low
 	- Opened: 20261015-133300
 	- Opened by: JC
@@ -1057,7 +1073,7 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- 20261019: Part 2 is done. Open upgrades an old file in memory in Go, Rust, and C, and writes nothing. The first Write over the file backs up the original with UpgradeFile's code, and later ones don't. `UpgradedFrom` and `BackupName` say what happened. The calls on Lines, Diags, Text, Parse, and Rewrites are in design.md's Decisions.
 		- 20261019: Real files from all 9 programs are shared cases 038 to 046. Quillroute's and Mossrealm's come from their tests, and Folderkite's from its own old-format writer built against 2.0. Tallowbase's 1.2 sample reads two ways with no Format line, so Open refuses it and the program converts it with `from` 2.
 		- 20261019: The real files show the upgrade keeps a 2.x backslash escape as typed, which 3.0 reads as text. Filed as 2026101910455900.
-		- 20261019: Waiting on signoff for one call users will notice. Open takes a file with no Format line that has errors on 3.0 as 2.x, as `Upgrade` with `from` 0 does. So a 3.0 file with a typo is upgraded, or refused when 2.0 has errors on it too, where it used to open with its errors in Diags. Files saved after `StampFormat` or `InfoBlock` are never taken as 2.x, and README says so.
+		- 20261019: Waiting on UAT for one call users will notice. Open takes a file with no Format line that has errors on 3.0 as 2.x, as `Upgrade` with `from` 0 does. So a 3.0 file with a typo is upgraded, or refused when 2.0 has errors on it too, where it used to open with its errors in Diags. Files saved after `StampFormat` or `InfoBlock` are never taken as 2.x, and README says so.
 		- 20261019: 3 tests opened an unstamped file with an error, which Open now refuses. Each one's old input is commented out, and the same input with a Format 3 line takes its place: Go's TestSaveRefusedOverFile, Rust's save_refused_over_file, and the strict open in C's test_errors.
 		- 20261019: Built as the Decisions row says, in Go, Rust, and C. A file with no Format line or 2.x block that has errors on 3.0 and 2.0 alike is current, with 3.0's errors in Diags, and a strict Open fails on it with `ErrStrict`. `Upgrade` with `from` 0 leaves it as it is. One marked as 2.x by its Format line or its block is still refused. A 2.x file that reads two ways is only `ErrAmbiguous` when it's taken as 2.x.
 		- 20261019: The 3 old inputs pass again and are back, beside the stamped ones. 2 C checks failed under the change and are commented out with the reason, since 2.0 has errors on both files: the 2-ways upgrade in test_upgrade, and the refused open in test_open_upgrade. A 2-ways file 2.0 reads clean, and the refused file with a Format line naming 2, take their places.
@@ -1912,10 +1928,15 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 
 	- The ID is the local time to the hundredth of a second. Opened is when it was written down, which may differ. (Use a keyboard macro and possibly something like project 'zuid' to generate.)
 
-	- Status values meaning: Testing means the fix is in and checks are running or still to run. Waiting on signoff means automated testing passed. Moot means something else changed that made it irrelevant. Canceled means it still applies but was decided against. Waiting for testing means the fix is in and waits on a long CI run or an outside test host. Can't reproduce means a real attempt to reproduce it failed.
+	- Status values meaning: Testing means the fix is in and checks are running or still to run. Moot means something else changed that made it irrelevant. Canceled means it still applies but was decided against. Can't reproduce means a real attempt to reproduce it failed.
+		- The fix is in, and it waits on one of these:
+			- Waiting on automated testing: a slow local suite or an outside test host, which a backlog round runs by itself.
+			- Waiting on a full CICD run: a complete pipeline run, with no flags. A person or a round can start it.
+			- Waiting on a partial CICD run: a pipeline run with only some stages, such as `--quick --leakcheck`. Also a person or a round.
+			- Waiting on UAT: automated testing passed, and a person still has to try it and judge.
 
 	- As issues are worked, and statuses change, place them in correct sorting order within the list:
-		- First by status: Waiting for answers, Waiting on signoff, Testing, Waiting for testing, Can't reproduce, Stalled, Started, Queued, Done, Deferred, Canceled, Moot
+		- First by status: Waiting for answers, Waiting on UAT, Testing, Waiting on a full CICD run, Waiting on a partial CICD run, Waiting on automated testing, Can't reproduce, Stalled, Started, Queued, Done, Deferred, Canceled, Moot
 		- Then by severity|priority: Critical, High, Avg, Low
 		- Then by type: Bugs, [not bugs together]
 
@@ -1926,7 +1947,7 @@ Template:
 - Title
 	- ID: YYYYmmDDHHMMSSNN
 	- Type: [Bug|Feature|Enhancement|Task]
-	- Status: [Queued|Waiting for answers|Waiting on signoff|Waiting for testing|Started|Testing|Stalled|Can't reproduce|Moot|Canceled|Deferred|Done]
+	- Status: [Queued|Waiting for answers|Waiting on UAT|Waiting on a full CICD run|Waiting on a partial CICD run|Waiting on automated testing|Started|Testing|Stalled|Can't reproduce|Moot|Canceled|Deferred|Done]
 	- Needs local test suite run?:
 	- Needs external testing:
 	- Priority [Feature|Enhancement] | Severity [Bug]: [Critical|High|Avg|Low]
