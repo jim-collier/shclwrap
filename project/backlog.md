@@ -767,17 +767,21 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Decisions:
 		- JC, 2026-10-24: a `--fuzz` flag turns fuzz back on under `--ci`, so `--ci --leakcheck --fuzz --no-sync -y` is the one full line.
 
-- Two cicd runs at once break each other's C lint
-	- ID: 2026102323244600
+- Two cicd runs started in the same second share one run log
+	- ID: 2026102409544336
 	- Type: Bug
 	- Status: Queued
-	- Priority: Low
-	- Opened: 2026-10-23
+	- Severity: Low
+	- Opened: 2026-10-24 09:54
 	- Opened by: JC
-	- Requirements:
-		- A second run, such as a push hook started while another run is going, either waits for the first or uses its own artifacts folder.
-	- Notes:
-		- On 2026-10-23 two `--ci` runs overlapped on `cicd/artifacts/c-analyze-shcl/`, and one failed with `shcl3.gcc.txt` missing. The same push passed when run alone.
+	- Related IDs: 2026102323244600
+	- Steps to reproduce [Bug]:
+		- Start two `cicd/cicd.bash --ci --quick -y` runs in one tree within the same second.
+	- Incorrect behavior [Bug]:
+		- Both `tee` into `cicd/artifacts/lint/run_<stamp>.log`, since the stamp has whole seconds only, so the second truncates the first's log and their lines mix. The log starts before the run lock, so the lock doesn't help.
+	- Expected behavior [Bug]:
+		- Each run has its own log, and `lint-report.bash` reads the right one.
+	- Reproduced [Bug]: No. Read from the code.
 
 - Python test reads a file in the locale's encoding
 	- ID: 2026102323122726
@@ -981,6 +985,32 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Opened by: JC
 	- Related IDs: 2026101513330009
 	- Note: `Merged` finds them with a second parse in each language. shcl's parser sees each fold, so a call there would be cheaper and could take that code's place.
+
+- Two cicd runs at once break each other's C lint
+	- ID: 2026102323244600
+	- Type: Bug
+	- Status: Done
+	- Priority: Low
+	- Opened: 2026-10-23
+	- Opened by: JC
+	- Requirements:
+		- A second run, such as a push hook started while another run is going, either waits for the first or uses its own artifacts folder.
+	- Notes:
+		- On 2026-10-23 two `--ci` runs overlapped on `cicd/artifacts/c-analyze-shcl/`, and one failed with `shcl3.gcc.txt` missing. The same push passed when run alone.
+	- Actual cause [Bug]:
+		- The `analyze-shcl` reports are `FORCE` targets written with `>$@`, and every run in a tree points them at the same `cicd/artifacts/leakcheck/c-analyze-shcl/`. One run's rewrite empties a report while the other's `shcl_known.py` reads it. The leak reports, CodeQL's cache in `cicd/cache/c-home`, and the remote sync's stash are shared the same way.
+	- Decisions:
+		- Waits, rather than its own folder, since more than the one folder is shared. One lock per tree, so separate worktrees still run side by side.
+	- Actual fix [Bug]:
+		- `cicd.bash` and `c-checks.bash` take a lock on `cicd/artifacts/run.lock`, from `cicd/utility/include/run-lock.bash`. A second run says which run it waits on, then goes. A script the locked run starts passes straight through. `--dry-run`, `--help` and the "Proceed?" prompt don't hold it. design.md says so.
+	- Progress log:
+		- 2026-10-24: Two lint runs at once with the lock bypassed both passed once, so the overlap wasn't caught in the act. It needs one run to rewrite a report as the other reads it.
+	- Verified: two `cicd.bash --ci --quick -y` runs started together in one tree both passed, and the second waited for the first. Two `c-checks.bash quick` runs alone did the same, with the lock held through the container. Test vGSqu passed, and failed with the lock made a no-op, with the pass-through removed, with the helper missing, and with `c-checks.bash` not calling it. shellcheck is clean.
+	- Swept: `cicd.bash` and `c-checks.bash` are the only scripts that write `cicd/artifacts/` or `cicd/cache/` from the host. `c-in-container.bash` runs only under `c-checks.bash`, `flags-test.bash` only calls `--dry-run`, and the pre-push hook goes through `cicd.bash`.
+	- Branch: round-1024
+	- Test case: vGSqu, `cicd/lock-test.bash`, in the tests stage.
+	- Acceptance signoff: Self-closed: build tooling only, with a test watched to fail.
+	- Closed: 2026-10-24 09:55
 
 - Rename the project shclwrap
 	- ID: 2026101513524769

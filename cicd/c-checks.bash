@@ -6,6 +6,7 @@ set -Eeuo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 root="$(cd "${here}/.." && pwd)"
 source "${here}/tool-pins.env"
+source "${here}/utility/include/run-lock.bash"
 
 if (($# < 3)); then
 	echo "usage: c-checks.bash MODE VERSION WORKDIR [FUZZ ARGS...]" >&2
@@ -15,6 +16,8 @@ fi
 mode="$1"
 version="$2"
 work="$(realpath "$3")"
+## Its own lock when run alone; under cicd.bash this passes straight through.
+fRunLock "${root}" "c-checks.bash $*"
 artifacts="${root}/cicd/artifacts/leakcheck"
 ## Kept between runs, so CodeQL's compiled queries are too (about 40 min cold).
 home="${root}/cicd/cache/c-home"

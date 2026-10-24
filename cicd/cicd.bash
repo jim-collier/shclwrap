@@ -33,6 +33,8 @@
 ##	  for Go's fuzzer. Failing fuzz cases go to cicd/artifacts/fuzz/, and the
 ##	  newest 10 sets are kept.
 ##	- Test scratch goes under $TMPDIR, in a folder the run makes and removes.
+##	- One run per tree at a time. A second one, such as a push hook, waits for
+##	  the first. --dry-run and --help don't.
 ##	- C builds against the shcl.h pinned in source/c/shcl-pins.env, fetched by
 ##	  commit into cicd/cache/ and checked by sha256. It takes 2.0's too, for
 ##	  the upgrade check. A cached header no pin names is dropped.
@@ -56,6 +58,7 @@ source "${here}/tool-pins.env"
 source "${root}/source/c/shcl-pins.env"
 source "${root}/source/python/shcl-pins.env"
 source "${here}/utility/include/gfs-rotate.bash"
+source "${here}/utility/include/run-lock.bash"
 stamp="$(date +%Y%m%d-%H%M%S)"
 
 ## rustup has to win over any system rust, or rust-toolchain.toml means nothing.
@@ -64,6 +67,7 @@ export PATH="${HOME}/.cargo/bin:${PATH}"
 ## Half the cores, since a workstation is usually running something else.
 cpuCap=$(( $(nproc 2>/dev/null || echo 2) / 2 )); if ((cpuCap < 1)); then cpuCap=1; fi
 
+cmdLine="$*"
 doCi=0; doQuick=0; doLeakcheck=""; doQuiet=0; assumeYes=0; doSync=1; doFuzz=1; dryRun=0
 while (($#)); do case "$1" in
 	--ci)       doCi=1; doFuzz=0; shift ;;
@@ -207,6 +211,7 @@ if ((! doQuiet)); then
 	fPreflight
 	if ((! assumeYes)); then read -r -p "Proceed? (Ctrl+C aborts, Enter continues) " _; fi
 fi
+fRunLock "${root}" "cicd.bash ${cmdLine}"
 mkdir -p "${work}" && touch "${work}/.shclw-cicd-owned"
 
 #•••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••
@@ -309,6 +314,8 @@ if ((doPy)); then
 fi
 bash "${here}/flags-test.bash" >/dev/null
 fEcho "OK: cicd flag mixes"
+TMPDIR="${work}" bash "${here}/lock-test.bash" >/dev/null
+fEcho "OK: one run per tree at a time"
 TMPDIR="${work}" bash "${here}/eol-test.bash" >/dev/null
 fEcho "OK: line ends under core.autocrlf=true"
 if ((doC && doQuick)); then
@@ -371,3 +378,4 @@ fEcho_Clean
 ##		- 2026-10-19 JC: shcl 3.0 is the floor. C builds and tests over 3.0 only, and the SHCLW_SHCL pick check is gone.
 ##		- 2026-10-21 JC: --dry-run. Drops cached headers no pin names, and keeps the newest 10 fuzz failure sets. --quick --leakcheck fetches headers.
 ##		- 2026-10-21 JC: Python: lint, tests, shared cases, and fuzz.
+##		- 2026-10-24 JC: A second run in the same tree waits for the first.
