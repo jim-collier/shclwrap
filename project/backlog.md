@@ -248,23 +248,6 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- Each project's other workarounds have their own items, with the project named in the item.
 		- 2026-10-21: waits on a go-ahead to edit the other repos, and which one goes first. Asked in the round's questions file.
 
-- clang-tidy refuses a cast in the upgrade line lists
-	- ID: 2026102114534365
-	- Type: Bug
-	- Status: Queued
-	- Severity: Avg
-	- Opened: 2026-10-21
-	- Related IDs: 2026101513330012, 2026101513330013
-	- Steps to reproduce [Bug]:
-		- Run `cicd.bash --ci` on branch `wip/round-1021-2026101513330012`.
-	- Incorrect behavior [Bug]:
-		- The C lint stage stops on `shclw.c:948`, "do not cast 'char *' to 'size_t *' through 'void *'" (bugprone-casting-through-void).
-	- Expected behavior [Bug]:
-		- clang-tidy passes, as it did before the line lists were added.
-	- Reproduced [Bug]: 2026-10-21, in the pre-push gate.
-	- Possible cause [Bug]: the lists sit inside the result's single memory block, and the code reaches them by a byte offset. The quick checks don't run clang-tidy.
-	- Branch: wip/round-1021-2026101513330012 (`0150af2`). It also has the design.md and backlog notes for both items.
-
 - Report blocks that shcl merged because they share a name
 	- ID: 2026101513330009
 	- Type: Feature
@@ -294,28 +277,53 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 - Upgrade lists the lines it changed
 	- ID: 2026101513330012
 	- Type: Feature
-	- Status: Queued
+	- Status: Waiting on automated testing
+	- Needs local test suite run?: Yes, the full run's leak checks (CodeQL, CTU, heaptrack soak) and the fuzz, over the new C code. CodeQL stops first on the findings of 2026101513330009 and 2026101513330017 while they're open.
 	- Priority: Avg
 	- Opened: 20261015-133300
 	- Opened by: JC
+	- Related IDs: 2026101513330013, 2026101513330003, 2026102114534365
 	- Note: Quillroute diffs the text line by line to say how many lines were written differently.
 	- Progress log:
 		- 2026-10-21: built in all 4 languages with `Lost` and `Rewritten` line lists on the upgrade result. The quick checks passed, but clang-tidy failed the gate. See 2026102114534365.
-	- Branch: wip/round-1021-2026101513330012
+		- 2026-10-23: On round-1023 with the cast fixed. The shared case is now `059-upgrade-lines`.
+	- Decisions:
+		- `Upgraded.Rewritten` lists the original's lines, from 1, that the upgraded text doesn't have as typed, apart from lost ones. Lines of the original, since that's what the user can look up in the backup.
+		- It goes on `Upgraded`, not in a call like `Rewrites`, since the upgrade has both texts.
+		- Lines match as a multiset, line ends included, not by a diff. A line that only moved wasn't written differently.
+		- design.md has these under Format and upgrade, and Decisions.
+	- Verified: Go, Rust, C and Python shared cases, C plain and sanitized and as C++, the C API tests, go vet, staticcheck, clippy pedantic, ruff, the C container lint, and `cicd/cicd.bash --ci --quick -y`.
+	- Swept: `Upgrade` and `UpgradeFile` in Go `shclw3`, Rust `v3`, C `shclw3.c` and Python, all four ops runners, and fuzz.py, which compares the op output as is. `Open` doesn't show the lists, as it doesn't show `Unsure`.
+	- Branch: round-1023
+	- Commit: 2cb7404
+	- Test case: tests/cases/059-upgrade-lines, plus the new line in every upgrade case's want file. C `test_upgrade_file` checks the lists survive `shclw_upgrade_file`'s copy.
 
 - Upgrade lists the lines it lost
 	- ID: 2026101513330013
 	- Type: Feature
-	- Status: Queued
+	- Status: Waiting on automated testing
+	- Needs local test suite run?: Yes, as on 2026101513330012.
 	- Priority: Avg
 	- Opened: 20261015-133300
 	- Opened by: JC
+	- Related IDs: 2026101513330012, 2026101513330018, 2026101513330001, 2026101513330002, 2026102114534365
 	- Requirements:
 		- Line numbers, not only a count.
 	- Note: Cobblevale logs them, and its CI checks the count. Wovenshell shows a notice for each one. A 1.x line break in a bare value that looks like a Windows path counts as lost, though 3.0 could write it as `\u000A`.
 	- Progress log:
 		- 2026-10-21: built in all 4 languages with `Lost` and `Rewritten` line lists on the upgrade result. The quick checks passed, but clang-tidy failed the gate. See 2026102114534365.
-	- Branch: wip/round-1021-2026101513330012
+		- 2026-10-23: On round-1023 with the cast fixed. The shared case is now `059-upgrade-lines`.
+		- Departs from the Note: a 1.x Windows-path line break is listed as rewritten, not lost.
+	- Decisions:
+		- `Upgraded.Lost` lists the original's lines, from 1, with a value 2.0 read that the upgraded file doesn't have at all. A value that reads differently is still refused, per 2026101513330002.
+		- A 1.x line break in a bare value like `C:\new` is rewritten, not lost, since the upgrade carries it as 2.0 read it. A program that counted it lost sees one fewer. This one is a call to confirm.
+		- `Unsure` stays shcl's own count. In the cases tried it matched the list's length.
+	- Verified: as on 2026101513330012.
+	- Swept: as on 2026101513330012. The lost check sits beside the 2.0 read-back in each language, so it sees the same paths.
+	- Branch: round-1023
+	- Commit: 2cb7404
+	- Test case: tests/cases/059-upgrade-lines, a 2.x comma list with a line under it.
+	- Acceptance signoff: Needs JC on the `C:\new` call, after the full run.
 
 - Open a newer-format file read-only
 	- ID: 2026101513330014
@@ -941,6 +949,34 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- The copy beside the wrapper wins over the installed one, since bundling it is a choice. Waits on JC with the parent's question.
 	- Commit: a4909af
 	- Test case: `source/python/tests/test_shclw.py`, `test_copied` and `test_none`.
+
+- clang-tidy refuses a cast in the upgrade line lists
+	- ID: 2026102114534365
+	- Type: Bug
+	- Status: Done
+	- Severity: Avg
+	- Opened: 2026-10-21
+	- Related IDs: 2026101513330012, 2026101513330013
+	- Steps to reproduce [Bug]:
+		- Run `cicd.bash --ci` on branch `wip/round-1021-2026101513330012`.
+	- Incorrect behavior [Bug]:
+		- The C lint stage stops on `shclw.c:948`, "do not cast 'char *' to 'size_t *' through 'void *'" (bugprone-casting-through-void).
+	- Expected behavior [Bug]:
+		- clang-tidy passes, as it did before the line lists were added.
+	- Reproduced [Bug]: 2026-10-21, in the pre-push gate.
+	- Possible cause [Bug]: the lists sit inside the result's single memory block, and the code reaches them by a byte offset. The quick checks don't run clang-tidy.
+	- Actual cause [Bug]:
+		- The lists were found from a `char *` at a byte offset, then cast to `size_t *` through `void *`, which bugprone-casting-through-void refuses.
+	- Progress log:
+		- 2026-10-23: The wip work is on round-1023 now. Its shared case is `059-upgrade-lines`, since round-1023 already had a 054.
+	- Actual fix [Bug]: The lists start at the end of the diagnostics array, cast straight from `shclw_diag *`. shclw_diag holds `size_t` fields, so that end is aligned for them.
+	- Verified: clang-tidy refuses the old cast and passes the new one. `bash cicd/c-checks.bash lint 3 WORK` and `bash cicd/c-checks.bash test 3 WORK` pass, and so does `cicd/cicd.bash --ci --quick -y`.
+	- Swept: no other cast through `void *` to a typed pointer is left in the C tree, apart from `free` and `qsort` arguments. The diagnostics' pointer in the same block is a plain cast from the result's own type.
+	- Branch: round-1023, from `wip/round-1021-2026101513330012`.
+	- Commit: 2cb7404
+	- Test case: the C lint stage's clang-tidy, which failed on the old cast and passes now.
+	- Acceptance signoff: Self-closed: a mechanical fix, and the lint that failed passes.
+	- Closed: 2026-10-23 20:18
 
 - shcl analyzer probe fails under the container's clang
 	- ID: 2026102113502809
