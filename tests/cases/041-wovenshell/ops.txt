@@ -7,3 +7,10 @@ errors
 get	str	font.family
 get	int	window.columns
 get	float	transparency.opacity
+# Its commented defaults, the 1.2 banner's SHCL line among them, and a put
+# that fills one in, so the lines under it don't move.
+commented
+put	float	font.size	20
+line	font.size
+line	font.line_height_scale
+line	window.columns

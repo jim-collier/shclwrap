@@ -1,0 +1,27 @@
+# Settings, with the defaults left in as comments
+## A note: not a setting
+# Prose with no colon
+
+font:
+	use_system_family: true
+	# use_system_size: true  ## Default
+	family: "Mono"
+	# size: 17.0  ## Default
+	line_height_scale: 1.22
+	# weight: bold   # a note of its own
+
+window:
+	columns: 80
+	# columns: 100  ## Default
+	# rows: [24,
+	# title: "a ## Default"
+	# "odd name": x  ##   default  
+	# "a:b": 1  ## Default
+	# db.host: localhost  ## Default
+
+help: ```
+# raw: not a setting
+```
+
+# top: 1  ## Default
+last: 2

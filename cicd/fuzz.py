@@ -92,8 +92,12 @@ def gen_block(rng: random.Random, fmt: int, depth: int, out: list[str]) -> None:
 			name = f"{name}.{rng.choice(NAMES)}"
 		pad = "\t" * depth
 		roll = rng.random()
-		if roll < 0.08:
+		if roll < 0.04:
 			out.append(f"{pad}# {rng.choice(WORDS)}")
+		elif roll < 0.08:
+			# A setting left in as a comment, as commented and a fill-in read it.
+			note = rng.choice(("", "  ## Default", " ## default"))
+			out.append(f"{pad}# {name}: {gen_scalar(rng)}{note}")
 		elif roll < 0.12:
 			out.append("")
 		elif roll < 0.35 and depth < 3:
@@ -242,6 +246,7 @@ def gen_case(seed: int, corpus: list[str]) -> Case:
 						"errors",
 						"unused",
 						"merged",
+						"commented",
 						"format",
 						f"upgrade\t{rng.choice(('', '2', '3'))}",
 						f"parse\t{rng.choice(('loose', 'standard', 'strict'))}",

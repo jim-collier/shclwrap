@@ -57,6 +57,9 @@ struct shclw_doc {
 	// The text as loaded, for shclw_merged.
 	char *src;
 	size_t src_len;
+	// The load's diagnostics, once a fill-in has parsed the text again.
+	shclw_diag *loaded;
+	size_t n_loaded;
 };
 
 static void free_read(read_file *f) {
@@ -135,6 +138,8 @@ shclw_kind shclw_parse_with(const char *text, size_t len, shclw_strictness level
 	d->file = NULL;
 	d->refused = NULL;
 	d->n_refused = 0;
+	d->loaded = NULL;
+	d->n_loaded = 0;
 	d->layers = NULL;
 	d->n_layers = 0;
 	d->edit = 0;
@@ -219,6 +224,7 @@ static void free_doc(shclw_doc *d) {
 		shcl_free(d->d);
 		free_read(d->file);
 		free(d->refused);
+		free(d->loaded);
 		free(d->src);
 		free(d);
 	}
@@ -650,7 +656,19 @@ static shclw_diag diag_of(size_t line, shcl_severity sev, const char *code, shcl
 }
 
 static shclw_diag *own_diags(shclw_doc *d, size_t *n);
-static size_t own_errors(shclw_doc *d) { return d->refused ? d->n_refused : shcl_error_count(d->d); }
+static size_t own_errors(shclw_doc *d) {
+	if (d->refused) {
+		return d->n_refused;
+	}
+	if (!d->loaded) {
+		return shcl_error_count(d->d);
+	}
+	size_t n = 0;
+	for (size_t i = 0; i < d->n_loaded; i++) {
+		n += d->loaded[i].severity == SHCLW_SEV_ERROR ? 1 : 0;
+	}
+	return n;
+}
 
 // Every layer's, in layer order, each with its layer.
 static shclw_diag *layer_diags(shclw_doc *d, size_t *n) {
@@ -696,6 +714,9 @@ static shclw_diag *own_diags(shclw_doc *d, size_t *n) {
 	*n = 0;
 	if (d->refused) {
 		return shclw_i_copy_diags(d->refused, d->n_refused, n);
+	}
+	if (d->loaded) {
+		return shclw_i_copy_diags(d->loaded, d->n_loaded, n);
 	}
 	size_t count = shcl_diag_count(d->d);
 	shclw_diag *views =
@@ -746,6 +767,121 @@ shclw_merge *shclw_merged(shclw_doc *d, size_t *n) {
 	shclw_merge *out = shclw_i_merges_of(srcs, k, n);
 	free(srcs);
 	return out;
+}
+
+// The save's text before the info block and the Format line, and whether it
+// keeps the file's lines. Caller frees.
+static char *lines_of(shclw_doc *d, size_t *len, int *kept) {
+	// Without the lines kept, this is the canonical form.
+	shcl_str s = shcl_to_text_keep_lines(d->d, kept);
+	char *text = shclw_i_dup(s.p ? s.p : "", s.p ? s.n : 0, len);
+	shcl_reads_release(d->d);
+	return text;
+}
+
+shclw_commented_line *shclw_commented(shclw_doc *d, size_t *n) {
+	*n = 0;
+	size_t len = 0;
+	int kept = 0;
+	char *text = lines_of(shclw_i_top(d), &len, &kept);
+	if (!text) {
+		return NULL;
+	}
+	shclw_commented_line *out = shclw_i_commented_of(text, len, NULL, n);
+	free(text);
+	return out;
+}
+
+// The line of path's commented "## Default" setting in text, or 0. SIZE_MAX
+// when memory ran out.
+static size_t default_line(const char *text, size_t len, const char *path, size_t plen) {
+	size_t n = 0;
+	shclw_commented_line *cs = shclw_i_commented_of(text, len, path, &n);
+	if (!cs) {
+		return SIZE_MAX;
+	}
+	size_t line = 0;
+	for (size_t i = 0; i < n && !line; i++) {
+		if (cs[i].path.n == plen && shclw_i_same_lower(cs[i].path.p, path, plen)) {
+			line = cs[i].line;
+		}
+	}
+	free(cs);
+	return line;
+}
+
+// What a fill-in replaced, so a set that fails can put it back.
+typedef struct {
+	shcl_doc *was;
+	bool first;
+} filled;
+
+// Swaps path's commented "## Default" line for the setting, so the set that
+// follows takes that line and the ones under it don't move
+// (2026101513330020). It's only where the save keeps the file's lines and
+// path isn't set yet. undo has what settle takes to put the document back.
+static shclw_kind fill(shclw_doc *d, const char *path, size_t plen, filled *undo) {
+	undo->was = NULL;
+	undo->first = false;
+	if (d->refused || shcl_exists(d->d, path, plen)) {
+		return SHCLW_OK;
+	}
+	size_t len = 0;
+	int kept = 0;
+	char *text = lines_of(d, &len, &kept);
+	if (!text) {
+		return SHCLW_ERR_NO_MEMORY;
+	}
+	size_t line = kept ? default_line(text, len, path, plen) : 0;
+	size_t up_len = 0;
+	char *up = line && line != SIZE_MAX ? shclw_i_uncommented(text, len, line, &up_len) : NULL;
+	free(text);
+	if (line == 0) {
+		return SHCLW_OK;
+	}
+	if (!up) {
+		return SHCLW_ERR_NO_MEMORY;
+	}
+	shcl_doc *nd = shcl_parse_keep_lines(up, up_len, shcl_strictness_of(d->d));
+	free(up);
+	if (!nd) {
+		return SHCLW_ERR_NO_MEMORY;
+	}
+	if (shcl_error_count(nd) != shcl_error_count(d->d) || !shcl_exists(nd, path, plen)) {
+		shcl_free(nd);
+		return SHCLW_OK;
+	}
+	undo->first = !d->loaded;
+	if (undo->first) {
+		d->loaded = own_diags(d, &d->n_loaded);
+		if (!d->loaded) {
+			shcl_free(nd);
+			return SHCLW_ERR_NO_MEMORY;
+		}
+	}
+	undo->was = d->d;
+	d->d = nd;
+	return SHCLW_OK;
+}
+
+// Keeps a fill-in when the set after it worked, and puts the document back
+// when it didn't.
+static void settle(shclw_doc *d, filled *undo, bool ok) {
+	if (!undo->was) {
+		return;
+	}
+	if (ok) {
+		shcl_free(undo->was);
+	} else {
+		shcl_free(d->d);
+		d->d = undo->was;
+		if (undo->first) {
+			free(d->loaded);
+			d->loaded = NULL;
+			d->n_loaded = 0;
+		}
+	}
+	undo->was = NULL;
 }
 
 size_t shclw_errors(shclw_doc *d) {
@@ -1065,8 +1201,7 @@ static shclw_kind set_strs(shclw_doc *d, const char *path, size_t plen, const sh
 	return set_err(err, path, st);
 }
 
-shclw_kind shclw_i_set(shclw_doc *d, const char *path, const shclw_i_value *v, shclw_error *err) {
-	size_t plen = strlen(path);
+static shclw_kind set_value(shclw_doc *d, const char *path, size_t plen, const shclw_i_value *v, shclw_error *err) {
 	shcl_set_status st = SHCL_SET_OK;
 	switch (v->kind) {
 	case SHCLW_I_INT: st = shcl_set_int(d->d, path, plen, v->i); break;
@@ -1078,6 +1213,18 @@ shclw_kind shclw_i_set(shclw_doc *d, const char *path, const shclw_i_value *v, s
 	case SHCLW_I_FLOATS: st = shcl_set_float_array(d->d, path, plen, v->floats, v->n); break;
 	}
 	return set_err(err, path, st);
+}
+
+shclw_kind shclw_i_set(shclw_doc *d, const char *path, const shclw_i_value *v, shclw_error *err) {
+	size_t plen = strlen(path);
+	filled undo;
+	shclw_kind k = fill(d, path, plen, &undo);
+	if (k != SHCLW_OK) {
+		return shclw_i_fail(err, k, path, NULL, 0);
+	}
+	k = set_value(d, path, plen, v, err);
+	settle(d, &undo, k == SHCLW_OK);
+	return k;
 }
 
 static shclw_kind put_syntax(shclw_doc *d, const char *path, const char *text, size_t len, shclw_error *err);
@@ -1093,7 +1240,13 @@ static shclw_kind put_syntax(shclw_doc *d, const char *path, const char *text, s
 		text = "";
 		len = 0;
 	}
-	shclw_kind k = set_err(err, path, shcl_set_literal(d->d, path, strlen(path), text, len));
+	filled undo;
+	shclw_kind k = fill(d, path, strlen(path), &undo);
+	if (k != SHCLW_OK) {
+		return shclw_i_fail(err, k, path, NULL, 0);
+	}
+	k = set_err(err, path, shcl_set_literal(d->d, path, strlen(path), text, len));
+	settle(d, &undo, k == SHCLW_OK);
 	if (k != SHCLW_OK) {
 		return k;
 	}

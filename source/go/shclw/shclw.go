@@ -307,6 +307,7 @@ type Doc interface {
 	Errors() int
 	Unused() []Spot
 	Merged() []Merge
+	Commented() []Commented
 	Check(schema Doc) []Diag
 	DropDeclared(diags []Diag) []Diag
 

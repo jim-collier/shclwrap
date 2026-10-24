@@ -131,6 +131,7 @@ Go names are listed. Rust uses the same words in snake case, and `ShclDoc` has t
 | `d.Diags()`, `d.Errors()` | The load's diagnostics, and how many are errors.
 | `d.Unused()`              | The lines the load couldn't use, once each.
 | `d.Merged()`              | Each name shcl kept one copy of, with the lines of every copy.
+| `d.Commented()`           | Each comment line that reads as a `key: value`, with the path it would set.
 | `d.Check(schema)`         | Validates against a schema document.
 | `schema.DropDeclared(ds)` | Drops the repeat hints for keys the schema says repeat.
 
@@ -214,6 +215,13 @@ Go names are listed. Rust uses the same words in snake case, and `ShclDoc` has t
 	- Both say what the load found, so an edit doesn't change them. On a layered document they're each layer's own, with `Layer` set, and the folding the layers' own merge does is left out, since that's what layering is for.
 	- `Merged` parses the loaded text twice more when it's called, so it costs about 2 loads.
 
+- `Commented` lists each comment line that reads as one `key: value` once its `#` comes off, such as a setting a program leaves in its file at the default (2026101513330021). Each has its `Path`, the `Value` as typed, its `Line`, and `Default`, which says the line ends in a `## Default` note.
+	- The path is shcl's own reading. The line is uncommented alone and the text parsed again, so it's in the block the line sits in by its indent, with an index on a step that repeats. A key that's also set in that block is listed under the plain path.
+	- A `##` line is a note, and isn't listed. Neither is a line in a raw body, or one that adds an error or moves any other field once it's uncommented, such as the start of an array that never closes.
+	- Prose that reads as a setting, like a 1.2 banner's `# SHCL: Simple Hierarchical Config Language.`, is listed too, so a program checks the path.
+	- It's of the save's text, edits and all, and on a layered document the edit layer's. It parses the text once more for each commented line, so a file with many costs about that many loads.
+	- C has it as `shclw_commented`, giving `shclw_commented_line`s, with `is_default` for `Default`.
+
 - C also has `shclw_compact`, for a program that edits a lot between saves. [Decisions](#decisions) says why.
 
 ### Reads
@@ -277,6 +285,13 @@ Go names are listed. Rust uses the same words in snake case, and `ShclDoc` has t
 	- A tie between 2 spellings goes to the even one, except at a float32 power of 2, where Go rounds up. Rust and C give the same digits as Go.
 
 - Infinity and NaN are refused with `BadValue`, and nothing changes, since no read would take them back.
+
+- A `Put` or `PutSyntax` of a path that isn't set, where the file has a commented `key: value  ## Default` line for it, fills in that line, so the lines under it don't move (2026101513330020). 3.0 adds the key at the end of its block instead.
+	- The `#` and the `## Default` note come off, and the value is the put's. Only a line with that note is filled in. A commented line without one, like `# size: 12  # for the laptop`, is left alone, and the put adds a line as usual.
+	- Names match without ASCII case, as in shcl. Where several lines match, the first one in the file is filled in.
+	- It's only where the save keeps the file's lines, as `Rewrites` says. A path that's already set is set where it is.
+	- The text is parsed again with the line filled in, so a key an earlier put added gets its real line, where `Lines` gave it as 0. `Diags` and `Errors` stay what the load found.
+	- A set shcl refuses, such as `PutSyntax` text that isn't a value, leaves the line commented and the document as it was. A put that doesn't read back keeps its edit, as any put does.
 
 - C has no `any`, so it has a put per type, `shclw_put_int` to `shclw_put_floats`. `shclw_each` gives `shclw_node`s, and `shclw_child` takes the name with its length, so a name from `shclw_names` goes in as it came out.
 
@@ -363,6 +378,7 @@ Each row has a test, either a shared case or an API test.
 | A file that isn't UTF-8                  | Varies by language.                                         | `ErrIO`, everywhere.
 | Walking repeated entries                 | A program writes selectors itself, and 3.0 changed them.    | `Each` gives paths, and `Child` extends them.
 | A save that can't keep the file's lines  | 3.0's save returns a flag, once it's done.                  | `Rewrites` asks before the save.
+| A put of a key with a commented default  | 3.0 adds the key at the end of its block.                   | Fills in the `## Default` line, where it is.
 
 - `PutSyntax` checks its text by setting it in a new document and parsing `k: text` in another. The two have to come out the same, and the value at the path has to read the same as the parsed one.
 
@@ -380,6 +396,7 @@ An ops script is one op per line, with fields split by tabs. `\t`, `\n`, `\r`, a
 | `diags`, `errors`                               | each diagnostic as line, severity, code, and message, or the count. A layer's line is `LAYER:LINE`.
 | `unused`                                        | how many lines, then each one
 | `merged`                                        | each merge's path, then its lines, one merge per line
+| `commented`                                     | each commented setting's line, path, and value, and `default` for a `## Default` line
 | `get TYPE PATH`                                 | status, line, and the value. Arrays print a count, then the items.
 | `or TYPE PATH FALLBACK...`                      | the value or the fallback
 | `has`, `count`, `line`, `names`                 | the answer for PATH
@@ -595,6 +612,12 @@ An ops script is one op per line, with fields split by tabs. `\t`, `\n`, `\r`, a
 - A save that would lose lines copies the file aside only when asked, with `WriteOpts.Backup`, rather than always (2026101513330019). The refusal stays the default, since a program that never looks at `BackupName` would leave copies piling up beside the file with no word to the user. Cobblevale asks.
 	- It's a flag rather than a save of the lines somewhere of the wrapper's choosing, since the upgrade's backup already has a name, a format tag, and a taken-name error programs handle.
 	- The copy is of the file `Open` read, so a `Write` elsewhere stays refused. Over another path the file `Open` read still has the lines, but a `Parse` document has no file at all, and one rule is easier to explain.
+
+- A put fills in a commented line only when it has the `## Default` note, not any commented `key: value` (2026101513330020). The note says a program wrote the line as a default it can take back. A commented line without it can be the user's own, and filling it in would lose it.
+	- The note comes off, since the value set is no longer the default.
+	- The fill-in parses the text again, since shcl has no call to turn a comment line into a field. That costs a load for each fill-in, and gives keys earlier puts added their real lines.
+
+- `Commented` finds a line's path by parsing the text again with the line uncommented, rather than by walking indents (2026101513330021). shcl's own parse knows dotted names, quoting, raw bodies, and repeated blocks, which an indent walker like Wovenshell's has to get right one by one.
 
 - There's no `OpenLayersWith` yet. A program that wants strict layers checks `Errors()`, which counts every layer.
 

@@ -41,6 +41,7 @@ type (
 	Layer      = shclw.Layer
 	Spot       = shclw.Spot
 	Merge      = shclw.Merge
+	Commented  = shclw.Commented
 )
 
 const (
@@ -69,6 +70,9 @@ type Doc struct {
 	lay   *layerSet
 	src   string // the text as loaded, for Merged
 	newer int    // the newer format the text names, which makes it read-only
+	level shcl.Strictness
+	// the load's diagnostics, once a fill-in has parsed the text again
+	loaded []shcl.Diagnostic
 	// where a Write copied the file Open read, so the lines the load lost
 	// are kept there
 	backup string
@@ -129,7 +133,7 @@ func ParseWith(text string, s Strictness) (*Doc, error) {
 	if d == nil {
 		d = shcl.New()
 	}
-	out := &Doc{d: d, src: text}
+	out := &Doc{d: d, src: text, level: strictness(s)}
 	if f := FormatOf(text); f > FormatMajor {
 		out.newer = f
 	}
@@ -816,6 +820,9 @@ func (d *Doc) StampFormat() error {
 // layer order, each with its Layer.
 func (d *Doc) Diags() []Diag {
 	if d.lay == nil {
+		if d.loaded != nil {
+			return diags(d.loaded)
+		}
 		return diags(d.d.Diagnostics())
 	}
 	var out []Diag
@@ -834,6 +841,15 @@ func (d *Doc) Diags() []Diag {
 // Errors counts error diagnostics, in every layer of a layered document.
 func (d *Doc) Errors() int {
 	if d.lay == nil {
+		if d.loaded != nil {
+			n := 0
+			for _, g := range d.loaded {
+				if g.Severity == shcl.SeverityError {
+					n++
+				}
+			}
+			return n
+		}
 		return d.d.ErrorCount()
 	}
 	n := 0
@@ -866,6 +882,43 @@ func (d *Doc) Merged() []Merge {
 }
 
 func parseDoc(text string) shclw.Doc { return Parse(text) }
+
+// Commented is each comment line that reads as one `key: value` once its
+// `#` comes off, with the path it would set. A layered document's are the
+// edit layer's.
+func (d *Doc) Commented() []Commented {
+	t := d.top()
+	return shclw.CommentedOf(t.lines(), parseDoc)
+}
+
+// fill swaps path's commented `## Default` line for the setting, so the set
+// that follows takes that line and the ones under it don't move
+// (2026101513330020). It's only where the save keeps the file's lines and
+// path isn't set yet. undo puts the document back, for a set that fails.
+func (d *Doc) fill(path string) (undo func()) {
+	undo = func() {}
+	if d.d.Exists(path) {
+		return undo
+	}
+	text, kept := d.d.ToTextKeepLines()
+	if !kept {
+		return undo
+	}
+	line := shclw.DefaultLine(text, path, parseDoc)
+	if line == 0 {
+		return undo
+	}
+	nd, _ := shcl.ParseKeepLines(shclw.Uncommented(text, line), d.level)
+	if nd == nil || nd.ErrorCount() != d.d.ErrorCount() || !nd.Exists(path) {
+		return undo
+	}
+	was, wasLoaded := d.d, d.loaded
+	if d.loaded == nil {
+		d.loaded = d.d.Diagnostics()
+	}
+	d.d = nd
+	return func() { d.d, d.loaded = was, wasLoaded }
+}
 
 // Check validates the document against a schema document.
 func (d *Doc) Check(schema shclw.Doc) []Diag {
@@ -975,6 +1028,7 @@ func (d *Doc) Put(path string, v any) error {
 	if err != nil {
 		return err
 	}
+	undo := d.fill(path)
 	var st shcl.SetStatus
 	switch val.Kind {
 	case shclw.KindInt:
@@ -993,6 +1047,7 @@ func (d *Doc) Put(path string, v any) error {
 		st = d.d.SetFloatArray(path, val.Floats)
 	}
 	if err := d.setErr(path, st); err != nil {
+		undo()
 		return err
 	}
 	return shclw.VerifyPut(d, path, val)
@@ -1006,7 +1061,9 @@ func (d *Doc) PutSyntax(path, text string) error {
 		defer d.edited()
 		return d.top().PutSyntax(path, text)
 	}
+	undo := d.fill(path)
 	if err := d.setErr(path, d.d.SetLiteral(path, text)); err != nil {
+		undo()
 		return err
 	}
 	alone := New()

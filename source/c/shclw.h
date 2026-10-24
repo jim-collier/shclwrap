@@ -126,6 +126,17 @@ typedef struct {
 	size_t layer;
 } shclw_merge;
 
+// A comment line that reads as one key: value once its # comes off, such as a
+// setting left in the file at its default. path is what the line would set.
+// is_default says the line ends in a "## Default" note, which is the line a
+// put of path fills in.
+typedef struct {
+	shclw_string path;
+	shclw_string value;
+	size_t line;
+	bool is_default;
+} shclw_commented_line;
+
 // One layer for shclw_open_layers: a file, or with file NULL, text the program
 // has, such as its defaults or this run's command line.
 typedef struct {
@@ -309,6 +320,10 @@ shclw_spot *shclw_unused(shclw_doc *d, size_t *n);
 // own, and not what the layers' merge folded. One block; caller frees. NULL
 // only when memory ran out.
 shclw_merge *shclw_merged(shclw_doc *d, size_t *n);
+// Each comment line that reads as one key: value once its # comes off, with
+// the path it would set. A layered document's are the edit layer's. One block;
+// caller frees. NULL only when memory ran out.
+shclw_commented_line *shclw_commented(shclw_doc *d, size_t *n);
 // d checked against a schema document. Caller frees the block. NULL only when
 // memory ran out.
 shclw_diag *shclw_check(shclw_doc *d, shclw_doc *schema, size_t *n);

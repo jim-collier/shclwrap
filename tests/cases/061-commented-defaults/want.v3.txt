@@ -1,0 +1,76 @@
+> commented
+7	font.use_system_size	true	default
+9	font.size	17.0	default
+11	font.weight	bold
+15	window.columns	100	default
+17	window.title	a ## Default
+18	window."odd name"	x	default
+19	window."a:b"	1	default
+20	window.db.host	localhost	default
+26	top	1	default
+> errors
+0
+> lines	window.columns
+1	14
+> syntax	font.size	[1,
+error badvalue
+> has	font.size
+false
+> put	float	font.size	20
+ok
+> put	bool	FONT.Use_System_Size	false
+ok
+> put	int	window."a:b"	2
+ok
+> syntax	window.db.host	"db.lan"
+ok
+> put	int	top	7
+ok
+> line	font.size
+9
+> line	font.line_height_scale
+10
+> line	last
+27
+> lines	window.columns
+1	14
+> put	str	font.weight	light
+ok
+> put	int	window.columns	90
+ok
+> errors
+0
+> text
+| # Settings, with the defaults left in as comments
+| ## A note: not a setting
+| # Prose with no colon
+| 
+| font:
+| \tuse_system_family: true
+| \tuse_system_size: false
+| \tfamily: "Mono"
+| \tsize: 20
+| \tline_height_scale: 1.22
+| \t# weight: bold   # a note of its own
+| \tweight: light
+| 
+| window:
+| \tcolumns: 90
+| \t# columns: 100  ## Default
+| \t# rows: [24,
+| \t# title: "a ## Default"
+| \t# "odd name": x  ##   default  
+| \t"a:b": 2
+| \tdb.host: "db.lan"
+| 
+| help: ```
+| # raw: not a setting
+| ```
+| 
+| top: 7
+| last: 2
+> commented
+11	font.weight	bold
+16	window.columns	100	default
+18	window.title	a ## Default
+19	window."odd name"	x	default
