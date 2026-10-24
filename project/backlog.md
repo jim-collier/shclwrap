@@ -25,32 +25,6 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 
 ## Issues
 
-- Updates to CICD script flags
-	- ID: 2026101816214270
-	- Type: Enhancement
-	- Status: Done
-	- Priority: High
-	- Opened: 2026-10-18
-	- Opened by: JC
-	- Requirements:
-		- `--ci`: Rename `--gate`.
-		- `--quick`:
-			- Should run whatever linting, validation, and testing steps are very quick.
-			- Cross-compile whatever is fast; e.g. maybe skip slow arm64.
-			- Skip anything requiring an external host.
-		- No flags, by default, should do everything.
-		- The other existing flags can stay.
-	- Notes:
-		- Pre-next-cut. Do next.
-		- There's no cross-compile in this project yet, so nothing to trim there. No stage uses an external test host either.
-		- `--quick` drops the remote sync, the C analyzers and sanitizers, the leak checks, and Go's fuzzer, and fuzzes Go against Rust for 10s. C still gets a gcc-15 pass and its plain API tests and shared cases on all 3 versions. It runs in about 50s.
-		- It doesn't fetch anything. If a pinned `shcl.h` isn't cached, C is skipped with a warning.
-		- No flags now runs the leak checks too. `--no-leakcheck` skips them, and `--leakcheck` adds them to `--ci` or `--quick`.
-	- Branch: ci-flags
-	- Test case: `cicd/flags-test.bash`, 14 flag mixes against `--dry-run`, since b098cf0.
-	- Acceptance signoff: Self-closed: the flag test covers every mix the requirements name.
-	- Closed: 2026-10-24
-
 - Sort shcl's analyzer and CodeQL findings
 	- ID: 2026102321270143
 	- Type: Task
@@ -242,25 +216,6 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Test case: shared case `056-write-changed` in all 4 languages, and Go's `TestWriteChangedOtherName`.
 	- Acceptance signoff: waits on JC, for the new kind, the reversed Decisions row, and the README line.
 
-- Python: run from a copied file
-	- ID: 2026101513330050
-	- Type: Feature
-	- Status: Done
-	- Priority: Low
-	- Opened: 20261015-133300
-	- Opened by: JC
-	- Parent ID: 2026101512024161
-	- Note: Lenscart bundles shcl's wheel in its packages. Folderkite parses shcl by hand in its Python tools, since nothing is installed there.
-	- Progress log:
-		- 2026-10-21: A `shcl.py` copied beside `shclw.py` is used first, then the installed one. The copy loads under its own name, so a program that still imports an older `shcl` keeps it. README says so.
-		- Verified: `test_copied` runs the wrapper from a package with 3.0 copied beside it and 1.2 on the path, and fails with the copy lookup taken out. `test_none` checks the message with nothing found.
-	- Decisions:
-		- The copy beside the wrapper wins over the installed one, since bundling it is a choice. JC OK'd it on 2026-10-24.
-	- Commit: a4909af
-	- Test case: `source/python/tests/test_shclw.py`, `test_copied` and `test_none`.
-	- Acceptance signoff: JC, 2026-10-24.
-	- Closed: 2026-10-24
-
 - Shared cases fail on a Windows clone with Git's default line ends
 	- ID: 2026102323122721
 	- Type: Bug
@@ -287,6 +242,35 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- LF for every text file, not only the cases, since gofmt, bash and the 2.0 copy's sha256 need it too. A Windows editor set to CRLF still gets LF.
 	- Commit: 88e56c1
 	- Test case: vGSLJ, `cicd/eol-test.bash`, in the tests stage. It checks out every tracked file with `core.autocrlf=true` and compares each to what's committed. It failed on 269 files without `.gitattributes`, and passes with it.
+
+- C doesn't build with mingw-w64 at the Makefile's warnings
+	- ID: 2026102323122737
+	- Type: Bug
+	- Status: Waiting on automated testing
+	- Needs external testing: Windows, on vm925w: the C compile in `win-tests.ps1`, now with `-Werror`, and the C shared cases (`-Only c`).
+	- Severity: Avg
+	- Opened: 2026-10-23 23:12
+	- Related IDs: 2026101512024174
+	- Steps to reproduce [Bug]:
+		- Compile `shclw.c` or `run.c` with mingw-w64 gcc 16 and `-Wconversion -Werror`, as `source/c/Makefile` does.
+	- Incorrect behavior [Bug]:
+		- `shclw.c:335` and `run.c:127` fail on "conversion from 'double' to 'float' may change value" at `signbit(f)`.
+	- Expected behavior [Bug]:
+		- It builds clean, as with gcc on Linux.
+	- Reproduced [Bug]: 2026-10-23, on vm925w, with `C:\ProgramData\mingw64`.
+	- Possible cause [Bug]: mingw's `signbit` macro has a float branch that converts its argument, even for a double. Without `-Werror` it builds, and the shared cases pass.
+	- Actual cause [Bug]:
+		- mingw-w64's `signbit` passes its argument uncast to each branch, so a double meets `__signbitf`. gcc checks the branch it doesn't take too. Upstream added the casts to `isnan` and `fpclassify`, not `signbit`. mingw-w64 12's headers have it in `isnan` and `isfinite` too.
+	- Progress log:
+		- 2026-10-24: Reproduced on Linux with mingw-w64 gcc 16.2 and 14.0.0 headers in the C container, at exactly `shclw.c:335` and `run.c:127`. gcc 14 with 12.0.0 headers fails 8 sites, `isfinite` and `isnan` too.
+		- Verified: the `mingw` target fails before the fix and passes after, on both. A mingw build of the driver at `-Werror` passed 58 of 59 shared cases under wine, 058 differing as on Windows. Also the container lint, the sanitized C tests, and `cicd.bash --ci --quick -y`.
+		- Swept: every `signbit`, `isnan`, `isinf` and `isfinite` in `source/c` goes through `shclw_adapter.h`, `api_test.c:526` included. Go, Rust and Python don't have the macro. shcl.h's own `signbit` builds without the warnings.
+		- Upstream draft in `private/claude_simple/upstream/2026102323122737/`.
+	- Decisions:
+		- On mingw only, `shclw_adapter.h` maps the 4 to gcc's builtins, as glibc does, so the call sites stay plain C. Not for C++, where `<cmath>` replaces them.
+	- Actual fix [Bug]: the builtins on mingw, and a `mingw` Makefile target that the container's lint and quick modes run, with mingw-w64 pinned in the C image.
+	- Commit: 3698622
+	- Test case: vGSU9, `make mingw`, in the container's lint and quick modes. Fails on HEAD's header, passes with the fix.
 
 - Create-only Write
 	- ID: 2026101513330015
@@ -342,6 +326,86 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Commit: fabafb8
 	- Test case: shared case `058-write-mode` in all 4 languages, which reads modes back with the new `mode` op.
 	- Acceptance signoff: waits on JC after the full run, since it's about who can read a file.
+
+- Back up a file before a save that would lose lines
+	- ID: 2026101513330019
+	- Type: Feature
+	- Status: Waiting on automated testing
+	- Needs local test suite run?: Yes, one full run, plain, for CodeQL, CTU and the fuzz over the C change.
+	- Priority: Avg
+	- Opened: 20261015-133300
+	- Opened by: JC
+	- Related IDs: 2026101513330017, 2026101613005800
+	- Requirements:
+		- A save option that copies the file aside and then writes, in place of `Refused`.
+	- Note: Cobblevale does this on its first write over such a file. 1.2 has no refusal, so the wrapper's own 1.2 Write loses those lines with no warning.
+	- Progress log:
+		- 2026-10-24: `WriteOpts.Backup` in Go, Rust, C, and Python, plus `write FILE backup`. Over the file `Open` read, a save that would lose lines copies it aside as the upgrade's backup does, then writes. `BackupName` names the copy. design.md and a README line updated.
+		- The 1.2 part of the Note is moot, since 3.0 has been the floor since 2026101613005800.
+		- Verified: Go tests and vet, Rust tests and clippy pedantic, Python tests, ruff and shared cases, the C container lint, the C API tests and shared cases plain, sanitized and as C++, and `cicd.bash --ci --quick -y`. The new case failed in Go before the change and passes after.
+		- Swept: the refusal and the backup in all 4 adapters, the layered path in each, and all 4 ops runners. fuzz.py makes no write ops.
+	- Decisions:
+		- Opt in, not on by default, so copies don't pile up beside a file for programs that never read `BackupName`.
+		- Only over the file `Open` read. Anywhere else, `Create`, and `Parse` or `New` documents are still `Refused`, since there's no file to copy.
+		- Once a copy exists, later saves don't refuse, since the lines are in it. The first save over an upgraded file counts too.
+		- The copy is the upgrade's backup name with format 3. In C the field goes last in `shclw_write_opts`, so positional setups still build.
+	- Branch: round-1024
+	- Commit: 4c1ec59
+	- Test case: shared case `060-write-backup` in all 4 languages.
+	- Acceptance signoff: waits on JC after the full run, for the README line and the opt-in call.
+
+- Put fills in a commented default line
+	- ID: 2026101513330020
+	- Type: Feature
+	- Status: Waiting on automated testing
+	- Needs local test suite run?: Yes, one full run, plain, for CodeQL, CTU and the fuzz over the C change.
+	- Priority: Avg
+	- Opened: 20261015-133300
+	- Opened by: JC
+	- Related IDs: 2026101513330021, 2026101513330022
+	- Requirements:
+		- Setting a key whose commented `key: value ## Default` line is in the file fills in that line, so the lines below it don't move.
+	- Note: shcl adds a new line above the comment. Wovenshell writes the line by hand, and reprints its launch messages with the new line numbers. Folderkite rebuilds its whole defaults list on every save.
+	- Progress log:
+		- 2026-10-24: `Put` and `PutSyntax` of a path that isn't set fill in its commented `## Default` line, in Go, Rust, C, and Python. The `#` and the note come off and the value is the put's, so the lines under it keep their numbers. design.md and a README line updated.
+		- On the current pin 3.0 adds the key at the end of its block, not above the comment as the Note says.
+		- A set shcl refuses leaves the line commented. The `has` line after the refused `syntax` in 061 gave true in Rust before that fix and false after.
+		- Verified: Go tests, vet and staticcheck, Rust tests and clippy pedantic, Python tests, ruff and shared cases, the C container lint, the C API tests and shared cases plain, sanitized and as C++, 90s of fuzz through all 4 drivers with the new op, and `cicd.bash --ci --quick -y`.
+		- Swept: Put and PutSyntax in all 4 adapters, the layered path in each, Diags and Errors in all 4 (Unused reads Diags), and all 4 ops runners. Comment and Remove set no value, so they don't fill in.
+	- Decisions:
+		- Only a line with the `## Default` note is filled in, and the note comes off. A commented line without it may be the user's own.
+		- Names match without ASCII case, and the first matching line in the file wins.
+		- The text is parsed again with the line filled in, since shcl has no call for it. `Diags` stay the load's, and keys earlier puts added get their real lines.
+	- Branch: round-1024
+	- Commit: a18e5f5
+	- Test case: shared case `061-commented-defaults` and new lines in `041-wovenshell`, in all 4 languages, plus the `commented` op in the fuzz.
+	- Acceptance signoff: waits on JC after the full run, for the README line and the calls in Decisions.
+
+- Read the commented defaults in a file
+	- ID: 2026101513330021
+	- Type: Feature
+	- Status: Waiting on automated testing
+	- Needs local test suite run?: Yes, the same full run as 2026101513330020.
+	- Priority: Avg
+	- Opened: 20261015-133300
+	- Opened by: JC
+	- Related IDs: 2026101513330020
+	- Requirements:
+		- List commented `key: value` lines, each with the path it would set.
+	- Note: shcl gives comment lines no path. Wovenshell has its own indent walker for this, and Folderkite strips and re-adds its list.
+	- Progress log:
+		- 2026-10-24: `Commented()` in Go, Rust, C (`shclw_commented`), and Python, plus a `commented` op. Each line has its path, its value as typed, its line, and whether it has the `## Default` note. design.md and a README line updated.
+		- Prose that reads as `key: value` is listed too, such as the 1.2 banner's `# SHCL:` line in Wovenshell's file.
+		- Verified: as 2026101513330020, in the same run.
+		- Swept: all 4 adapters and ops runners, the layered path in each, and fuzz.py's generator and op list.
+	- Decisions:
+		- The path comes from shcl's own parse of the text with that line uncommented, not from an indent walker.
+		- A `##` line, a line in a raw body, and one that adds an error or moves another field once uncommented aren't listed. A key that's also set in its block is listed under its plain path.
+		- It costs about a load per commented line. Wovenshell's file has about 70.
+	- Branch: round-1024
+	- Commit: a18e5f5
+	- Test case: shared case `061-commented-defaults` and new lines in `041-wovenshell`, in all 4 languages, plus the `commented` op in the fuzz.
+	- Acceptance signoff: waits on JC after the full run, for the README line and the calls in Decisions.
 
 - Python test reads a file in the locale's encoding
 	- ID: 2026102323122726
@@ -483,115 +547,6 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Estimated effort: Avg
 	- Progress log:
 		- 2026-10-23: Split into 2026102321270143 (the triage), 2026102321270148 (the lists made fatal), 2026102321270154 (CTU into shcl), and 2026102321270159 (gcc at `-O0`).
-
-- C doesn't build with mingw-w64 at the Makefile's warnings
-	- ID: 2026102323122737
-	- Type: Bug
-	- Status: Waiting on automated testing
-	- Needs external testing: Windows, on vm925w: the C compile in `win-tests.ps1`, now with `-Werror`, and the C shared cases (`-Only c`).
-	- Severity: Avg
-	- Opened: 2026-10-23 23:12
-	- Related IDs: 2026101512024174
-	- Steps to reproduce [Bug]:
-		- Compile `shclw.c` or `run.c` with mingw-w64 gcc 16 and `-Wconversion -Werror`, as `source/c/Makefile` does.
-	- Incorrect behavior [Bug]:
-		- `shclw.c:335` and `run.c:127` fail on "conversion from 'double' to 'float' may change value" at `signbit(f)`.
-	- Expected behavior [Bug]:
-		- It builds clean, as with gcc on Linux.
-	- Reproduced [Bug]: 2026-10-23, on vm925w, with `C:\ProgramData\mingw64`.
-	- Possible cause [Bug]: mingw's `signbit` macro has a float branch that converts its argument, even for a double. Without `-Werror` it builds, and the shared cases pass.
-	- Actual cause [Bug]:
-		- mingw-w64's `signbit` passes its argument uncast to each branch, so a double meets `__signbitf`. gcc checks the branch it doesn't take too. Upstream added the casts to `isnan` and `fpclassify`, not `signbit`. mingw-w64 12's headers have it in `isnan` and `isfinite` too.
-	- Progress log:
-		- 2026-10-24: Reproduced on Linux with mingw-w64 gcc 16.2 and 14.0.0 headers in the C container, at exactly `shclw.c:335` and `run.c:127`. gcc 14 with 12.0.0 headers fails 8 sites, `isfinite` and `isnan` too.
-		- Verified: the `mingw` target fails before the fix and passes after, on both. A mingw build of the driver at `-Werror` passed 58 of 59 shared cases under wine, 058 differing as on Windows. Also the container lint, the sanitized C tests, and `cicd.bash --ci --quick -y`.
-		- Swept: every `signbit`, `isnan`, `isinf` and `isfinite` in `source/c` goes through `shclw_adapter.h`, `api_test.c:526` included. Go, Rust and Python don't have the macro. shcl.h's own `signbit` builds without the warnings.
-		- Upstream draft in `private/claude_simple/upstream/2026102323122737/`.
-	- Decisions:
-		- On mingw only, `shclw_adapter.h` maps the 4 to gcc's builtins, as glibc does, so the call sites stay plain C. Not for C++, where `<cmath>` replaces them.
-	- Actual fix [Bug]: the builtins on mingw, and a `mingw` Makefile target that the container's lint and quick modes run, with mingw-w64 pinned in the C image.
-	- Commit: 3698622
-	- Test case: vGSU9, `make mingw`, in the container's lint and quick modes. Fails on HEAD's header, passes with the fix.
-
-- Back up a file before a save that would lose lines
-	- ID: 2026101513330019
-	- Type: Feature
-	- Status: Waiting on automated testing
-	- Needs local test suite run?: Yes, one full run, plain, for CodeQL, CTU and the fuzz over the C change.
-	- Priority: Avg
-	- Opened: 20261015-133300
-	- Opened by: JC
-	- Related IDs: 2026101513330017, 2026101613005800
-	- Requirements:
-		- A save option that copies the file aside and then writes, in place of `Refused`.
-	- Note: Cobblevale does this on its first write over such a file. 1.2 has no refusal, so the wrapper's own 1.2 Write loses those lines with no warning.
-	- Progress log:
-		- 2026-10-24: `WriteOpts.Backup` in Go, Rust, C, and Python, plus `write FILE backup`. Over the file `Open` read, a save that would lose lines copies it aside as the upgrade's backup does, then writes. `BackupName` names the copy. design.md and a README line updated.
-		- The 1.2 part of the Note is moot, since 3.0 has been the floor since 2026101613005800.
-		- Verified: Go tests and vet, Rust tests and clippy pedantic, Python tests, ruff and shared cases, the C container lint, the C API tests and shared cases plain, sanitized and as C++, and `cicd.bash --ci --quick -y`. The new case failed in Go before the change and passes after.
-		- Swept: the refusal and the backup in all 4 adapters, the layered path in each, and all 4 ops runners. fuzz.py makes no write ops.
-	- Decisions:
-		- Opt in, not on by default, so copies don't pile up beside a file for programs that never read `BackupName`.
-		- Only over the file `Open` read. Anywhere else, `Create`, and `Parse` or `New` documents are still `Refused`, since there's no file to copy.
-		- Once a copy exists, later saves don't refuse, since the lines are in it. The first save over an upgraded file counts too.
-		- The copy is the upgrade's backup name with format 3. In C the field goes last in `shclw_write_opts`, so positional setups still build.
-	- Branch: round-1024
-	- Commit: 4c1ec59
-	- Test case: shared case `060-write-backup` in all 4 languages.
-	- Acceptance signoff: waits on JC after the full run, for the README line and the opt-in call.
-
-- Put fills in a commented default line
-	- ID: 2026101513330020
-	- Type: Feature
-	- Status: Waiting on automated testing
-	- Needs local test suite run?: Yes, one full run, plain, for CodeQL, CTU and the fuzz over the C change.
-	- Priority: Avg
-	- Opened: 20261015-133300
-	- Opened by: JC
-	- Related IDs: 2026101513330021, 2026101513330022
-	- Requirements:
-		- Setting a key whose commented `key: value ## Default` line is in the file fills in that line, so the lines below it don't move.
-	- Note: shcl adds a new line above the comment. Wovenshell writes the line by hand, and reprints its launch messages with the new line numbers. Folderkite rebuilds its whole defaults list on every save.
-	- Progress log:
-		- 2026-10-24: `Put` and `PutSyntax` of a path that isn't set fill in its commented `## Default` line, in Go, Rust, C, and Python. The `#` and the note come off and the value is the put's, so the lines under it keep their numbers. design.md and a README line updated.
-		- On the current pin 3.0 adds the key at the end of its block, not above the comment as the Note says.
-		- A set shcl refuses leaves the line commented. The `has` line after the refused `syntax` in 061 gave true in Rust before that fix and false after.
-		- Verified: Go tests, vet and staticcheck, Rust tests and clippy pedantic, Python tests, ruff and shared cases, the C container lint, the C API tests and shared cases plain, sanitized and as C++, 90s of fuzz through all 4 drivers with the new op, and `cicd.bash --ci --quick -y`.
-		- Swept: Put and PutSyntax in all 4 adapters, the layered path in each, Diags and Errors in all 4 (Unused reads Diags), and all 4 ops runners. Comment and Remove set no value, so they don't fill in.
-	- Decisions:
-		- Only a line with the `## Default` note is filled in, and the note comes off. A commented line without it may be the user's own.
-		- Names match without ASCII case, and the first matching line in the file wins.
-		- The text is parsed again with the line filled in, since shcl has no call for it. `Diags` stay the load's, and keys earlier puts added get their real lines.
-	- Branch: round-1024
-	- Commit: a18e5f5
-	- Test case: shared case `061-commented-defaults` and new lines in `041-wovenshell`, in all 4 languages, plus the `commented` op in the fuzz.
-	- Acceptance signoff: waits on JC after the full run, for the README line and the calls in Decisions.
-
-- Read the commented defaults in a file
-	- ID: 2026101513330021
-	- Type: Feature
-	- Status: Waiting on automated testing
-	- Needs local test suite run?: Yes, the same full run as 2026101513330020.
-	- Priority: Avg
-	- Opened: 20261015-133300
-	- Opened by: JC
-	- Related IDs: 2026101513330020
-	- Requirements:
-		- List commented `key: value` lines, each with the path it would set.
-	- Note: shcl gives comment lines no path. Wovenshell has its own indent walker for this, and Folderkite strips and re-adds its list.
-	- Progress log:
-		- 2026-10-24: `Commented()` in Go, Rust, C (`shclw_commented`), and Python, plus a `commented` op. Each line has its path, its value as typed, its line, and whether it has the `## Default` note. design.md and a README line updated.
-		- Prose that reads as `key: value` is listed too, such as the 1.2 banner's `# SHCL:` line in Wovenshell's file.
-		- Verified: as 2026101513330020, in the same run.
-		- Swept: all 4 adapters and ops runners, the layered path in each, and fuzz.py's generator and op list.
-	- Decisions:
-		- The path comes from shcl's own parse of the text with that line uncommented, not from an indent walker.
-		- A `##` line, a line in a raw body, and one that adds an error or moves another field once uncommented aren't listed. A key that's also set in its block is listed under its plain path.
-		- It costs about a load per commented line. Wovenshell's file has about 70.
-	- Branch: round-1024
-	- Commit: a18e5f5
-	- Test case: shared case `061-commented-defaults` and new lines in `041-wovenshell`, in all 4 languages, plus the `commented` op in the fuzz.
-	- Acceptance signoff: waits on JC after the full run, for the README line and the calls in Decisions.
 
 - Comment doesn't stack, and leaves the user's own notes
 	- ID: 2026101513330022
@@ -1043,85 +998,6 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Related IDs: 2026101513330009
 	- Note: `Merged` finds them with a second parse in each language. shcl's parser sees each fold, so a call there would be cheaper and could take that code's place.
 
-- Two cicd runs started in the same second share one run log
-	- ID: 2026102409544336
-	- Type: Bug
-	- Status: Done
-	- Severity: Low
-	- Opened: 2026-10-24 09:54
-	- Opened by: JC
-	- Related IDs: 2026102323244600
-	- Steps to reproduce [Bug]:
-		- Start two `cicd/cicd.bash --ci --quick -y` runs in one tree within the same second.
-	- Incorrect behavior [Bug]:
-		- Both `tee` into `cicd/artifacts/lint/run_<stamp>.log`, since the stamp has whole seconds only, so the second truncates the first's log and their lines mix. The log starts before the run lock, so the lock doesn't help.
-	- Expected behavior [Bug]:
-		- Each run has its own log, and `lint-report.bash` reads the right one.
-	- Reproduced [Bug]: 2026-10-24, with 4 stand-in runs started at once: they left one log between them.
-	- Actual cause [Bug]:
-		- The log name is the run's start to the second, and `tee` truncates a log that's there. The rotation can also rename a log while another run looks for its name.
-	- Actual fix [Bug]:
-		- `fRunLog` in `cicd/utility/include/run-lock.bash` takes a short lock in the log folder, skips a second that already has a log, under any rotated name, and creates the log exclusively. The rotation runs under that lock. A run started in a taken second waits for the next one, so the second run's stamp, scratch folder and fuzz folder all differ. The scratch folder is also made exclusively, since another tree's run can pick the same name under one TMPDIR. design.md says so.
-	- Progress log:
-		- 2026-10-24: Two `cicd.bash --ci --quick -y` runs started in the same second both passed, with logs `run_20261024-103445` and `run_20261024-103446`, each holding one run, and `lint-report.bash` read the second.
-		- Verified: test vGTf8 passes, and fails with the old naming put back (4 runs, 1 log). It passes with no `flock` on PATH too. shellcheck is clean, and `cicd.bash --ci --quick -y` passes.
-		- Swept: `stamp` in `cicd.bash` also names the scratch folder, the fuzz failure folder and the sync stash, which now follow the claimed stamp. `c-checks.bash` and the pre-push hook write no run log, and nothing else reads the log names but `lint-report.bash` and the rotation.
-	- Branch: round-1024
-	- Test case: vGTf8, `cicd/log-name-test.bash`, in the tests stage.
-	- Acceptance signoff: Self-closed: build tooling only, with a test watched to fail.
-	- Closed: 2026-10-24 10:40
-
-- Fuzz seeds lose their CRLF
-	- ID: 2026102410113346
-	- Type: Bug
-	- Status: Done
-	- Severity: Low
-	- Opened: 2026-10-24 10:11
-	- Related IDs: 2026102323122726
-	- Steps to reproduce [Bug]:
-		- Read `load_corpus` in `cicd/fuzz.py`.
-	- Incorrect behavior [Bug]:
-		- It reads each case's `doc*.shcl` with `read_text`, which turns CRLF into LF on every platform, so the CRLF docs in 027 and 051 never reach the fuzzer as typed.
-	- Expected behavior [Bug]:
-		- Seeds keep their bytes, so CRLF input gets fuzzed from real files.
-	- Reproduced [Bug]: 2026-10-24, by test vGTig on the old code: the 027 doc loaded without its CRs.
-	- Actual cause [Bug]: `Path.read_text` reads in universal newline mode, and its `newline` argument only came in Python 3.13.
-	- Actual fix [Bug]: `load_corpus` reads bytes and decodes them as UTF-8.
-	- Progress log:
-		- 2026-10-24: Verified: vGTig fails before the fix and passes after. A 60s fuzz of Go, Rust and Python with only cases 027 and 051 as the corpus ran 609 cases with no failures. ruff and `cicd.bash --ci --quick -y` pass.
-		- Swept: every `read_text` in `cicd/` and `source/python/`. `c_cases.py` copies the docs with `shutil.copyfile`, and its want files have no CR. Go's `FuzzRun` seeds come from `os.ReadFile`. Both fuzzers' `doc*.shcl` glob leaves out 051's `middle.shcl` and `crlf.shcl`, which are layer files.
-		- C wasn't in the fuzz run, since it needs the container. The end-of-round full run covers it.
-	- Branch: round-1024
-	- Test case: vGTig, `cicd/fuzz_test.py`, in the tests stage.
-	- Acceptance signoff: Self-closed: build tooling only, with a test watched to fail.
-	- Closed: 2026-10-24 10:40
-
-- Two cicd runs at once break each other's C lint
-	- ID: 2026102323244600
-	- Type: Bug
-	- Status: Done
-	- Priority: Low
-	- Opened: 2026-10-23
-	- Opened by: JC
-	- Requirements:
-		- A second run, such as a push hook started while another run is going, either waits for the first or uses its own artifacts folder.
-	- Notes:
-		- On 2026-10-23 two `--ci` runs overlapped on `cicd/artifacts/c-analyze-shcl/`, and one failed with `shcl3.gcc.txt` missing. The same push passed when run alone.
-	- Actual cause [Bug]:
-		- The `analyze-shcl` reports are `FORCE` targets written with `>$@`, and every run in a tree points them at the same `cicd/artifacts/leakcheck/c-analyze-shcl/`. One run's rewrite empties a report while the other's `shcl_known.py` reads it. The leak reports, CodeQL's cache in `cicd/cache/c-home`, and the remote sync's stash are shared the same way.
-	- Decisions:
-		- Waits, rather than its own folder, since more than the one folder is shared. One lock per tree, so separate worktrees still run side by side.
-	- Actual fix [Bug]:
-		- `cicd.bash` and `c-checks.bash` take a lock on `cicd/artifacts/run.lock`, from `cicd/utility/include/run-lock.bash`. A second run says which run it waits on, then goes. A script the locked run starts passes straight through. `--dry-run`, `--help` and the "Proceed?" prompt don't hold it. design.md says so.
-	- Progress log:
-		- 2026-10-24: Two lint runs at once with the lock bypassed both passed once, so the overlap wasn't caught in the act. It needs one run to rewrite a report as the other reads it.
-	- Verified: two `cicd.bash --ci --quick -y` runs started together in one tree both passed, and the second waited for the first. Two `c-checks.bash quick` runs alone did the same, with the lock held through the container. Test vGSqu passed, and failed with the lock made a no-op, with the pass-through removed, with the helper missing, and with `c-checks.bash` not calling it. shellcheck is clean.
-	- Swept: `cicd.bash` and `c-checks.bash` are the only scripts that write `cicd/artifacts/` or `cicd/cache/` from the host. `c-in-container.bash` runs only under `c-checks.bash`, `flags-test.bash` only calls `--dry-run`, and the pre-push hook goes through `cicd.bash`.
-	- Branch: round-1024
-	- Test case: vGSqu, `cicd/lock-test.bash`, in the tests stage.
-	- Acceptance signoff: Self-closed: build tooling only, with a test watched to fail.
-	- Closed: 2026-10-24 09:55
-
 - Rename the project shclwrap
 	- ID: 2026101513524769
 	- Type: Task
@@ -1284,6 +1160,32 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Swept: `Upgrade` and `UpgradeFile` in Go `shclw3` and Rust `v3`. The 1.2 and 2.0 adapters convert nothing. A format 3 file passed with `from` 2 that 2.0 has errors on, such as `tags: [a, b]`, is still left alone.
 	- Closed: 20261017-11325800
 	- Acceptance signoff: Self-closed: the 2.0 check is now required in every build, per 2026101613005800, and the test failed before the fix and passes after.
+
+- Updates to CICD script flags
+	- ID: 2026101816214270
+	- Type: Enhancement
+	- Status: Done
+	- Priority: High
+	- Opened: 2026-10-18
+	- Opened by: JC
+	- Requirements:
+		- `--ci`: Rename `--gate`.
+		- `--quick`:
+			- Should run whatever linting, validation, and testing steps are very quick.
+			- Cross-compile whatever is fast; e.g. maybe skip slow arm64.
+			- Skip anything requiring an external host.
+		- No flags, by default, should do everything.
+		- The other existing flags can stay.
+	- Notes:
+		- Pre-next-cut. Do next.
+		- There's no cross-compile in this project yet, so nothing to trim there. No stage uses an external test host either.
+		- `--quick` drops the remote sync, the C analyzers and sanitizers, the leak checks, and Go's fuzzer, and fuzzes Go against Rust for 10s. C still gets a gcc-15 pass and its plain API tests and shared cases on all 3 versions. It runs in about 50s.
+		- It doesn't fetch anything. If a pinned `shcl.h` isn't cached, C is skipped with a warning.
+		- No flags now runs the leak checks too. `--no-leakcheck` skips them, and `--leakcheck` adds them to `--ci` or `--quick`.
+	- Branch: ci-flags
+	- Test case: `cicd/flags-test.bash`, 14 flag mixes against `--dry-run`, since b098cf0.
+	- Acceptance signoff: Self-closed: the flag test covers every mix the requirements name.
+	- Closed: 2026-10-24
 
 - CICD `--leakcheck` and `--no-leakcheck`
 	- ID: 2026101916500101
@@ -2205,6 +2107,85 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- 20261015: public, with secret scanning on. A plain `go get` works with no settings.
 	- Closed: 2026-10-15
 
+- Two cicd runs started in the same second share one run log
+	- ID: 2026102409544336
+	- Type: Bug
+	- Status: Done
+	- Severity: Low
+	- Opened: 2026-10-24 09:54
+	- Opened by: JC
+	- Related IDs: 2026102323244600
+	- Steps to reproduce [Bug]:
+		- Start two `cicd/cicd.bash --ci --quick -y` runs in one tree within the same second.
+	- Incorrect behavior [Bug]:
+		- Both `tee` into `cicd/artifacts/lint/run_<stamp>.log`, since the stamp has whole seconds only, so the second truncates the first's log and their lines mix. The log starts before the run lock, so the lock doesn't help.
+	- Expected behavior [Bug]:
+		- Each run has its own log, and `lint-report.bash` reads the right one.
+	- Reproduced [Bug]: 2026-10-24, with 4 stand-in runs started at once: they left one log between them.
+	- Actual cause [Bug]:
+		- The log name is the run's start to the second, and `tee` truncates a log that's there. The rotation can also rename a log while another run looks for its name.
+	- Actual fix [Bug]:
+		- `fRunLog` in `cicd/utility/include/run-lock.bash` takes a short lock in the log folder, skips a second that already has a log, under any rotated name, and creates the log exclusively. The rotation runs under that lock. A run started in a taken second waits for the next one, so the second run's stamp, scratch folder and fuzz folder all differ. The scratch folder is also made exclusively, since another tree's run can pick the same name under one TMPDIR. design.md says so.
+	- Progress log:
+		- 2026-10-24: Two `cicd.bash --ci --quick -y` runs started in the same second both passed, with logs `run_20261024-103445` and `run_20261024-103446`, each holding one run, and `lint-report.bash` read the second.
+		- Verified: test vGTf8 passes, and fails with the old naming put back (4 runs, 1 log). It passes with no `flock` on PATH too. shellcheck is clean, and `cicd.bash --ci --quick -y` passes.
+		- Swept: `stamp` in `cicd.bash` also names the scratch folder, the fuzz failure folder and the sync stash, which now follow the claimed stamp. `c-checks.bash` and the pre-push hook write no run log, and nothing else reads the log names but `lint-report.bash` and the rotation.
+	- Branch: round-1024
+	- Test case: vGTf8, `cicd/log-name-test.bash`, in the tests stage.
+	- Acceptance signoff: Self-closed: build tooling only, with a test watched to fail.
+	- Closed: 2026-10-24 10:40
+
+- Fuzz seeds lose their CRLF
+	- ID: 2026102410113346
+	- Type: Bug
+	- Status: Done
+	- Severity: Low
+	- Opened: 2026-10-24 10:11
+	- Related IDs: 2026102323122726
+	- Steps to reproduce [Bug]:
+		- Read `load_corpus` in `cicd/fuzz.py`.
+	- Incorrect behavior [Bug]:
+		- It reads each case's `doc*.shcl` with `read_text`, which turns CRLF into LF on every platform, so the CRLF docs in 027 and 051 never reach the fuzzer as typed.
+	- Expected behavior [Bug]:
+		- Seeds keep their bytes, so CRLF input gets fuzzed from real files.
+	- Reproduced [Bug]: 2026-10-24, by test vGTig on the old code: the 027 doc loaded without its CRs.
+	- Actual cause [Bug]: `Path.read_text` reads in universal newline mode, and its `newline` argument only came in Python 3.13.
+	- Actual fix [Bug]: `load_corpus` reads bytes and decodes them as UTF-8.
+	- Progress log:
+		- 2026-10-24: Verified: vGTig fails before the fix and passes after. A 60s fuzz of Go, Rust and Python with only cases 027 and 051 as the corpus ran 609 cases with no failures. ruff and `cicd.bash --ci --quick -y` pass.
+		- Swept: every `read_text` in `cicd/` and `source/python/`. `c_cases.py` copies the docs with `shutil.copyfile`, and its want files have no CR. Go's `FuzzRun` seeds come from `os.ReadFile`. Both fuzzers' `doc*.shcl` glob leaves out 051's `middle.shcl` and `crlf.shcl`, which are layer files.
+		- C wasn't in the fuzz run, since it needs the container. The end-of-round full run covers it.
+	- Branch: round-1024
+	- Test case: vGTig, `cicd/fuzz_test.py`, in the tests stage.
+	- Acceptance signoff: Self-closed: build tooling only, with a test watched to fail.
+	- Closed: 2026-10-24 10:40
+
+- Two cicd runs at once break each other's C lint
+	- ID: 2026102323244600
+	- Type: Bug
+	- Status: Done
+	- Priority: Low
+	- Opened: 2026-10-23
+	- Opened by: JC
+	- Requirements:
+		- A second run, such as a push hook started while another run is going, either waits for the first or uses its own artifacts folder.
+	- Notes:
+		- On 2026-10-23 two `--ci` runs overlapped on `cicd/artifacts/c-analyze-shcl/`, and one failed with `shcl3.gcc.txt` missing. The same push passed when run alone.
+	- Actual cause [Bug]:
+		- The `analyze-shcl` reports are `FORCE` targets written with `>$@`, and every run in a tree points them at the same `cicd/artifacts/leakcheck/c-analyze-shcl/`. One run's rewrite empties a report while the other's `shcl_known.py` reads it. The leak reports, CodeQL's cache in `cicd/cache/c-home`, and the remote sync's stash are shared the same way.
+	- Decisions:
+		- Waits, rather than its own folder, since more than the one folder is shared. One lock per tree, so separate worktrees still run side by side.
+	- Actual fix [Bug]:
+		- `cicd.bash` and `c-checks.bash` take a lock on `cicd/artifacts/run.lock`, from `cicd/utility/include/run-lock.bash`. A second run says which run it waits on, then goes. A script the locked run starts passes straight through. `--dry-run`, `--help` and the "Proceed?" prompt don't hold it. design.md says so.
+	- Progress log:
+		- 2026-10-24: Two lint runs at once with the lock bypassed both passed once, so the overlap wasn't caught in the act. It needs one run to rewrite a report as the other reads it.
+	- Verified: two `cicd.bash --ci --quick -y` runs started together in one tree both passed, and the second waited for the first. Two `c-checks.bash quick` runs alone did the same, with the lock held through the container. Test vGSqu passed, and failed with the lock made a no-op, with the pass-through removed, with the helper missing, and with `c-checks.bash` not calling it. shellcheck is clean.
+	- Swept: `cicd.bash` and `c-checks.bash` are the only scripts that write `cicd/artifacts/` or `cicd/cache/` from the host. `c-in-container.bash` runs only under `c-checks.bash`, `flags-test.bash` only calls `--dry-run`, and the pre-push hook goes through `cicd.bash`.
+	- Branch: round-1024
+	- Test case: vGSqu, `cicd/lock-test.bash`, in the tests stage.
+	- Acceptance signoff: Self-closed: build tooling only, with a test watched to fail.
+	- Closed: 2026-10-24 09:55
+
 - C Makefile lists an `analyze-ctu` target it has no rule for
 	- ID: 2026102322213500
 	- Type: Bug
@@ -2413,6 +2394,25 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Swept: every place Rust turns a float into text, `format_float` and `From<f32>`. Go's and C's already follow Go's rule. No other float-to-text site in the 3 wrappers.
 	- Closed: 20261017-11325800
 	- Acceptance signoff: Self-closed: reproduced, and its test failed before the fix and passes after. Go's rule needed no change to any want file.
+
+- Python: run from a copied file
+	- ID: 2026101513330050
+	- Type: Feature
+	- Status: Done
+	- Priority: Low
+	- Opened: 20261015-133300
+	- Opened by: JC
+	- Parent ID: 2026101512024161
+	- Note: Lenscart bundles shcl's wheel in its packages. Folderkite parses shcl by hand in its Python tools, since nothing is installed there.
+	- Progress log:
+		- 2026-10-21: A `shcl.py` copied beside `shclw.py` is used first, then the installed one. The copy loads under its own name, so a program that still imports an older `shcl` keeps it. README says so.
+		- Verified: `test_copied` runs the wrapper from a package with 3.0 copied beside it and 1.2 on the path, and fails with the copy lookup taken out. `test_none` checks the message with nothing found.
+	- Decisions:
+		- The copy beside the wrapper wins over the installed one, since bundling it is a choice. JC OK'd it on 2026-10-24.
+	- Commit: a4909af
+	- Test case: `source/python/tests/test_shclw.py`, `test_copied` and `test_none`.
+	- Acceptance signoff: JC, 2026-10-24.
+	- Closed: 2026-10-24
 
 - Move the other projects onto the wrapper
 	- ID: 2026101512024167
