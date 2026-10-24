@@ -536,6 +536,7 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- Once a copy exists, later saves don't refuse, since the lines are in it. The first save over an upgraded file counts too.
 		- The copy is the upgrade's backup name with format 3. In C the field goes last in `shclw_write_opts`, so positional setups still build.
 	- Branch: round-1024
+	- Commit: 4c1ec59
 	- Test case: shared case `060-write-backup` in all 4 languages.
 	- Acceptance signoff: waits on JC after the full run, for the README line and the opt-in call.
 
