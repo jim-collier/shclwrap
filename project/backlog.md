@@ -216,96 +216,12 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Test case: shared case `056-write-changed` in all 4 languages, and Go's `TestWriteChangedOtherName`.
 	- Acceptance signoff: waits on JC, for the new kind, the reversed Decisions row, and the README line.
 
-- Shared cases fail on a Windows clone with Git's default line ends
-	- ID: 2026102323122721
-	- Type: Bug
-	- Status: Waiting on automated testing
-	- Needs external testing: Windows, on vm925w: the Rust, Python and C shared cases from a clone with Git for Windows' default `core.autocrlf=true`.
-	- Severity: Avg
-	- Opened: 2026-10-23 23:12
-	- Related IDs: 2026101512024174, 2026101513330014
-	- Steps to reproduce [Bug]:
-		- On Windows, with Git for Windows' `core.autocrlf=true` from its system gitconfig, clone the repo and run `cargo test --all-features` in `source/rust`.
-	- Incorrect behavior [Bug]:
-		- All 59 shared cases fail in Rust, and most in Python, since each case's `doc.shcl` and ops are checked out with CRLF.
-	- Expected behavior [Bug]:
-		- The cases pass on a default clone, as they do with `core.autocrlf` off.
-	- Reproduced [Bug]: 2026-10-23, on vm925w. 2026-10-24 on Linux too, from a clone with `core.autocrlf=true`: Rust failed 59 of 59 cases, and Python most of them.
-	- Possible cause [Bug]: the repo has no `.gitattributes`, so test data that must stay LF, such as `tests/cases/`, gets the clone's line ends. Case 027 has CRLF on purpose and would need its own rule.
-	- Actual cause [Bug]:
-		- With no `.gitattributes`, `core.autocrlf=true` checks out every text file with CRLF. The cases, the sha256 check of the 2.0 copy `_shclw_shcl2.py`, and gofmt's check all want the bytes as committed.
-	- Actual fix [Bug]: `.gitattributes` checks out every text file as LF, and leaves `tests/cases/` exactly as committed, so the 4 CRLF case files in 027 and 051 keep their CRLF.
-	- Progress log:
-		- 2026-10-24: Verified on Linux from clones with `core.autocrlf=true`. Without the fix Rust failed 59 of 59 cases, Python's cases failed, and gofmt listed 14 files. With it Rust, Python's cases and tests, and Go passed, gofmt listed none, and the CRLF case files stayed CRLF. Also `cicd.bash --ci --quick -y`.
-		- Swept: the readers of `tests/cases/` in all 4 languages go through the one rule. Outside the cases, the 2.0 copy's sha256, the bash scripts, the pre-push hook and the Makefile want LF too, which the default rule gives. No other tracked file has CRLF.
-	- Decisions:
-		- LF for every text file, not only the cases, since gofmt, bash and the 2.0 copy's sha256 need it too. A Windows editor set to CRLF still gets LF.
-	- Commit: 88e56c1
-	- Test case: vGSLJ, `cicd/eol-test.bash`, in the tests stage. It checks out every tracked file with `core.autocrlf=true` and compares each to what's committed. It failed on 269 files without `.gitattributes`, and passes with it.
-
-- C doesn't build with mingw-w64 at the Makefile's warnings
-	- ID: 2026102323122737
-	- Type: Bug
-	- Status: Waiting on automated testing
-	- Needs external testing: Windows, on vm925w: the C compile in `win-tests.ps1`, now with `-Werror`, and the C shared cases (`-Only c`).
-	- Severity: Avg
-	- Opened: 2026-10-23 23:12
-	- Related IDs: 2026101512024174
-	- Steps to reproduce [Bug]:
-		- Compile `shclw.c` or `run.c` with mingw-w64 gcc 16 and `-Wconversion -Werror`, as `source/c/Makefile` does.
-	- Incorrect behavior [Bug]:
-		- `shclw.c:335` and `run.c:127` fail on "conversion from 'double' to 'float' may change value" at `signbit(f)`.
-	- Expected behavior [Bug]:
-		- It builds clean, as with gcc on Linux.
-	- Reproduced [Bug]: 2026-10-23, on vm925w, with `C:\ProgramData\mingw64`.
-	- Possible cause [Bug]: mingw's `signbit` macro has a float branch that converts its argument, even for a double. Without `-Werror` it builds, and the shared cases pass.
-	- Actual cause [Bug]:
-		- mingw-w64's `signbit` passes its argument uncast to each branch, so a double meets `__signbitf`. gcc checks the branch it doesn't take too. Upstream added the casts to `isnan` and `fpclassify`, not `signbit`. mingw-w64 12's headers have it in `isnan` and `isfinite` too.
-	- Progress log:
-		- 2026-10-24: Reproduced on Linux with mingw-w64 gcc 16.2 and 14.0.0 headers in the C container, at exactly `shclw.c:335` and `run.c:127`. gcc 14 with 12.0.0 headers fails 8 sites, `isfinite` and `isnan` too.
-		- Verified: the `mingw` target fails before the fix and passes after, on both. A mingw build of the driver at `-Werror` passed 58 of 59 shared cases under wine, 058 differing as on Windows. Also the container lint, the sanitized C tests, and `cicd.bash --ci --quick -y`.
-		- Swept: every `signbit`, `isnan`, `isinf` and `isfinite` in `source/c` goes through `shclw_adapter.h`, `api_test.c:526` included. Go, Rust and Python don't have the macro. shcl.h's own `signbit` builds without the warnings.
-		- Upstream draft in `private/claude_simple/upstream/2026102323122737/`.
-	- Decisions:
-		- On mingw only, `shclw_adapter.h` maps the 4 to gcc's builtins, as glibc does, so the call sites stay plain C. Not for C++, where `<cmath>` replaces them.
-	- Actual fix [Bug]: the builtins on mingw, and a `mingw` Makefile target that the container's lint and quick modes run, with mingw-w64 pinned in the C image.
-	- Commit: 3698622
-	- Test case: vGSU9, `make mingw`, in the container's lint and quick modes. Fails on HEAD's header, passes with the fix.
-
-- Create-only Write
-	- ID: 2026101513330015
-	- Type: Feature
-	- Status: Waiting on automated testing
-	- Needs local test suite run?: No. The full run passed on 2026-10-23.
-	- Needs external testing: Windows: Go's hard link on NTFS, since vm925w has no Go, and a FAT or other no-link filesystem for the fallback.
-	- Priority: Avg
-	- Opened: 20261015-133300
-	- Opened by: JC
-	- Related IDs: 2026101513330016, 2026101513330017
-	- Requirements:
-		- Fails if the file exists, and stays right when 2 processes create it at once.
-	- Note: Radixmill hard-links a synced temp file into place. shcl's atomic write replaces a file it finds there.
-	- Progress log:
-		- 2026-10-21: `WriteOpts.Create` writes a synced temp beside the file and hard-links it into place, so a taken name is the new `ErrExists` and the name never holds part of a file. A filesystem with no hard links falls back to an exclusive create of the name. C on Windows moves the temp without replacing. Go, Rust, C, and Python, plus `write FILE create`. design.md and README updated.
-		- Verified: Go tests, vet, staticcheck; Rust tests, clippy pedantic; C API tests plain, sanitized, and as C++, the C lint stage, and the shared cases plain and sanitized; Python tests, ruff, and shared cases; `cicd.bash --quick`.
-		- Each race test fails with a rename in place of the link, and passes with it.
-		- 2026-10-21: The full run at `15509b0` passed the sanitized C cases, and a second run without the leak checks passed the fuzz. The full run stopped at CodeQL findings from 2026101513330009 and 2026101513330017, so CTU and the heaptrack soak weren't reached.
-		- Swept: every `WriteOpts`, `write_opts`, and `force` site in all 4 adapters and runners, `replacing` in `shclw_upgrade_file`, and the fuzz script's `write` ops.
-		- 2026-10-23: The full run at `7b2b21e` passed, leak checks and fuzz included.
-		- 2026-10-23: On vm925w, Windows 11, from a fresh clone of `round-1023` with `core.autocrlf` off: `057-write-create` passed in Rust, C and Python on NTFS, and so did Rust's `create_race_link` and `create_race_in_place` and Python's `CreateRace`. C's `test_create_raced` didn't build there, per 2026102323122732.
-	- Decisions:
-		- Link of a synced temp, with the exclusive create as the fallback, rather than refusing on a filesystem with no links. design.md, Decisions, says why.
-		- `Force` has nothing to skip with `Create`, since it never replaces. Over the file `Open` read it's `ErrExists`.
-	- Commit: fabafb8
-	- Test case: shared case `057-write-create` in all 4 languages, and the race tests: Go `TestCreateRace`, Rust `create_race_link` and `create_race_in_place`, Python `CreateRace`, C `test_create_raced` (8 processes).
-	- Acceptance signoff: waits on JC after the full run, for the README line.
-
 - Write with a file mode
 	- ID: 2026101513330016
 	- Type: Feature
-	- Status: Waiting on automated testing
-	- Needs local test suite run?: No. The full run passed on 2026-10-23.
-	- Needs external testing: Windows, Go only, since vm925w has no Go.
+	- Status: Waiting on UAT
+	- Needs local test suite run?: No. The full run passed on 2026-10-24.
+	- Needs external testing: No. Windows passed on 2026-10-24.
 	- Priority: Avg
 	- Opened: 20261015-133300
 	- Opened by: JC
@@ -320,6 +236,7 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- Swept: as 2026101513330015.
 		- 2026-10-23: The full run at `7b2b21e` passed, leak checks and fuzz included.
 		- 2026-10-23: On vm925w, Windows 11, from a fresh clone of `round-1023` with `core.autocrlf` off: in Rust, C and Python `058-write-mode`'s writes passed, and each `mode` op printed 0666, as the mode is ignored there. So that case differs on Windows, as expected, and every other case passed.
+		- 2026-10-24: The full run at `b9a392c` passed, leak checks and fuzz included. On vm925w, Go's `058-write-mode` did the same as the other 3, from a test binary cross-built for Windows: its writes passed and each `mode` op printed 0666. All of Go's other tests passed there.
 	- Decisions:
 		- Exact, not masked by the umask, and only on a file the `Write` creates. design.md, Decisions, says why.
 		- In Go and C 0 means no mode. Rust takes `Option<u32>`, and Python `None`.
@@ -330,8 +247,8 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 - Back up a file before a save that would lose lines
 	- ID: 2026101513330019
 	- Type: Feature
-	- Status: Waiting on automated testing
-	- Needs local test suite run?: Yes, one full run, plain, for CodeQL, CTU and the fuzz over the C change.
+	- Status: Waiting on UAT
+	- Needs local test suite run?: No. The full run passed on 2026-10-24.
 	- Priority: Avg
 	- Opened: 20261015-133300
 	- Opened by: JC
@@ -344,6 +261,7 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- The 1.2 part of the Note is moot, since 3.0 has been the floor since 2026101613005800.
 		- Verified: Go tests and vet, Rust tests and clippy pedantic, Python tests, ruff and shared cases, the C container lint, the C API tests and shared cases plain, sanitized and as C++, and `cicd.bash --ci --quick -y`. The new case failed in Go before the change and passes after.
 		- Swept: the refusal and the backup in all 4 adapters, the layered path in each, and all 4 ops runners. fuzz.py makes no write ops.
+		- 2026-10-24: The full run at `b9a392c` passed: CodeQL, CTU and the heaptrack soak, then 583 fuzz cases through all 4 drivers and 30s of Go's fuzzer. On vm925w `060-write-backup` passed in all 4 languages.
 	- Decisions:
 		- Opt in, not on by default, so copies don't pile up beside a file for programs that never read `BackupName`.
 		- Only over the file `Open` read. Anywhere else, `Create`, and `Parse` or `New` documents are still `Refused`, since there's no file to copy.
@@ -357,8 +275,8 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 - Put fills in a commented default line
 	- ID: 2026101513330020
 	- Type: Feature
-	- Status: Waiting on automated testing
-	- Needs local test suite run?: Yes, one full run, plain, for a fresh CodeQL, the fuzz, and CTU again over the C change.
+	- Status: Waiting on UAT
+	- Needs local test suite run?: No. The full run passed on 2026-10-24.
 	- Priority: Avg
 	- Opened: 20261015-133300
 	- Opened by: JC
@@ -375,6 +293,7 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- 2026-10-24: The full run at `be17af0` failed CTU on ours, `shclw.c:1834` in `uncomment`, reached from `fill`. The path was false: it had `memchr` find a newline in an empty range, then read past a 1-byte text. The 3 line scans in the new code now go through `line_end`, which never calls `memchr` on an empty range.
 		- Verified: the leak run's CTU step, which fails on any finding of ours, reported it on the host's clang 19 before the fix and nothing of ours after. In the container, `c-checks.bash leakcheck-resume` passed with clang-22, CTU matching both pins' lists and the heaptrack soak, from `be17af0`'s CodeQL report. The C container lint, the sanitized C tests and shared cases, and `cicd.bash --ci --quick -y` passed too.
 		- Swept: every `memchr` line scan in `shclw.c` and `info.c`. `shclw_i_commented_of` had the same shape and now uses `line_end`. `probe_text` already checked `pos < len`. The older scans in `info.c` and `text_lines` either loop only while `at < len` or slice nothing past the range, and CTU reports none of them.
+		- 2026-10-24: The full run at `b9a392c` passed: a fresh CodeQL, CTU with nothing of ours, and the heaptrack soak, then 583 fuzz cases through all 4 drivers with the `commented` op, and 30s of Go's fuzzer. On vm925w `061-commented-defaults` and `041-wovenshell` passed in all 4 languages.
 	- Decisions:
 		- Only a line with the `## Default` note is filled in, and the note comes off. A commented line without it may be the user's own.
 		- Names match without ASCII case, and the first matching line in the file wins.
@@ -387,8 +306,8 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 - Read the commented defaults in a file
 	- ID: 2026101513330021
 	- Type: Feature
-	- Status: Waiting on automated testing
-	- Needs local test suite run?: Yes, the same full run as 2026101513330020.
+	- Status: Waiting on UAT
+	- Needs local test suite run?: No. The full run passed on 2026-10-24.
 	- Priority: Avg
 	- Opened: 20261015-133300
 	- Opened by: JC
@@ -402,6 +321,7 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- Verified: as 2026101513330020, in the same run.
 		- Swept: all 4 adapters and ops runners, the layered path in each, and fuzz.py's generator and op list.
 		- 2026-10-24: The CTU fix on 2026101513330020 covers `shclw_commented`'s line scan too.
+		- 2026-10-24: Verified: as 2026101513330020, in the full run at `b9a392c` and on vm925w.
 	- Decisions:
 		- The path comes from shcl's own parse of the text with that line uncommented, not from an indent walker.
 		- A `##` line, a line in a raw body, and one that adds an error or moves another field once uncommented aren't listed. A key that's also set in its block is listed under its plain path.
@@ -411,62 +331,36 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Test case: shared case `061-commented-defaults` and new lines in `041-wovenshell`, in all 4 languages, plus the `commented` op in the fuzz.
 	- Acceptance signoff: waits on JC after the full run, for the README line and the calls in Decisions.
 
-- Python test reads a file in the locale's encoding
-	- ID: 2026102323122726
-	- Type: Bug
+- Create-only Write
+	- ID: 2026101513330015
+	- Type: Feature
 	- Status: Waiting on automated testing
-	- Needs external testing: Windows, on vm925w: `python unittest` in `win-tests.ps1`, the run without UTF-8 mode.
-	- Severity: Low
-	- Opened: 2026-10-23 23:12
-	- Steps to reproduce [Bug]:
-		- Run the Python unit tests on Windows, without `PYTHONUTF8=1`.
-	- Incorrect behavior [Bug]:
-		- `test_upgrade_on_write` fails with a `UnicodeDecodeError` from cp1252, at `test_shclw.py:135`.
-	- Expected behavior [Bug]:
-		- It passes, as it does in UTF-8 mode.
-	- Reproduced [Bug]: 2026-10-23, on vm925w with Python 3.14. 2026-10-24 on Linux too, in the C locale with UTF-8 mode off.
-	- Possible cause [Bug]: `read_text()` with no encoding, at lines 135, 146 and 186. The written file is UTF-8.
-	- Actual cause [Bug]:
-		- The tests read and wrote with `read_text` and `write_text` and no encoding, so they got the locale's. Text mode also turns LF into CRLF on a Windows write and back on read, so a check could miss a CRLF the library wrote. The library itself reads and writes bytes.
-	- Actual fix [Bug]: The tests compare a file's bytes, and say UTF-8 where they write text. cicd's tests stage runs the Python tests and shared cases with `EncodingWarning` as an error, so a text read or write with no encoding fails on Linux too. `fuzz.py` says UTF-8, and writes its docs and scripts with no newline change.
+	- Needs local test suite run?: No. The full run passed on 2026-10-23.
+	- Needs external testing: Windows, on vm925w: Go, Rust and Python's `057-write-create` and race tests with the temp folder on a FAT32 volume, once 2026102412381602 is fixed. `win-go-fat.ps1` runs them.
+	- Priority: Avg
+	- Opened: 20261015-133300
+	- Opened by: JC
+	- Prereq IDs: 2026102412381602
+	- Related IDs: 2026101513330016, 2026101513330017
+	- Requirements:
+		- Fails if the file exists, and stays right when 2 processes create it at once.
+	- Note: Radixmill hard-links a synced temp file into place. shcl's atomic write replaces a file it finds there.
 	- Progress log:
-		- 2026-10-24: In the C locale with UTF-8 mode off, `test_upgrade_on_write` failed with a `UnicodeDecodeError` before the fix and passes after.
-		- Verified: with `EncodingWarning` as an error, 8 of 14 tests failed before and all 14 pass after, and the 59 Python shared cases pass. Also ruff and `cicd.bash --ci --quick -y`.
-		- Swept: every `read_text`, `write_text`, `open` and `text=True` in the repo's Python. `shclw.py` and `shclw_drive.py` already use bytes, and `c_cases.py` and `shcl_known.py` already say UTF-8. `fuzz.py` had 6 such calls, now fixed. Go, Rust and C have no locale encoding.
+		- 2026-10-21: `WriteOpts.Create` writes a synced temp beside the file and hard-links it into place, so a taken name is the new `ErrExists` and the name never holds part of a file. A filesystem with no hard links falls back to an exclusive create of the name. C on Windows moves the temp without replacing. Go, Rust, C, and Python, plus `write FILE create`. design.md and README updated.
+		- Verified: Go tests, vet, staticcheck; Rust tests, clippy pedantic; C API tests plain, sanitized, and as C++, the C lint stage, and the shared cases plain and sanitized; Python tests, ruff, and shared cases; `cicd.bash --quick`.
+		- Each race test fails with a rename in place of the link, and passes with it.
+		- 2026-10-21: The full run at `15509b0` passed the sanitized C cases, and a second run without the leak checks passed the fuzz. The full run stopped at CodeQL findings from 2026101513330009 and 2026101513330017, so CTU and the heaptrack soak weren't reached.
+		- Swept: every `WriteOpts`, `write_opts`, and `force` site in all 4 adapters and runners, `replacing` in `shclw_upgrade_file`, and the fuzz script's `write` ops.
+		- 2026-10-23: The full run at `7b2b21e` passed, leak checks and fuzz included.
+		- 2026-10-23: On vm925w, Windows 11, from a fresh clone of `round-1023` with `core.autocrlf` off: `057-write-create` passed in Rust, C and Python on NTFS, and so did Rust's `create_race_link` and `create_race_in_place` and Python's `CreateRace`. C's `test_create_raced` didn't build there, per 2026102323122732.
+		- 2026-10-24: On vm925w at `b9a392c`, on NTFS: Go's `TestCreateRace` and `057-write-create` passed, from a test binary cross-built for Windows, and C's `test_create_raced` passed.
+		- 2026-10-24: On a FAT32 volume there, C's API tests passed, the create race included, and so did `057-write-create` in C. Go's `TestCreateRace/link`, Rust's `create_race_link` and Python's `CreateRace.test_link` failed, as did 057 in all 3, each create giving `io`, "Incorrect function". Their in-place races passed. Filed as 2026102412381602.
 	- Decisions:
-		- Byte compares rather than `encoding="utf-8"` on the reads, so a CRLF the library wrote on Windows fails the test.
-		- `EncodingWarning` set through the environment, so the driver and the tests' child processes get it too. ruff's PLW1514 is preview only and found 4 of the 7 test calls, so it stays off.
-	- Commit: 94bf156
-	- Test case: vGTH7, the Python tests and shared cases in cicd's tests stage with `EncodingWarning` as an error. Fails on the old tests, passes now.
-
-- C test tools don't run on Windows
-	- ID: 2026102323122732
-	- Type: Bug
-	- Status: Waiting on automated testing
-	- Needs external testing: Windows, on vm925w: `win-tests.ps1 -Only c`. Its `c cases` step should compare every op with no LF stand-in, and its new `c api` step runs the API tests.
-	- Severity: Low
-	- Opened: 2026-10-23 23:12
-	- Related IDs: 2026101512024174, 2026101513330015
-	- Steps to reproduce [Bug]:
-		- Build the C driver and API tests with mingw-w64 on Windows, and run `cicd/c_cases.py` with the driver.
-	- Incorrect behavior [Bug]:
-		- `c_cases.py` compares no op, since the driver's stdout is in text mode and every line ends in CRLF.
-		- `tests/api_test.c` doesn't compile, since it includes `sys/wait.h` for the race test.
-	- Expected behavior [Bug]:
-		- The shared cases and the API tests run on Windows, so the C paths there have tests.
-	- Reproduced [Bug]: 2026-10-23, on vm925w. With CRLF turned back to LF in front of the driver, 58 of 59 cases passed, 058 differing as expected. 2026-10-24 with a mingw-w64 build under wine too.
-	- Actual cause [Bug]:
-		- The driver read its script and wrote its output in text mode, so Windows wrote CRLF and read a CRLF script as LF. The Go, Rust and Python drivers use bytes.
-		- `api_test.c` used `fork`, `waitpid`, `mkdtemp` and a 2-argument `mkdir`, and checked Unix modes. Its NUL test also saved to `nul.shcl`, a device name on Windows.
-	- Actual fix [Bug]: The driver puts stdin and stdout in binary mode on Windows. There the API tests run the other side of each race in a thread, skip the mode checks as the other languages do, and make the scratch folder with `_mktemp_s`. The NUL test saves to `nul0.shcl`. `make mingw` compiles `api_test.c` too.
-	- Progress log:
-		- 2026-10-24: The old driver compared no op on 3 cases under wine.
-		- Verified: under wine, the fixed driver passed 58 of 59 shared cases with 678 ops compared, 058 differing as on Windows, and the API tests passed. A create that replaces the file failed the create race, through threads under wine and through `fork` on Linux. `make mingw` fails on the old `api_test.c` and passes now. Also the API tests plain, sanitized and as C++ on Linux, the C container lint, and `cicd.bash --ci --quick -y`.
-		- Swept: the Go, Rust and Python drivers already write bytes, and no other C program reads stdin or writes stdout. No other test names a Windows device file.
-	- Decisions:
-		- Threads on Windows rather than starting the test program again, since there's no `fork`. Python's race test uses threads too, and C's temp names already differ between threads.
-	- Commit: 94bf156
-	- Test case: vGSU9, `make mingw`, now with `api_test.c`. The Windows runs are `win-tests.ps1` on vm925w.
+		- Link of a synced temp, with the exclusive create as the fallback, rather than refusing on a filesystem with no links. design.md, Decisions, says why.
+		- `Force` has nothing to skip with `Create`, since it never replaces. Over the file `Open` read it's `ErrExists`.
+	- Commit: fabafb8
+	- Test case: shared case `057-write-create` in all 4 languages, and the race tests: Go `TestCreateRace`, Rust `create_race_link` and `create_race_in_place`, Python `CreateRace`, C `test_create_raced` (8 processes).
+	- Acceptance signoff: waits on JC after the full run, for the README line.
 
 - Leak tests and all tests cover third-party and vendored code
 	- ID: 2026101916500102
@@ -551,6 +445,25 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Estimated effort: Avg
 	- Progress log:
 		- 2026-10-23: Split into 2026102321270143 (the triage), 2026102321270148 (the lists made fatal), 2026102321270154 (CTU into shcl), and 2026102321270159 (gcc at `-O0`).
+
+- Create-only Write fails on a FAT volume on Windows
+	- ID: 2026102412381602
+	- Type: Bug
+	- Status: Queued
+	- Needs external testing: Windows, on vm925w: `win-go-fat.ps1`, the FAT32 steps.
+	- Severity: Avg
+	- Opened: 2026-10-24 12:38
+	- Related IDs: 2026101513330015
+	- Target OS: Windows
+	- Steps to reproduce [Bug]:
+		- On Windows, point `TMP` and `TMPDIR` at a FAT32 volume, then run Go's `TestCreateRace`, Rust's `create_race_link`, Python's `CreateRace`, or shared case `057-write-create`.
+	- Incorrect behavior [Bug]:
+		- Every create-only `Write` fails as `io`, "Incorrect function", in Go, Rust and Python, where it should fall back to the exclusive create.
+	- Expected behavior [Bug]:
+		- It falls back, as design.md says for a filesystem with no hard links. C passes there, since on Windows it moves the temp into place without a link.
+	- Reproduced [Bug]: 2026-10-24, on vm925w, Windows 11, on a FAT32 volume, at `b9a392c`. The in-place races pass there, so only the fallback check misses.
+	- Possible cause [Bug]: `CreateHardLink` on FAT gives `ERROR_INVALID_FUNCTION` (1). Go's `ErrUnsupported` takes only `ERROR_NOT_SUPPORTED`, `ERROR_CALL_NOT_IMPLEMENTED` and a few errnos, and Rust doesn't call it `Unsupported` either. Python sees errno 22 with winerror 1. exFAT and network shares may give other codes, not tried.
+	- Test case: none yet. CI has no FAT volume. On vm925w `win-go-fat.ps1` makes one and runs the 3 languages' race tests and shared cases on it.
 
 - Comment doesn't stack, and leaves the user's own notes
 	- ID: 2026101513330022
@@ -1650,6 +1563,68 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Closed: 20261017-11325800
 	- Acceptance signoff: Self-closed: every shared case passes on all 3 versions. The memory growth goes away with 1.2 and 2.0, in 2026101613005800.
 
+- Shared cases fail on a Windows clone with Git's default line ends
+	- ID: 2026102323122721
+	- Type: Bug
+	- Status: Done
+	- Needs external testing: No. Windows passed on 2026-10-24.
+	- Severity: Avg
+	- Opened: 2026-10-23 23:12
+	- Related IDs: 2026101512024174, 2026101513330014
+	- Steps to reproduce [Bug]:
+		- On Windows, with Git for Windows' `core.autocrlf=true` from its system gitconfig, clone the repo and run `cargo test --all-features` in `source/rust`.
+	- Incorrect behavior [Bug]:
+		- All 59 shared cases fail in Rust, and most in Python, since each case's `doc.shcl` and ops are checked out with CRLF.
+	- Expected behavior [Bug]:
+		- The cases pass on a default clone, as they do with `core.autocrlf` off.
+	- Reproduced [Bug]: 2026-10-23, on vm925w. 2026-10-24 on Linux too, from a clone with `core.autocrlf=true`: Rust failed 59 of 59 cases, and Python most of them.
+	- Possible cause [Bug]: the repo has no `.gitattributes`, so test data that must stay LF, such as `tests/cases/`, gets the clone's line ends. Case 027 has CRLF on purpose and would need its own rule.
+	- Actual cause [Bug]:
+		- With no `.gitattributes`, `core.autocrlf=true` checks out every text file with CRLF. The cases, the sha256 check of the 2.0 copy `_shclw_shcl2.py`, and gofmt's check all want the bytes as committed.
+	- Actual fix [Bug]: `.gitattributes` checks out every text file as LF, and leaves `tests/cases/` exactly as committed, so the 4 CRLF case files in 027 and 051 keep their CRLF.
+	- Progress log:
+		- 2026-10-24: Verified on Linux from clones with `core.autocrlf=true`. Without the fix Rust failed 59 of 59 cases, Python's cases failed, and gofmt listed 14 files. With it Rust, Python's cases and tests, and Go passed, gofmt listed none, and the CRLF case files stayed CRLF. Also `cicd.bash --ci --quick -y`.
+		- Swept: the readers of `tests/cases/` in all 4 languages go through the one rule. Outside the cases, the 2.0 copy's sha256, the bash scripts, the pre-push hook and the Makefile want LF too, which the default rule gives. No other tracked file has CRLF.
+		- 2026-10-24: Verified on vm925w, Windows 11, from a clone of `round-1024` at `b9a392c` with `core.autocrlf=true`: every file outside `tests/cases/` checked out LF, and the Rust, Python and C shared cases passed, except 058's `mode` lines, which print 0666 there as expected.
+	- Decisions:
+		- LF for every text file, not only the cases, since gofmt, bash and the 2.0 copy's sha256 need it too. A Windows editor set to CRLF still gets LF.
+	- Commit: 88e56c1
+	- Test case: vGSLJ, `cicd/eol-test.bash`, in the tests stage. It checks out every tracked file with `core.autocrlf=true` and compares each to what's committed. It failed on 269 files without `.gitattributes`, and passes with it.
+	- Acceptance signoff: Self-closed: its test failed before the fix and passes after, the full run passed, and a default Windows clone passes its cases.
+	- Closed: 2026-10-24
+
+- C doesn't build with mingw-w64 at the Makefile's warnings
+	- ID: 2026102323122737
+	- Type: Bug
+	- Status: Done
+	- Needs external testing: No. Windows passed on 2026-10-24.
+	- Severity: Avg
+	- Opened: 2026-10-23 23:12
+	- Related IDs: 2026101512024174
+	- Steps to reproduce [Bug]:
+		- Compile `shclw.c` or `run.c` with mingw-w64 gcc 16 and `-Wconversion -Werror`, as `source/c/Makefile` does.
+	- Incorrect behavior [Bug]:
+		- `shclw.c:335` and `run.c:127` fail on "conversion from 'double' to 'float' may change value" at `signbit(f)`.
+	- Expected behavior [Bug]:
+		- It builds clean, as with gcc on Linux.
+	- Reproduced [Bug]: 2026-10-23, on vm925w, with `C:\ProgramData\mingw64`.
+	- Possible cause [Bug]: mingw's `signbit` macro has a float branch that converts its argument, even for a double. Without `-Werror` it builds, and the shared cases pass.
+	- Actual cause [Bug]:
+		- mingw-w64's `signbit` passes its argument uncast to each branch, so a double meets `__signbitf`. gcc checks the branch it doesn't take too. Upstream added the casts to `isnan` and `fpclassify`, not `signbit`. mingw-w64 12's headers have it in `isnan` and `isfinite` too.
+	- Progress log:
+		- 2026-10-24: Reproduced on Linux with mingw-w64 gcc 16.2 and 14.0.0 headers in the C container, at exactly `shclw.c:335` and `run.c:127`. gcc 14 with 12.0.0 headers fails 8 sites, `isfinite` and `isnan` too.
+		- Verified: the `mingw` target fails before the fix and passes after, on both. A mingw build of the driver at `-Werror` passed 58 of 59 shared cases under wine, 058 differing as on Windows. Also the container lint, the sanitized C tests, and `cicd.bash --ci --quick -y`.
+		- Swept: every `signbit`, `isnan`, `isinf` and `isfinite` in `source/c` goes through `shclw_adapter.h`, `api_test.c:526` included. Go, Rust and Python don't have the macro. shcl.h's own `signbit` builds without the warnings.
+		- Upstream draft in `private/claude_simple/upstream/2026102323122737/`.
+		- 2026-10-24: Verified on vm925w with `C:\ProgramData\mingw64`, at `b9a392c`: the library, the driver and `api_test.c` compiled clean at the Makefile's warnings with `-Werror`. The C shared cases passed, except 058's `mode` lines, as expected.
+	- Decisions:
+		- On mingw only, `shclw_adapter.h` maps the 4 to gcc's builtins, as glibc does, so the call sites stay plain C. Not for C++, where `<cmath>` replaces them.
+	- Actual fix [Bug]: the builtins on mingw, and a `mingw` Makefile target that the container's lint and quick modes run, with mingw-w64 pinned in the C image.
+	- Commit: 3698622
+	- Test case: vGSU9, `make mingw`, in the container's lint and quick modes. Fails on HEAD's header, passes with the fix.
+	- Acceptance signoff: Self-closed: its test failed before the fix and passes after, and Windows builds clean.
+	- Closed: 2026-10-24
+
 - `make analyze` passes on a clang analyzer finding
 	- ID: 2026102322354803
 	- Type: Bug
@@ -2124,6 +2099,69 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Progress log:
 		- 20261015: public, with secret scanning on. A plain `go get` works with no settings.
 	- Closed: 2026-10-15
+
+- Python test reads a file in the locale's encoding
+	- ID: 2026102323122726
+	- Type: Bug
+	- Status: Done
+	- Needs external testing: No. Windows passed on 2026-10-24.
+	- Severity: Low
+	- Opened: 2026-10-23 23:12
+	- Steps to reproduce [Bug]:
+		- Run the Python unit tests on Windows, without `PYTHONUTF8=1`.
+	- Incorrect behavior [Bug]:
+		- `test_upgrade_on_write` fails with a `UnicodeDecodeError` from cp1252, at `test_shclw.py:135`.
+	- Expected behavior [Bug]:
+		- It passes, as it does in UTF-8 mode.
+	- Reproduced [Bug]: 2026-10-23, on vm925w with Python 3.14. 2026-10-24 on Linux too, in the C locale with UTF-8 mode off.
+	- Possible cause [Bug]: `read_text()` with no encoding, at lines 135, 146 and 186. The written file is UTF-8.
+	- Actual cause [Bug]:
+		- The tests read and wrote with `read_text` and `write_text` and no encoding, so they got the locale's. Text mode also turns LF into CRLF on a Windows write and back on read, so a check could miss a CRLF the library wrote. The library itself reads and writes bytes.
+	- Actual fix [Bug]: The tests compare a file's bytes, and say UTF-8 where they write text. cicd's tests stage runs the Python tests and shared cases with `EncodingWarning` as an error, so a text read or write with no encoding fails on Linux too. `fuzz.py` says UTF-8, and writes its docs and scripts with no newline change.
+	- Progress log:
+		- 2026-10-24: In the C locale with UTF-8 mode off, `test_upgrade_on_write` failed with a `UnicodeDecodeError` before the fix and passes after.
+		- Verified: with `EncodingWarning` as an error, 8 of 14 tests failed before and all 14 pass after, and the 59 Python shared cases pass. Also ruff and `cicd.bash --ci --quick -y`.
+		- Swept: every `read_text`, `write_text`, `open` and `text=True` in the repo's Python. `shclw.py` and `shclw_drive.py` already use bytes, and `c_cases.py` and `shcl_known.py` already say UTF-8. `fuzz.py` had 6 such calls, now fixed. Go, Rust and C have no locale encoding.
+		- 2026-10-24: Verified on vm925w with Python 3.14 at `b9a392c`: all the unit tests passed without UTF-8 mode and with it.
+	- Decisions:
+		- Byte compares rather than `encoding="utf-8"` on the reads, so a CRLF the library wrote on Windows fails the test.
+		- `EncodingWarning` set through the environment, so the driver and the tests' child processes get it too. ruff's PLW1514 is preview only and found 4 of the 7 test calls, so it stays off.
+	- Commit: 94bf156
+	- Test case: vGTH7, the Python tests and shared cases in cicd's tests stage with `EncodingWarning` as an error. Fails on the old tests, passes now.
+	- Acceptance signoff: Self-closed: its test failed before the fix and passes after, and the tests pass on Windows without UTF-8 mode.
+	- Closed: 2026-10-24
+
+- C test tools don't run on Windows
+	- ID: 2026102323122732
+	- Type: Bug
+	- Status: Done
+	- Needs external testing: No. Windows passed on 2026-10-24.
+	- Severity: Low
+	- Opened: 2026-10-23 23:12
+	- Related IDs: 2026101512024174, 2026101513330015
+	- Steps to reproduce [Bug]:
+		- Build the C driver and API tests with mingw-w64 on Windows, and run `cicd/c_cases.py` with the driver.
+	- Incorrect behavior [Bug]:
+		- `c_cases.py` compares no op, since the driver's stdout is in text mode and every line ends in CRLF.
+		- `tests/api_test.c` doesn't compile, since it includes `sys/wait.h` for the race test.
+	- Expected behavior [Bug]:
+		- The shared cases and the API tests run on Windows, so the C paths there have tests.
+	- Reproduced [Bug]: 2026-10-23, on vm925w. With CRLF turned back to LF in front of the driver, 58 of 59 cases passed, 058 differing as expected. 2026-10-24 with a mingw-w64 build under wine too.
+	- Actual cause [Bug]:
+		- The driver read its script and wrote its output in text mode, so Windows wrote CRLF and read a CRLF script as LF. The Go, Rust and Python drivers use bytes.
+		- `api_test.c` used `fork`, `waitpid`, `mkdtemp` and a 2-argument `mkdir`, and checked Unix modes. Its NUL test also saved to `nul.shcl`, a device name on Windows.
+	- Actual fix [Bug]: The driver puts stdin and stdout in binary mode on Windows. There the API tests run the other side of each race in a thread, skip the mode checks as the other languages do, and make the scratch folder with `_mktemp_s`. The NUL test saves to `nul0.shcl`. `make mingw` compiles `api_test.c` too.
+	- Progress log:
+		- 2026-10-24: The old driver compared no op on 3 cases under wine.
+		- Verified: under wine, the fixed driver passed 58 of 59 shared cases with 678 ops compared, 058 differing as on Windows, and the API tests passed. A create that replaces the file failed the create race, through threads under wine and through `fork` on Linux. `make mingw` fails on the old `api_test.c` and passes now. Also the API tests plain, sanitized and as C++ on Linux, the C container lint, and `cicd.bash --ci --quick -y`.
+		- Swept: the Go, Rust and Python drivers already write bytes, and no other C program reads stdin or writes stdout. No other test names a Windows device file.
+		- 2026-10-24: Verified on vm925w at `b9a392c`: the API tests passed, and with no LF stand-in the driver compared 723 ops and passed 60 cases whole, the same as with it. Only 058's `mode` lines differed, as expected. On a FAT32 volume the API tests and cases gave the same.
+	- Decisions:
+		- Threads on Windows rather than starting the test program again, since there's no `fork`. Python's race test uses threads too, and C's temp names already differ between threads.
+	- Commit: 94bf156
+	- Test case: vGSU9, `make mingw`, now with `api_test.c`. The Windows runs are `win-tests.ps1` on vm925w.
+	- Acceptance signoff: Self-closed: its test failed before the fix and passes after, and the C tests run on Windows.
+	- Closed: 2026-10-24
 
 - Two cicd runs started in the same second share one run log
 	- ID: 2026102409544336
