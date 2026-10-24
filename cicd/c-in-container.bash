@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # shellcheck disable=1091
+# shellcheck disable=2016  ## jq's $vars sit in single quotes.
 
 set -Eeuo pipefail
 
@@ -42,6 +43,39 @@ make_c(){
 
 case "${mode}" in
 	lint)
+		## Test vFKcU: the analyze-shcl rules must see a double free planted in a stand-in shcl.h.
+		probe_dir="/work/shcl-analyze-probe"
+		mkdir -p "${probe_dir}/inc"
+		cat > "${probe_dir}/inc/shcl.h" <<'EOF'
+#include <stdlib.h>
+void shcl_probe_use(int *p);
+#ifdef SHCL_IMPLEMENTATION
+void shcl_probe(void) { int *p = malloc(sizeof *p); if (!p) return; shcl_probe_use(p); free(p); free(p); }
+#endif
+EOF
+		make_c -j "${jobs}" analyze-shcl-report SHCL_DIR="${probe_dir}/inc" SHCL2_DIR="${probe_dir}/inc" SHCL_REPORT="${probe_dir}/out" >/dev/null
+		## By check name at the planted line. clang 22 reworded clang 19's "Attempt to free released memory".
+		for log in shcl3.gcc shcl3.clang shcl2.gcc shcl2.clang; do
+			grep -qE '/shcl\.h:4:[0-9]+: warning: .*\[(-Wanalyzer-double-free|unix\.Malloc)\]' "${probe_dir}/out/${log}.txt" || { echo "analyze-shcl missed the planted double free (${log})" >&2; exit 1; }
+		done
+		## Test vGAuM: the known list must fail on the planted finding, pass once it's listed, and fail once it's gone.
+		python3 "${here}/shcl_known.py" list gcc "${probe_dir}/out/shcl3.gcc.txt" > "${probe_dir}/known.txt"
+		python3 "${here}/shcl_known.py" list clang "${probe_dir}/out/shcl3.clang.txt" >> "${probe_dir}/known.txt"
+		make_c analyze-shcl SHCL_DIR="${probe_dir}/inc" SHCL2_DIR="${probe_dir}/inc" SHCL_REPORT="${probe_dir}/out" SHCL_KNOWN="${probe_dir}/known.txt" SHCL2_KNOWN="${probe_dir}/known.txt" >/dev/null
+		: > "${probe_dir}/none.txt"
+		if make_c analyze-shcl SHCL_DIR="${probe_dir}/inc" SHCL2_DIR="${probe_dir}/inc" SHCL_REPORT="${probe_dir}/out" SHCL_KNOWN="${probe_dir}/none.txt" SHCL2_KNOWN="${probe_dir}/known.txt" >/dev/null 2>&1; then echo "analyze-shcl passed a finding not in its list" >&2; exit 1; fi
+		printf 'clang\tshcl.h:99:1\tcore.NullDereference\n' >> "${probe_dir}/known.txt"
+		if make_c analyze-shcl SHCL_DIR="${probe_dir}/inc" SHCL2_DIR="${probe_dir}/inc" SHCL_REPORT="${probe_dir}/out" SHCL_KNOWN="${probe_dir}/known.txt" SHCL2_KNOWN="${probe_dir}/known.txt" >/dev/null 2>&1; then echo "analyze-shcl passed a listed finding that's gone" >&2; exit 1; fi
+		## Test vGBqv: make analyze's gcc pass must see a leak that -O1 optimizes away.
+		cat > "${probe_dir}/leak.c" <<'EOF'
+#include <stdlib.h>
+#include <string.h>
+int shclw_probe_leak(int flag);
+int shclw_probe_leak(int flag) { char *p = malloc(64); if (!p) return -1; if (flag) return 1; memset(p, 0, 64); free(p); return 0; }
+EOF
+		if make_c analyze ANALYZE_C="${probe_dir}/leak.c" >"${probe_dir}/leak.out" 2>&1; then echo "make analyze passed a planted leak" >&2; exit 1; fi
+		grep -q 'analyzer-malloc-leak' "${probe_dir}/leak.out" || { cat "${probe_dir}/leak.out" >&2; echo "gcc's analyzer missed the planted leak" >&2; exit 1; }
+		make_c -j "${jobs}" analyze-shcl SHCL_REPORT=/artifacts/c-analyze-shcl
 		make_c lint strict analyze format-check
 		;;
 	test)
@@ -122,14 +156,47 @@ EOF
 		chmod +x /work/codeql-build.bash
 		bash -n /work/codeql-build.bash
 		bash /work/codeql-build.bash validate
-		"${codeql}" database create --language=cpp --source-root="${root}/source/c" \
+		## The repo root, not source/c, so shcl.h under cicd/cache is inside it. CodeQL reports only on files there.
+		"${codeql}" database create --language=cpp --source-root="${root}" \
 			--command="bash /work/codeql-build.bash capture" \
 			/work/codeql-db
 		"${codeql}" database analyze /work/codeql-db "${queries}" \
 			/work/codeql-queries/cpp/ql/src/AlertSuppression.ql \
 			--format=sarif-latest --output="${artifact_dir}/codeql.sarif"
 		fi
-		jq -e '[.runs[].results[]? | select(([.suppressions[]?.kind] | index("inSource")) == null)] | length == 0' "${artifact_dir}/codeql.sarif" >/dev/null || { echo "CodeQL findings; see ${artifact_dir}/codeql.sarif" >&2; exit 1; }
+		## Findings in shcl itself must match each pin's list in source/c/shcl-known/ (backlog 2026102321270148).
+		openQuery='[.runs[].results[]? | select(([.suppressions[]?.kind] | index("inSource")) == null) | select((.locations[0].physicalLocation.artifactLocation.uri // "" | startswith("cicd/cache/")) == $shcl)] | length'
+		python3 "${here}/shcl_known.py" codeql "${root}/source/c/shcl-known" "${artifact_dir}/codeql.sarif" "${SHCL3_REV}" "${SHCL2_REV}" || { echo "CodeQL findings in shcl differ from the known lists; see ${artifact_dir}/codeql.sarif" >&2; exit 1; }
+		[[ "$(jq --argjson shcl false "${openQuery}" "${artifact_dir}/codeql.sarif")" == 0 ]] || { echo "CodeQL findings; see ${artifact_dir}/codeql.sarif" >&2; exit 1; }
+		## Test vGBSI: a null dereference in a stand-in shcl.h, reached only through a call from
+		## our side, must show in the CTU pass, and the check must hold it to the list.
+		probe_dir="/work/ctu-probe"
+		probe_inc="${probe_dir}/cicd/cache/shcl-c/probe"
+		mkdir -p "${probe_inc}" "${probe_dir}/known" "${probe_dir}/ast"
+		cat > "${probe_inc}/shcl.h" <<'EOF'
+#ifndef SHCL_H
+#define SHCL_H
+int shcl_probe_get(const int *p);
+#ifdef SHCL_IMPLEMENTATION
+int shcl_probe_get(const int *p) { return *p; }
+#endif
+#endif
+EOF
+		printf '#include "shcl.h"\nint ours_probe(void) { return shcl_probe_get(0); }\n' > "${probe_dir}/ours.c"
+		clang-22 -std=c11 -I"${probe_inc}" -emit-ast "${probe_dir}/ours.c" -o "${probe_dir}/ast/ours.ast"
+		clang-22 -x c -std=c11 -DSHCL_IMPLEMENTATION -emit-ast "${probe_inc}/shcl.h" -o "${probe_dir}/ast/shcl.ast"
+		{ clang-extdef-mapping-22 "${probe_dir}/ast/ours.ast"; clang-extdef-mapping-22 "${probe_dir}/ast/shcl.ast"; } > "${probe_dir}/ast/externalDefMap.txt"
+		clang-22 --analyze -std=c11 -I"${probe_inc}" \
+			-Xclang -analyzer-config -Xclang experimental-enable-naive-ctu-analysis=true \
+			-Xclang -analyzer-config -Xclang "ctu-dir=${probe_dir}/ast" -Xclang -analyzer-output=text \
+			-o /dev/null "${probe_dir}/ours.c" >"${probe_dir}/ours.log" 2>&1
+		grep -qE '/shcl\.h:5:[0-9]+: warning: .*\[core\.NullDereference\]' "${probe_dir}/ours.log" || { echo "CTU pass didn't follow the planted call into shcl.h" >&2; exit 1; }
+		: > "${probe_dir}/known/probe.txt"
+		if python3 "${here}/shcl_known.py" ctu "${probe_dir}/known" --rev probe "${probe_dir}/ours.log" >/dev/null 2>&1; then echo "CTU check passed a shcl finding not in its list" >&2; exit 1; fi
+		python3 "${here}/shcl_known.py" list ctu "${probe_dir}/ours.log" --rev probe > "${probe_dir}/known/probe.txt"
+		python3 "${here}/shcl_known.py" ctu "${probe_dir}/known" --rev probe "${probe_dir}/ours.log" >/dev/null
+		printf '%s/ours.c:2:1: warning: planted [core.NullDereference]\n' "${probe_dir}" >> "${probe_dir}/ours.log"
+		if python3 "${here}/shcl_known.py" ctu "${probe_dir}/known" --rev probe "${probe_dir}/ours.log" >/dev/null 2>&1; then echo "CTU check passed a finding of ours" >&2; exit 1; fi
 		ctu_dir="/work/ctu/v3"
 		mkdir -p "${ctu_dir}/ast"
 		: > "${ctu_dir}/externalDefMap.txt"
@@ -141,6 +208,14 @@ EOF
 				-emit-ast "${root}/source/c/${src}" -o "${ast}"
 			clang-extdef-mapping-22 "${ast}" >> "${ctu_dir}/externalDefMap.txt"
 		done
+		## shcl too, so the pass follows our calls into it. The mapper takes only the main
+		## file's definitions, so each shcl.h is the main file, built as its impl file builds it.
+		clang-22 -x c -std=c11 -O1 -g -DSHCL_IMPLEMENTATION \
+			-emit-ast "${shcl3Dir}/shcl.h" -o "${ctu_dir}/ast/shcl3.ast"
+		clang-extdef-mapping-22 "${ctu_dir}/ast/shcl3.ast" >> "${ctu_dir}/externalDefMap.txt"
+		clang-22 -x c -std=c11 -O1 -g -I"${root}/source/c" -include shclw3_v2_names.h -DSHCL_IMPLEMENTATION \
+			-emit-ast "${shcl2Dir}/shcl.h" -o "${ctu_dir}/ast/shcl2.ast"
+		clang-extdef-mapping-22 "${ctu_dir}/ast/shcl2.ast" >> "${ctu_dir}/externalDefMap.txt"
 		for src in "${ctu_sources[@]}"; do
 			inc="${shcl3Dir}"; [[ "${src}" == shclw3_v2.c ]] && inc="${shcl2Dir}"
 			clang-22 --analyze -std=c11 -O1 -g -Wall -Wextra -Wpedantic -Wshadow -Wconversion -Werror \
@@ -149,6 +224,11 @@ EOF
 				-Xclang -analyzer-config -Xclang "ctu-dir=${ctu_dir}" -Xclang -analyzer-output=text \
 				-o /dev/null "${root}/source/c/${src}" >"${artifact_dir}/ctu-v3-${src}.log" 2>&1
 		done
+		## Ours fail outright. Those inside shcl must match each pin's list, as CodeQL's do.
+		ctu_logs=()
+		for src in "${ctu_sources[@]}"; do ctu_logs+=("${artifact_dir}/ctu-v3-${src}.log"); done
+		python3 "${here}/shcl_known.py" ctu "${root}/source/c/shcl-known" --rev "${SHCL3_REV}" --rev "${SHCL2_REV}" "${ctu_logs[@]}" \
+			|| { echo "CTU findings; see ${artifact_dir}/ctu-v3-*.log" >&2; exit 1; }
 		probe_dir="/work/c-leak-probes"
 		mkdir -p "${probe_dir}"
 		cat > "${probe_dir}/leak.c" <<'EOF'

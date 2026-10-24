@@ -2,6 +2,7 @@
 2
 > upgrade
 from 2 changed true unsure 0
+lost [] rewritten [1 6 8]
 | p: [a, b]
 | 
 | ##

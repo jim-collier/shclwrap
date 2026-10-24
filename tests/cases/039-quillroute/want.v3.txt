@@ -8,6 +8,7 @@ true
 Good	4	C:\\new
 > upgrade	2
 from 2 changed true unsure 0
+lost [] rewritten [4 6 7 8 9 10 11 12]
 | # mine
 | account: w
 | \tname: Ada

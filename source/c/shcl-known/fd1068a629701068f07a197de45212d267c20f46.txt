@@ -1,0 +1,21 @@
+## Analyzer and CodeQL findings in shcl.h 2.0 (v2.0.0) at this pin. A frozen
+## tag, so each is accepted as it stands. Tool, place, check, then why after
+## the '#'. Backlog 2026102321270143.
+
+clang	shcl.h:2217:14	core.NullDereference	# false: a map entry is put only after the element it indexes is pushed; 3.0's 6007
+clang	shcl.h:2571:17	core.NullDereference	# false: same, seen and arr; 3.0's 6754
+clang	shcl.h:3077:13	core.NullDereference	# false: same, group_of and order; 3.0's 8328
+clang	shcl.h:3583:17	deadcode.DeadStores	# harmless: prec is clamped and never read after
+clang	shcl.h:4390:14	core.NullDereference	# false: same, sib_of and sib_chain; 3.0's 12284
+clang	shcl.h:4404:14	core.NullDereference	# false: same, legal and legal_chains; 3.0's 12298
+clang	shcl.h:4433:14	core.NullDereference	# false: same, legal and legal_chains; 3.0's 12342
+clang	shcl.h:4441:14	core.NullDereference	# false: same, sib_of and sib_chain; 3.0's 12350
+
+codeql	shcl.h:2005	cpp/long-switch	# style
+codeql	shcl.h:3064	cpp/complex-block	# style
+codeql	shcl.h:3706	cpp/large-parameter	# style
+codeql	shcl.h:1119	cpp/large-parameter	# style
+codeql	shcl.h:721	cpp/large-parameter	# style
+codeql	shcl.h:3582	cpp/equality-on-floats	# on purpose: the shortest round-trip test
+codeql	shcl.h:4166	cpp/equality-on-floats	# on purpose: exact match against the allowed values
+codeql	shcl.h:-	cpp/missing-header-guard	# false: guarded by SHCL_H

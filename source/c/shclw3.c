@@ -1297,19 +1297,58 @@ static void check_old(void *ctx, const char *path, size_t plen, size_t line, siz
 	if (c->differs || c->is.status != SHCL_GOOD) {
 		return;
 	}
-	if (c->is.n != n || c->is.values[i].n != vlen || (vlen && memcmp(c->is.values[i].p, v, vlen) != 0)) {
+	// The walk keeps i < n, but clang's CTU pass starts here without it.
+	if (c->is.n != n || i >= n || c->is.values[i].n != vlen || (vlen && memcmp(c->is.values[i].p, v, vlen) != 0)) {
 		c->differs = true;
 		keep_old(c->bad, line, "W002", not_as_read, sizeof not_as_read - 1);
+	}
+}
+
+// The lines with a value 2.0 read that the upgraded text doesn't have.
+typedef struct {
+	shcl_doc *now;
+	size_t *v;
+	size_t n, cap;
+	bool oom;
+} lost_list;
+
+static void keep_lost(lost_list *l, size_t line) {
+	if (l->oom || !line) {
+		return;
+	}
+	if (l->n == l->cap) {
+		size_t cap = l->cap ? l->cap * 2 : 8;
+		size_t *grown = cap < SIZE_MAX / sizeof(size_t) ? (size_t *)realloc(l->v, cap * sizeof(size_t)) : NULL;
+		if (!grown) {
+			l->oom = true;
+			return;
+		}
+		l->v = grown;
+		l->cap = cap;
+	}
+	l->v[l->n++] = line;
+}
+
+static void check_lost(void *ctx, const char *path, size_t plen, const size_t *lines, size_t n, int reads) {
+	lost_list *l = (lost_list *)ctx;
+	size_t has = shcl_count(l->now, path, plen);
+	// instances past the ones 3.0 still has are gone
+	for (size_t i = has < n ? has : n; i < n; i++) {
+		keep_lost(l, lines[i]);
+	}
+	if (reads && has == 1 && shcl_read_string_array(l->now, path, plen).status != SHCL_GOOD &&
+	    shcl_read_raw(l->now, path, plen).status != SHCL_GOOD) {
+		keep_lost(l, lines[0]);
 	}
 }
 
 // Go's carryReads: makes up, the upgraded text, read each value the way shcl
 // 2.0 read it in old, since shcl's migrate leaves a 2.x backslash escape as
 // typed and 3.0 reads it as text (2026101910455900). What can't be carried
-// goes in bad. *fixed is the new text, malloc'd, or NULL when nothing changed
-// or something went in bad.
+// goes in bad, and the lines it lost in lost, sorted. *fixed is the new text,
+// malloc'd, or NULL when nothing changed or something went in bad.
 static shclw_kind carry_reads(shclw_i_v2_doc *old, const char *up, size_t up_len, bool names_as_typed, old_list *bad,
-                              char **fixed, size_t *fixed_len) {
+                              lost_list *lost, char **fixed, size_t *fixed_len) {
 	static const char bad_name[] = "shcl 2.0 read this name with its backslash escapes resolved, and 3.0 reads it "
 								   "as typed; rename it and upgrade again";
 	static const char cant_hold[] = "the upgraded file can't hold this value as shcl 2.0 read it";
@@ -1402,6 +1441,19 @@ static shclw_kind carry_reads(shclw_i_v2_doc *old, const char *up, size_t up_len
 	if (!oom) {
 		carry_check c = {now, bad, {NULL, 0, SHCL_NOT_FOUND, NULL}, false};
 		shclw_i_v2_reads(old, check_old, &c);
+		lost->now = now;
+		shclw_i_v2_paths(old, check_lost, lost);
+		oom = lost->oom;
+		size_t kept = 0;
+		if (lost->n) {
+			qsort(lost->v, lost->n, sizeof(size_t), by_size);
+		}
+		for (size_t i = 0; i < lost->n; i++) {
+			if (i == 0 || lost->v[i] != lost->v[i - 1]) {
+				lost->v[kept++] = lost->v[i];
+			}
+		}
+		lost->n = kept;
 	}
 	for (size_t k = 0; k < n_sets; k++) {
 		free_carried(&sets[k]);
@@ -1443,6 +1495,19 @@ static shclw_upgraded *upgraded_ends(const char *text, size_t len, const char *u
 		r = shclw_i_upgraded(text, len, u->format, false, 0, NULL, NULL, 0);
 	}
 	free(t);
+	return r;
+}
+
+// u with its lost and rewritten lines, against text, the original. u is
+// freed. NULL only when memory ran out.
+static shclw_upgraded *with_lines(shclw_upgraded *u, const char *text, size_t len, const lost_list *lost) {
+	size_t *rewritten = NULL, n = 0;
+	shclw_upgraded *r = NULL;
+	if (shclw_i_rewritten_lines(text, len, u->text.p, u->text.n, lost->v, lost->n, &rewritten, &n)) {
+		r = shclw_i_upgraded_lines(u, NULL, lost->v, lost->n, rewritten, n);
+	}
+	free(rewritten);
+	free(u);
 	return r;
 }
 
@@ -1507,8 +1572,9 @@ static shclw_kind upgrade(const char *text, size_t len, int64_t from, const char
 		bool checked = false;
 		char *fixed = NULL;
 		size_t fixed_len = 0;
+		lost_list lost = {NULL, NULL, 0, 0, false};
 		if (!l.oom && !l.n && !u.ambiguous) {
-			k = carry_reads(old, u.text, u.len, named == 1, &l, &fixed, &fixed_len);
+			k = carry_reads(old, u.text, u.len, named == 1, &l, &lost, &fixed, &fixed_len);
 			checked = true;
 		}
 		shclw_i_v2_free(old);
@@ -1549,6 +1615,10 @@ static shclw_kind upgrade(const char *text, size_t len, int64_t from, const char
 			                     : shclw_i_upgraded(text, len, u.format, false, 0, NULL, NULL, 0);
 			free(t);
 		}
+		if (checked && k == SHCLW_OK && *out) {
+			*out = with_lines(*out, text, len, &lost);
+		}
+		free(lost.v);
 		free(fixed);
 		free_old(&l);
 	}
@@ -1613,7 +1683,7 @@ shclw_kind shclw_upgrade_file(const char *path, int64_t from, shclw_upgraded **o
 	if (k != SHCLW_OK) {
 		k = none(k, u->from, NULL, out, err);
 	} else {
-		*out = shclw_i_upgraded(u->text.p, u->text.n, u->from, true, u->unsure, backup, NULL, 0);
+		*out = shclw_i_upgraded_lines(u, backup, u->lost, u->n_lost, u->rewritten, u->n_rewritten);
 		k = *out ? k : shclw_i_fail(err, SHCLW_ERR_NO_MEMORY, path, NULL, 0);
 	}
 	free(backup);

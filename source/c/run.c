@@ -22,6 +22,8 @@
 #include <io.h>
 #else
 #include <dirent.h>
+#include <fcntl.h>
+#include <unistd.h>
 #endif
 
 typedef struct {
@@ -675,7 +677,16 @@ static void scribble(runner *r, const fields *f) {
 	}
 	const char *text = arg(f, 2);
 	size_t n = strlen(text);
+#ifdef _WIN32
 	FILE *out = fopen(path, "wb");
+#else
+	// 0644 as Go's runner has it, not fopen's 0666.
+	int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644);
+	FILE *out = fd < 0 ? NULL : fdopen(fd, "wb");
+	if (fd >= 0 && !out) {
+		(void)close(fd);
+	}
+#endif
 	bool ok = out && fwrite(text, 1, n, out) == n;
 	ok = (out && fclose(out) == 0) && ok;
 	free(path);
@@ -975,6 +986,18 @@ static void check(runner *r, const fields *f) {
 	shclw_free(schema);
 }
 
+// [3 4], as Go prints a slice
+static void line_list(buf *b, const size_t *v, size_t n) {
+	putc_(b, '[');
+	for (size_t i = 0; i < n; i++) {
+		if (i) {
+			putc_(b, ' ');
+		}
+		put_size(b, v[i]);
+	}
+	putc_(b, ']');
+}
+
 static void upgrade(runner *r, const char *from) {
 	int64_t n = 0;
 	if (*from && !parse_int(from, &n)) {
@@ -994,6 +1017,11 @@ static void upgrade(runner *r, const char *from) {
 		put_i64(&r->out, u->from);
 		puts_(&r->out, u->changed ? " changed true unsure " : " changed false unsure ");
 		put_size(&r->out, u->unsure);
+		nl(&r->out);
+		puts_(&r->out, "lost ");
+		line_list(&r->out, u->lost, u->n_lost);
+		puts_(&r->out, " rewritten ");
+		line_list(&r->out, u->rewritten, u->n_rewritten);
 		nl(&r->out);
 		block(r, u->text.p, u->text.n);
 	}

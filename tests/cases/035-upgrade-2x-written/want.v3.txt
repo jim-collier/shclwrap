@@ -9,6 +9,7 @@
 26	error	E026	a comma then a space or the end in a bare value; write an array in brackets, [a, b], or quote the text
 > upgrade
 from 2 changed true unsure 0
+lost [] rewritten [9 18 22 24 26]
 | # app settings
 | server:
 | \thost: example.org
@@ -48,6 +49,7 @@ from 2 changed true unsure 0
 | ##
 > upgrade	2
 from 2 changed true unsure 0
+lost [] rewritten [9 18 22 24 26]
 | # app settings
 | server:
 | \thost: example.org

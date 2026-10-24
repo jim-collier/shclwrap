@@ -6,6 +6,7 @@ doc.shcl
 ops.txt
 > upgrade	2
 from 2 changed true unsure 0
+lost [] rewritten [14 34 35 36 37 38 40 41 42 45 46 47 64 72 73 75 76 81 114 116 118 120 122 123 126 128 129 130 142 144 146 148 149 151 152 157 159 161 163 164 167 169 170 171 173 175 176 177 180 182 183 184 192 194 195 197 198 199 200 201 202 203 205 206 207 208 209 210 230 234]
 | code:  ## Application-level
 | \tbefore_open:  ## Function to run when app is loaded, but before showing any UI. Can cancel by returning false. Gets passed <name>, <path to tx log folder>.
 | \tafter_open:

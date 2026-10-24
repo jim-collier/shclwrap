@@ -25,168 +25,6 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 
 ## Issues
 
-- Updates to CICD script flags
-	- ID: 2026101816214270
-	- Type: Enhancement
-	- Status: Waiting on UAT
-	- Priority: High
-	- Opened: 2026-10-18
-	- Opened by: JC
-	- Requirements:
-		- `--ci`: Rename `--gate`.
-		- `--quick`:
-			- Should run whatever linting, validation, and testing steps are very quick.
-			- Cross-compile whatever is fast; e.g. maybe skip slow arm64.
-			- Skip anything requiring an external host.
-		- No flags, by default, should do everything.
-		- The other existing flags can stay.
-	- Notes:
-		- Pre-next-cut. Do next.
-		- There's no cross-compile in this project yet, so nothing to trim there. No stage uses an external test host either.
-		- `--quick` drops the remote sync, the C analyzers and sanitizers, the leak checks, and Go's fuzzer, and fuzzes Go against Rust for 10s. C still gets a gcc-15 pass and its plain API tests and shared cases on all 3 versions. It runs in about 50s.
-		- It doesn't fetch anything. If a pinned `shcl.h` isn't cached, C is skipped with a warning.
-		- No flags now runs the leak checks too. `--no-leakcheck` skips them, and `--leakcheck` adds them to `--ci` or `--quick`.
-	- Branch: ci-flags
-	- Test case: None. Each flag mix was checked by hand, plus `--quick` with a header missing from the cache.
-
-- shcl 4 adapters
-	- ID: 2026101512024163
-	- Type: Feature
-	- Status: Stalled
-	- Priority: High
-	- Opened: 2026-10-15
-	- Opened by: JC
-	- Prereq IDs: shcl 4 in each language. It's planned Rust first, then C, then Go and Python.
-	- Requirements:
-		- The same API, over shcl 4.
-	- Notes:
-		- 4 keeps every line as typed, so Text and Write get simpler. Its read-back check in setters can replace the wrapper's.
-	- Progress log:
-		- 20261015: shcl 4 isn't built in any language yet, only planned in its v4 doc. This waits on it.
-
-- Move the 3.0 pin to the first 3.0 beta
-	- ID: 2026101512024165
-	- Type: Task
-	- Status: Stalled
-	- Priority: Avg
-	- Opened: 2026-10-15
-	- Opened by: JC
-	- Requirements:
-		- Pin `v3.0.0-beta1` once it's tagged, in place of a dev commit.
-	- Notes:
-		- The tag is spelled with no dot, per shcl's own backlog.
-		- shcl's Go module path is still `.../v2`, and Go won't take a v3 tag on it. Go stays on a commit until that changes.
-		- Quillroute plans to have its release refuse a commit pin. The same check would fit here.
-
-- Builds clean up stale artifacts and side-effects
-	- ID: 2026101916500100
-	- Type: Enhancement
-	- Status: Waiting on a partial CICD run
-	- Needs local test suite run?: Yes. The leak mode passing under the container's init, such as `--quick --leakcheck`, once the CodeQL findings from 2026101513330009 and 2026101513330017 are fixed.
-	- Priority: High
-	- Opened: 2026-10-19
-	- Opened by: JC
-	- Requirements:
-		- Verify or ensure that builds clean up *stale* artifacts and side-effects after they're done: caches, container cruft, tmp files, etc.
-	- Notes:
-		- Pre-next-cut.
-	- Progress log:
-		- 2026-10-21: A run already removed its own scratch folder, and the C container is `--rm`. Left over were a cached `shcl.h` for a rev no pin names, and leak reports for shcl 1.2 and 2.0 from before the 3.0 floor.
-		- Also left: a 57 MB scratch folder in `/tmp` from 2026-10-17, written into by the C container when it still ran as root. It needs root to remove. The `--user` fix stops it happening again.
-		- Ctrl+C left the C container running, since bash as PID 1 ignores it. The container now runs under an init that passes it to the whole tree.
-		- Added: dropping cached headers no pin names, keeping the newest 10 fuzz failure sets, clearing the leak reports when a fresh leak run starts, and removing an older C image no container uses. `docker builder prune` runs only after a real rebuild. Every build gets a new image ID, even a fully cached one, so it compares layers.
-		- 2026-10-21: The full run at `15509b0` passed lint and the sanitized tests under the init, and the leak mode started under it and cleared the old leak reports. It stopped at CodeQL findings from 2 other items, so CTU and the heaptrack soak weren't reached. After it and a second run without the leak checks: no scratch folder, no container, one C image, only the 2 pinned headers, and only the fresh `codeql.sarif` in the leak reports.
-	- Decisions:
-		- Kept, since the next run reuses them: `cicd/cache/c-home` with CodeQL's compiled queries, the pinned headers, the C image, Go's and cargo's caches, and the rotated run logs.
-	- Verified: `--quick` passed twice with the changes, and left no scratch folder, no container, and one C image. The unpinned header was dropped and the 2 pinned kept. On a stand-in tree, 12 marked fuzz sets went to 10, and an unmarked set, an unpinned folder holding another file, and a non-rev folder were left. Ctrl+C stopped the container with the init, and not without it.
-	- Swept: `c-checks.bash` has the only `docker build` and `docker run`. `cicd.bash` is the only writer of `cicd/artifacts/fuzz` and `cicd/cache/shcl-c`, and `c-in-container.bash` of the leak reports.
-	- Branch: round-1021
-	- Test case: None. It cleans up host state, checked by the runs under Verified.
-
-- CICD `--leakcheck` and `--no-leakcheck`
-	- ID: 2026101916500101
-	- Type: Enhancement
-	- Status: Done
-	- Priority: High
-	- Opened: 2026-10-19
-	- Opened by: JC
-	- Related IDs: 2026101816214270
-	- Requirements:
-		- CICD should have both `--leakcheck` (e.g. useful to add back in for `--quick`), and `--no-leakcheck` (e.g. to exclude from default or with `--quiet`).
-	- Notes:
-		- Pre-next-cut.
-		- Both flags are already in the CICD flags item above. Check it against this before closing either.
-	- Progress log:
-		- 2026-10-21: Both flags were already in, from 2026101816214270, and match this. No flags runs the leak checks, `--no-leakcheck` drops them from any mix, `--quiet` included, and `--leakcheck` adds them to `--ci` or `--quick`. The later of the two wins.
-		- `--quick --leakcheck` now fetches a missing pinned header. It skipped C before, and the leak stage would then fail in the container. The leak checks need the network anyway.
-		- Added `--dry-run`, which shows the stages a mix of flags picks and stops.
-	- Verified: `cicd/flags-test.bash` passes on 14 flag mixes, and fails with either flag broken. `--quick --leakcheck` fetched a missing header, and `--quick` alone still skipped it.
-	- Branch: round-1021
-	- Test case: vFKCk, `cicd/flags-test.bash`, run in the tests stage.
-	- Acceptance signoff: Self-closed: the flags were in, and now have a regression test.
-	- Closed: 2026-10-21
-
-- shcl analyzer probe fails under the container's clang
-	- ID: 2026102113502809
-	- Type: Bug
-	- Status: Queued
-	- Severity: High
-	- Opened: 2026-10-21
-	- Related IDs: 2026101916500102
-	- Steps to reproduce [Bug]:
-		- Push branch `wip/round-1021-2026101916500102`, or run `cicd.bash --ci` on it.
-	- Incorrect behavior [Bug]:
-		- The lint stage stops with "analyze-shcl missed the planted double free (shcl3.clang)".
-	- Expected behavior [Bug]:
-		- clang flags the planted double free in the stand-in `shcl.h`, as it did with clang 19 on the host.
-	- Reproduced [Bug]: 2026-10-21, in the pre-push gate. The container has clang-22.
-	- Possible cause [Bug]: clang-22 handles the header flag or the probe differently. Not looked at yet.
-	- Branch: wip/round-1021-2026101916500102 (`eda48d5`). It also has the backlog edits for 2026101916500102 and the new item 2026102113393169, which aren't on the round branch yet.
-
-- Leak tests and all tests cover third-party and vendored code
-	- ID: 2026101916500102
-	- Type: Enhancement
-	- Status: Queued
-	- Priority: High
-	- Opened: 2026-10-19
-	- Opened by: JC
-	- Requirements:
-		- Make sure CICD leak tests, and all tests, include third-party and vendored code. But only code that gets run by end users.
-		- Anything wrong goes on the backlog for a fix.
-	- Notes:
-		- Pre-next-cut.
-		- This may only affect what's already written in the backlog, and/or done.
-	- Progress log:
-		- 2026-10-21: the sanitizers already build shcl's code, but gcc's and clang's analyzers skipped it as a system header, and CodeQL's root left it out. A fix adds `make analyze-shcl` with a planted-fault probe, and moves CodeQL's root up. It passed on the host but failed the gate in the container. See 2026102113502809.
-	- Branch: wip/round-1021-2026101916500102
-
-- Layered loading
-	- ID: 2026101512024156
-	- Type: Feature
-	- Status: Waiting on UAT
-	- Priority: Avg
-	- Opened: 2026-10-15
-	- Opened by: JC
-	- Related IDs: 2026101513330030, 2026102114101028
-	- Requirements:
-		- Defaults, then site, then user file, as one document.
-	- Notes:
-		- Cobblevale uses shcl's merge. Mossrealm does it by hand.
-		- Mossrealm's layers are defaults, then a system file, then the user file, then the command line.
-	- Progress log:
-		- 2026-10-21: `OpenLayers` in Go, Rust, and C, plus a `layers` op. Reads are the merge, edits and saves go to the last file layer, and `Diag` has a `Layer`. design.md has the API and the Decisions. README has a feature line.
-		- Verified: Go tests, vet; Rust tests, clippy pedantic; C API tests plain, sanitized, and as C++, clang-tidy, gcc-15 at C17, and the shared cases plain and sanitized; `cicd.bash --quick`.
-		- Swept: every edit and save call on the 3.0 adapter in all 3 languages goes to the edit layer, every C put through `put`, and every `Diag` literal has the new field.
-		- Left open in 2026102114101028: a read's line doesn't say which layer it's in, and `DropDeclared` loses `Layer`.
-	- Decisions:
-		- shcl's own merge, not one of the wrapper's. Cobblevale already uses it.
-		- Edits and saves go to the last file layer only. Text layers after it, like a command line, win reads and are never saved.
-		- A missing file is skipped. Any other error stops the load, as `Open` does.
-		- `Diag.Layer` is the layer's place in the list, from 1, not a name.
-	- Commit: 21cc72c
-	- Test case: shared case `053-layers`, in all 3 languages.
-	- Acceptance signoff: waits on JC, for the README line and the calls in Decisions.
-
 - Python wrapper
 	- ID: 2026101512024161
 	- Type: Feature
@@ -231,81 +69,167 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- Each project's other workarounds have their own items, with the project named in the item.
 		- 2026-10-21: waits on a go-ahead to edit the other repos, and which one goes first. Asked in the round's questions file.
 
-- clang-tidy refuses a cast in the upgrade line lists
-	- ID: 2026102114534365
-	- Type: Bug
-	- Status: Queued
-	- Severity: Avg
-	- Opened: 2026-10-21
-	- Related IDs: 2026101513330012, 2026101513330013
-	- Steps to reproduce [Bug]:
-		- Run `cicd.bash --ci` on branch `wip/round-1021-2026101513330012`.
-	- Incorrect behavior [Bug]:
-		- The C lint stage stops on `shclw.c:948`, "do not cast 'char *' to 'size_t *' through 'void *'" (bugprone-casting-through-void).
-	- Expected behavior [Bug]:
-		- clang-tidy passes, as it did before the line lists were added.
-	- Reproduced [Bug]: 2026-10-21, in the pre-push gate.
-	- Possible cause [Bug]: the lists sit inside the result's single memory block, and the code reaches them by a byte offset. The quick checks don't run clang-tidy.
-	- Branch: wip/round-1021-2026101513330012 (`0150af2`). It also has the design.md and backlog notes for both items.
-
-- Report blocks that shcl merged because they share a name
-	- ID: 2026101513330009
-	- Type: Feature
-	- Status: Queued
-	- Needs local test suite run?: Yes, a full run after the fix, for CodeQL, CTU, and the heaptrack soak.
-	- Priority: Avg
-	- Opened: 20261015-133300
+- Updates to CICD script flags
+	- ID: 2026101816214270
+	- Type: Enhancement
+	- Status: Waiting on UAT
+	- Priority: High
+	- Opened: 2026-10-18
 	- Opened by: JC
-	- Related IDs: 2026101513330018, 2026101513330004, 2026102115285934
 	- Requirements:
-		- List each merged block, with the lines of both copies.
-	- Note: Tallowbase, Cobblevale, and Radixmill all lost a second copy of a block without a word. shcl's H002 hint only fires when the 2 blocks are apart.
-	- Progress log:
-		- 2026-10-21: `Merged()` in all 4 languages, and a `merged` op. Each `Merge` has the kept copy's path and every copy's line, and a layer on a layered document.
-		- 2026-10-21: The full run at `15509b0` failed CodeQL on this: `cpp/suspicious-pointer-scaling` at `shclw.c:1400`, the `(char *)(lines + nl)` in `shclw_i_merges_of`'s packed result. The C analyzers and the sanitized tests passed, and a second run without the leak checks passed the 60 second fuzz.
-	- Decisions:
-		- A call beside `Diags`, not a field filled in at load, since it parses the text twice more.
-		- Every fold is listed, next to each other or apart, at every level of a block, and a key repeated with the same value too, as H002 counts them. A dotted line that only reopens a block isn't a copy.
-		- The wrapper finds a fold with a second parse where each folded line's name is made unique. shcl's parser would be the better place; 2026102115285934 asks for that.
-		- design.md has these under Loading and saving, Ops scripts, and Decisions.
-	- Verified: the new shared case passes in Go, Rust, C (plain and under ASan and UBSan), and Python. A 90 second fuzz of all 4 with the new ops found no difference. The C lint stage passes.
-	- Swept: Go `shclw3`, Rust `v3`, C `shclw3.c`, and Python each have `Merged`, held by the `Doc` interface, `ShclDoc`, and Go's `docMethods` list. All 4 ops runners and fuzz.py's op list have `merged`.
-	- Branch: round-1021
-	- Commit: 56aedbc
-	- Test case: tests/cases/054-merged-unused, and the fuzz op.
+		- `--ci`: Rename `--gate`.
+		- `--quick`:
+			- Should run whatever linting, validation, and testing steps are very quick.
+			- Cross-compile whatever is fast; e.g. maybe skip slow arm64.
+			- Skip anything requiring an external host.
+		- No flags, by default, should do everything.
+		- The other existing flags can stay.
+	- Notes:
+		- Pre-next-cut. Do next.
+		- There's no cross-compile in this project yet, so nothing to trim there. No stage uses an external test host either.
+		- `--quick` drops the remote sync, the C analyzers and sanitizers, the leak checks, and Go's fuzzer, and fuzzes Go against Rust for 10s. C still gets a gcc-15 pass and its plain API tests and shared cases on all 3 versions. It runs in about 50s.
+		- It doesn't fetch anything. If a pinned `shcl.h` isn't cached, C is skipped with a warning.
+		- No flags now runs the leak checks too. `--no-leakcheck` skips them, and `--leakcheck` adds them to `--ci` or `--quick`.
+	- Branch: ci-flags
+	- Test case: None. Each flag mix was checked by hand, plus `--quick` with a header missing from the cache.
 
-- Upgrade lists the lines it changed
-	- ID: 2026101513330012
-	- Type: Feature
-	- Status: Queued
-	- Priority: Avg
-	- Opened: 20261015-133300
-	- Opened by: JC
-	- Note: Quillroute diffs the text line by line to say how many lines were written differently.
+- Sort shcl's analyzer and CodeQL findings
+	- ID: 2026102321270143
+	- Type: Task
+	- Status: Waiting on UAT
+	- Priority: High
+	- Opened: 2026-10-23 21:27
+	- Parent ID: 2026102113393169
+	- Requirements:
+		- Sort each finding in `cicd/artifacts/leakcheck/c-analyze-shcl/`, and each shcl one in the leak run's `codeql.sarif`, into a real bug or a false report. Real bugs in 3.0 get reported to shcl. 2.0's are listed as accepted, each with why.
 	- Progress log:
-		- 2026-10-21: built in all 4 languages with `Lost` and `Rewritten` line lists on the upgrade result. The quick checks passed, but clang-tidy failed the gate. See 2026102114534365.
-	- Branch: wip/round-1021-2026101513330012
+		- 2026-10-23: Read all 46. In 3.0: gcc 1, clang 15, CodeQL 14. In 2.0: clang 8, CodeQL 8. None is a bug in effect. Each one's reason is in `source/c/shcl-known/<pin>.txt`.
+		- Most of clang's null dereferences have one shape: a map entry is put only after the element it indexes is pushed, and the analyzer doesn't carry that across the two. Two more come from `arena_panic`, which never returns but isn't `_Noreturn`.
+		- gcc's leak is the `volatile` pointer in `shcl_generate`. The null check reads it again.
+		- CodeQL's 3 stack-address results are the recovery point. Every caller read disarms it on each way out.
+		- Nothing goes to shcl as a bug. Two small changes would quiet the analyzers for every program that builds shcl: `_Noreturn` on `arena_panic`, and a plain pointer for `own` in `shcl_generate`. Drafted in the round report for JC, not filed.
+	- Decisions:
+		- 3.0's two stream findings at 13605 are harmless, not false. A failed read does loop for one more `fread`, but the file is refused after it.
+	- Test case: the lists are what 2026102321270148's gate matches against.
+	- Verified: `cicd/shcl_known.py` matched the saved reports and `codeql.sarif` against both lists exactly, and so did a fresh container lint with clang-22.
+	- Acceptance signoff: waits on JC, since some calls are on security queries (`toctou-race-condition`, `path-injection`, `stack-address-escape`).
+
+- Builds clean up stale artifacts and side-effects
+	- ID: 2026101916500100
+	- Type: Enhancement
+	- Status: Waiting on UAT
+	- Priority: High
+	- Opened: 2026-10-19
+	- Opened by: JC
+	- Requirements:
+		- Verify or ensure that builds clean up *stale* artifacts and side-effects after they're done: caches, container cruft, tmp files, etc.
+	- Notes:
+		- Pre-next-cut.
+	- Progress log:
+		- 2026-10-21: A run already removed its own scratch folder, and the C container is `--rm`. Left over were a cached `shcl.h` for a rev no pin names, and leak reports for shcl 1.2 and 2.0 from before the 3.0 floor.
+		- Also left: a 57 MB scratch folder in `/tmp` from 2026-10-17, written into by the C container when it still ran as root. It needs root to remove. The `--user` fix stops it happening again.
+		- Ctrl+C left the C container running, since bash as PID 1 ignores it. The container now runs under an init that passes it to the whole tree.
+		- Added: dropping cached headers no pin names, keeping the newest 10 fuzz failure sets, clearing the leak reports when a fresh leak run starts, and removing an older C image no container uses. `docker builder prune` runs only after a real rebuild. Every build gets a new image ID, even a fully cached one, so it compares layers.
+		- 2026-10-21: The full run at `15509b0` passed lint and the sanitized tests under the init, and the leak mode started under it and cleared the old leak reports. It stopped at CodeQL findings from 2 other items, so CTU and the heaptrack soak weren't reached. After it and a second run without the leak checks: no scratch folder, no container, one C image, only the 2 pinned headers, and only the fresh `codeql.sarif` in the leak reports.
+		- 2026-10-23: The full run at `7b2b21e` passed the leak mode under the init, CTU and the heaptrack soak included. After it: no container, one C image, only the 2 pinned headers, and no scratch folder. Older `test_shclw*` and `test_shclwrap_*` folders from 2026-10-15 to 2026-10-21 are still under the temp root, and the root-owned one in `/tmp`.
+	- Acceptance signoff: no regression test, so it waits on JC.
+	- Decisions:
+		- Kept, since the next run reuses them: `cicd/cache/c-home` with CodeQL's compiled queries, the pinned headers, the C image, Go's and cargo's caches, and the rotated run logs.
+	- Verified: `--quick` passed twice with the changes, and left no scratch folder, no container, and one C image. The unpinned header was dropped and the 2 pinned kept. On a stand-in tree, 12 marked fuzz sets went to 10, and an unmarked set, an unpinned folder holding another file, and a non-rev folder were left. Ctrl+C stopped the container with the init, and not without it.
+	- Swept: `c-checks.bash` has the only `docker build` and `docker run`. `cicd.bash` is the only writer of `cicd/artifacts/fuzz` and `cicd/cache/shcl-c`, and `c-in-container.bash` of the leak reports.
+	- Branch: round-1021
+	- Test case: None. It cleans up host state, checked by the runs under Verified.
+
+- CTU pass follows our calls into shcl
+	- ID: 2026102321270154
+	- Type: Task
+	- Status: Waiting on UAT
+	- Needs local test suite run?: No. The full run passed on 2026-10-23.
+	- Priority: High
+	- Opened: 2026-10-23 21:27
+	- Parent ID: 2026102113393169
+	- Prereq IDs: 2026102321270148
+	- Requirements:
+		- Add shcl's two implementation files, `tests/shcl_impl.c` and `shclw3_v2_impl.c`, to the CTU map, so the CTU pass follows our calls into shcl.
+		- Since 86d5c2f any non-empty CTU log fails the leak run. Findings inside shcl go to the pin's known list, the way CodeQL's do.
+	- Progress log:
+		- 2026-10-23: Mapping the 2 impl files adds nothing, since `clang-extdef-mapping` maps only the main file's definitions. Mapped with `shcl.h` itself as the main file, plus `-DSHCL_IMPLEMENTATION`, and `-include shclw3_v2_names.h` for 2.0, it adds 247 entries.
+		- On this host's clang 19 the pass then takes about 81s, up from about 75s, and reports 12: 11 inside 3.0's `shcl.h` (1173, 1186, 3734, 3749) and 1 in ours, `shclw3.c:1300`. None is triaged yet. 1186's is a use after free in `arena_guard`, and ours looks like a path where `i < n` isn't known.
+		- 2026-10-23: The leak run maps both `shcl.h` pins that way, built as each impl file builds it. This departs from the wording: the impl files themselves aren't mapped, since that maps nothing.
+		- Every shcl finding is false, and all have one cause. The pass treats `arena_panic` as a call that returns, though every way out of it is `longjmp`, `exit` or `abort`. The use after free is in `migrate_text`: it frees `own` on the recovery path, then calls `arena_panic`, which never comes back.
+		- clang-22 in the container gives 10, listed in 3.0's list as `ctu` lines, once per file of ours that reaches each one. clang 19 puts the use after free at 1186, inside `arena_guard`, instead of at 3737. 2.0 gives none.
+		- Ours at `shclw3.c:1300` was false too. `check_old` is a callback the 2.0 walk calls only with `i < n`, but the pass starts there knowing neither. It now checks `i >= n` as well.
+		- `cicd/shcl_known.py ctu` reads the logs. A finding in our files, a clang error, or output with no diagnostic fails it. Findings in a pin's `shcl.h` must match that pin's list.
+	- Decisions:
+		- A finding is counted once per file of ours it's reached from, since each of those is a separate path in.
+		- The list holds clang-22's set, the gate's, not the host's clang 19.
+	- Verified: `bash cicd/c-checks.bash leakcheck-resume 3 WORK` passed CodeQL from the saved report, the new probe, CTU with 10 shcl findings matching the list and none of ours, and the heaptrack soak. A run before the list had the clang-22 lines failed, naming each new and gone line. With shcl taken out of the probe's map, the run failed at the probe. On the host's clang 19, `shclw3.c:1300` was reported before the fix and not after. The check also failed on a clang crash line, on output with no diagnostic, on an error inside `shcl.h`, on a doubled log, on a gone line, and on a pin with no list. `analyzer` and `codeql` modes still match the saved reports with the `ctu` lines in the list. `cicd/cicd.bash --ci --quick -y`, `lint-report.bash`, ruff and shellcheck passed.
+		- 2026-10-23: The full run at `7b2b21e` passed: a fresh CodeQL with the new `shclw3.c` line and no finding of ours, CTU with 10 shcl findings matching 3.0's list and 0 for 2.0, and the heaptrack soak.
+	- Swept: the leak run's CTU step is the only CTU pass in the repo. The Makefile's `.PHONY` names an `analyze-ctu` target that has no rule. `analyzer` and `codeql` compare only their own tool's lines, so `ctu` lines don't reach them. `check_old` is the only `shclw_i_v2_elem` callback, and the other `values[i]` reads in `shclw3.c` loop over the array's own count. The CTU pass is C only; Go, Rust and Python index with bounds checks.
+	- Branch: round-1023
+	- Test case: vGBSI, in `cicd/c-in-container.bash` leak mode: a planted null dereference in a stand-in `shcl.h`, reached only through our call, must show, fail unlisted, pass listed, and fail on a finding of ours.
+	- Acceptance signoff: waits on JC, after the leak run, for the use after free in `migrate_text` judged false. It's a memory safety call.
+
+- Layered loading
+	- ID: 2026101512024156
+	- Type: Feature
+	- Status: Waiting on UAT
+	- Priority: Avg
+	- Opened: 2026-10-15
+	- Opened by: JC
+	- Related IDs: 2026101513330030, 2026102114101028
+	- Requirements:
+		- Defaults, then site, then user file, as one document.
+	- Notes:
+		- Cobblevale uses shcl's merge. Mossrealm does it by hand.
+		- Mossrealm's layers are defaults, then a system file, then the user file, then the command line.
+	- Progress log:
+		- 2026-10-21: `OpenLayers` in Go, Rust, and C, plus a `layers` op. Reads are the merge, edits and saves go to the last file layer, and `Diag` has a `Layer`. design.md has the API and the Decisions. README has a feature line.
+		- Verified: Go tests, vet; Rust tests, clippy pedantic; C API tests plain, sanitized, and as C++, clang-tidy, gcc-15 at C17, and the shared cases plain and sanitized; `cicd.bash --quick`.
+		- Swept: every edit and save call on the 3.0 adapter in all 3 languages goes to the edit layer, every C put through `put`, and every `Diag` literal has the new field.
+		- Left open in 2026102114101028: a read's line doesn't say which layer it's in, and `DropDeclared` loses `Layer`.
+	- Decisions:
+		- shcl's own merge, not one of the wrapper's. Cobblevale already uses it.
+		- Edits and saves go to the last file layer only. Text layers after it, like a command line, win reads and are never saved.
+		- A missing file is skipped. Any other error stops the load, as `Open` does.
+		- `Diag.Layer` is the layer's place in the list, from 1, not a name.
+	- Commit: 21cc72c
+	- Test case: shared case `053-layers`, in all 3 languages.
+	- Acceptance signoff: waits on JC, for the README line and the calls in Decisions.
 
 - Upgrade lists the lines it lost
 	- ID: 2026101513330013
 	- Type: Feature
-	- Status: Queued
+	- Status: Waiting on UAT
+	- Needs local test suite run?: No. The full run passed on 2026-10-23, as on 2026101513330012.
 	- Priority: Avg
 	- Opened: 20261015-133300
 	- Opened by: JC
+	- Related IDs: 2026101513330012, 2026101513330018, 2026101513330001, 2026101513330002, 2026102114534365
 	- Requirements:
 		- Line numbers, not only a count.
 	- Note: Cobblevale logs them, and its CI checks the count. Wovenshell shows a notice for each one. A 1.x line break in a bare value that looks like a Windows path counts as lost, though 3.0 could write it as `\u000A`.
 	- Progress log:
 		- 2026-10-21: built in all 4 languages with `Lost` and `Rewritten` line lists on the upgrade result. The quick checks passed, but clang-tidy failed the gate. See 2026102114534365.
-	- Branch: wip/round-1021-2026101513330012
+		- 2026-10-23: On round-1023 with the cast fixed. The shared case is now `059-upgrade-lines`.
+		- Departs from the Note: a 1.x Windows-path line break is listed as rewritten, not lost.
+	- Decisions:
+		- `Upgraded.Lost` lists the original's lines, from 1, with a value 2.0 read that the upgraded file doesn't have at all. A value that reads differently is still refused, per 2026101513330002.
+		- A 1.x line break in a bare value like `C:\new` is rewritten, not lost, since the upgrade carries it as 2.0 read it. A program that counted it lost sees one fewer. This one is a call to confirm.
+		- `Unsure` stays shcl's own count. In the cases tried it matched the list's length.
+	- Verified: as on 2026101513330012.
+	- Swept: as on 2026101513330012. The lost check sits beside the 2.0 read-back in each language, so it sees the same paths.
+	- Branch: round-1023
+	- Commit: 2cb7404
+	- Test case: tests/cases/059-upgrade-lines, a 2.x comma list with a line under it.
+	- Acceptance signoff: Needs JC on the `C:\new` call, after the full run.
 
 - Open a newer-format file read-only
 	- ID: 2026101513330014
 	- Type: Feature
-	- Status: Waiting on automated testing
-	- Needs local test suite run?: Yes, the full run's leak checks (CodeQL, CTU, heaptrack soak), after 2026101513330017's CodeQL finding is fixed.
-	- Needs external testing: Windows, for the C and Rust paths.
+	- Status: Waiting on UAT
+	- Needs local test suite run?: No. The full run passed on 2026-10-23.
+	- Needs external testing: No. Windows passed on 2026-10-23.
 	- Priority: Avg
 	- Opened: 20261015-133300
 	- Opened by: JC
@@ -319,6 +243,8 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- Swept: every `TooNew` site in all 4 adapters. `Upgrade`, `UpgradeFile`, `InfoBlock`, and `StampFormat` still refuse a newer file. Cases 037 and 053 had `open` and `layers` failing on a newer file, and now show it read-only.
 		- Goes to signoff after the full run, for the README line and the change to what `Open` does.
 		- 2026-10-21: The full run at `15509b0` passed lint with the C analyzers and the sanitized C tests, and a second run without the leak checks passed the fuzz. The full run stopped at CodeQL findings from 2026101513330017 and 2026101513330009, so CTU and the heaptrack soak weren't reached.
+		- 2026-10-23: The full run at `7b2b21e` passed, leak checks and fuzz included.
+		- 2026-10-23: On vm925w, Windows 11, from a fresh clone of `round-1023` with `core.autocrlf` off: `055-open-newer`, `037-open-refused` and `053-layers` passed in Rust, C (mingw-w64 gcc 16) and Python. Go has no toolchain there. C's runner needed its CRLF output turned back to LF first, per 2026102323122732.
 	- Decisions:
 		- `Open` succeeds and `Write` refuses, rather than `Open` giving the document beside an `ErrTooNew`. design.md, Decisions, says why.
 		- `Write` refuses with `ErrTooNew`, not a new kind.
@@ -326,12 +252,59 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Test case: shared case `055-open-newer`, and the newer-file parts of `037-open-refused` and `053-layers`, in all 4 languages.
 	- Acceptance signoff: waits on JC, for the README line and the `Open` change.
 
+- Write refuses when the file changed on disk since it was read
+	- ID: 2026101513330017
+	- Type: Feature
+	- Status: Waiting on UAT
+	- Needs local test suite run?: No. The leak checks passed on 2026-10-23.
+	- Needs external testing: No. Windows passed on 2026-10-23.
+	- Priority: Avg
+	- Opened: 20261015-133300
+	- Opened by: JC
+	- Related IDs: 2026101513330014, 2026101513330015, 2026101513330016
+	- Note: Quillroute re-reads the file under its own lock. Radixmill and Lenscart both lost writes to 2 processes saving at once, and Lenscart moved its counters out of shcl because of it.
+	- Progress log:
+		- 2026-10-21: A `Write` over the file `Open` read refuses with the new `ErrChanged` when the file no longer holds what was read, byte for byte. After a good `Write` it checks against what that `Write` left. A layered document's user file that wasn't there must still not be there. `WriteWith(path, WriteOpts{Force: true})` skips the check. Go, Rust, C, and Python, plus `write FILE force` and a `scribble` op that changes a file behind the document's back.
+		- `UpgradeFile` and the first `Write` over an upgraded file gave `ErrIO` for the same thing, and now give `ErrChanged`. That reverses the Decisions row "A file that changed under `UpgradeFile` is `ErrIO`", which now says why.
+		- Verified: Go tests, vet, staticcheck; Rust tests, clippy pedantic; C API tests plain, sanitized, and as C++, the C lint stage, and the shared cases plain and sanitized; Python tests, ruff, and shared cases; `cicd.bash --quick`.
+		- Swept: `ReplaceRead` and its twins in all 4 languages give the new kind. The tests that wanted `ErrIO` for a changed file (Go, Rust, C) now want `ErrChanged`. Write failures stay `ErrIO`.
+		- Not covered, and said in design.md: a save by another program between the last check and the rename. A lock was left out.
+		- 2026-10-21: The full run at `15509b0` failed CodeQL on this: `cpp/world-writable-file-creation` at `run.c:678`, the `fopen(path, "wb")` in the C runner's `scribble` op. Lint with the C analyzers and the sanitized C tests passed, and a second run without the leak checks passed the fuzz.
+		- 2026-10-23: The C runner's `scribble` op makes its file with `open` at 0644 on POSIX, as Go's runner does, not with `fopen` at 0666.
+			- Verified: the leak run passed, as on 2026101513330009, and failed at `1cf9f96` on `run.c:678`. Also the C container lint and tests, and `cicd.bash --ci --quick -y`.
+			- Swept: the Rust and Python runners write at their default, 0666 less the umask, and nothing scans them for it. The library's own create stays at 0666 less the umask, as shcl's is, unless a mode is given.
+		- 2026-10-23: On vm925w, Windows 11, from a fresh clone of `round-1023` with `core.autocrlf` off: `056-write-changed` passed in C, with its by-path check and `_stat64`, and in Rust and Python. Go has no toolchain there.
+	- Decisions:
+		- Compare the text that was read, not a hash or size and mtime. Exact, already there for the backup, and costs a copy of the file in memory.
+		- On by default. `Force` is a field on `WriteOpts`, where create-only and a file mode can go later.
+		- `ErrChanged` is its own kind, for `Write` and the upgrade's backup alike.
+	- Commit: 12dcaaa
+	- Test case: shared case `056-write-changed` in all 4 languages, and Go's `TestWriteChangedOtherName`.
+	- Acceptance signoff: waits on JC, for the new kind, the reversed Decisions row, and the README line.
+
+- Python: run from a copied file
+	- ID: 2026101513330050
+	- Type: Feature
+	- Status: Waiting on UAT
+	- Priority: Low
+	- Opened: 20261015-133300
+	- Opened by: JC
+	- Parent ID: 2026101512024161
+	- Note: Lenscart bundles shcl's wheel in its packages. Folderkite parses shcl by hand in its Python tools, since nothing is installed there.
+	- Progress log:
+		- 2026-10-21: A `shcl.py` copied beside `shclw.py` is used first, then the installed one. The copy loads under its own name, so a program that still imports an older `shcl` keeps it. README says so.
+		- Verified: `test_copied` runs the wrapper from a package with 3.0 copied beside it and 1.2 on the path, and fails with the copy lookup taken out. `test_none` checks the message with nothing found.
+	- Decisions:
+		- The copy beside the wrapper wins over the installed one, since bundling it is a choice. Waits on JC with the parent's question.
+	- Commit: a4909af
+	- Test case: `source/python/tests/test_shclw.py`, `test_copied` and `test_none`.
+
 - Create-only Write
 	- ID: 2026101513330015
 	- Type: Feature
 	- Status: Waiting on automated testing
-	- Needs local test suite run?: Yes, the full run's leak checks (CodeQL, CTU, heaptrack soak), after the CodeQL findings from 2026101513330009 and 2026101513330017 are fixed.
-	- Needs external testing: Windows: C's `MoveFileExA` path, Go, Rust, and Python hard links on NTFS, and a FAT or other no-link filesystem for the fallback.
+	- Needs local test suite run?: No. The full run passed on 2026-10-23.
+	- Needs external testing: Windows: Go's hard link on NTFS, since vm925w has no Go, and a FAT or other no-link filesystem for the fallback.
 	- Priority: Avg
 	- Opened: 20261015-133300
 	- Opened by: JC
@@ -345,6 +318,8 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- Each race test fails with a rename in place of the link, and passes with it.
 		- 2026-10-21: The full run at `15509b0` passed the sanitized C cases, and a second run without the leak checks passed the fuzz. The full run stopped at CodeQL findings from 2026101513330009 and 2026101513330017, so CTU and the heaptrack soak weren't reached.
 		- Swept: every `WriteOpts`, `write_opts`, and `force` site in all 4 adapters and runners, `replacing` in `shclw_upgrade_file`, and the fuzz script's `write` ops.
+		- 2026-10-23: The full run at `7b2b21e` passed, leak checks and fuzz included.
+		- 2026-10-23: On vm925w, Windows 11, from a fresh clone of `round-1023` with `core.autocrlf` off: `057-write-create` passed in Rust, C and Python on NTFS, and so did Rust's `create_race_link` and `create_race_in_place` and Python's `CreateRace`. C's `test_create_raced` didn't build there, per 2026102323122732.
 	- Decisions:
 		- Link of a synced temp, with the exclusive create as the fallback, rather than refusing on a filesystem with no links. design.md, Decisions, says why.
 		- `Force` has nothing to skip with `Create`, since it never replaces. Over the file `Open` read it's `ErrExists`.
@@ -356,8 +331,8 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- ID: 2026101513330016
 	- Type: Feature
 	- Status: Waiting on automated testing
-	- Needs local test suite run?: Yes, the full run's leak checks, with 2026101513330015.
-	- Needs external testing: Windows, where the mode is ignored, and case 058's `mode` op prints what Windows has, so that case won't match there.
+	- Needs local test suite run?: No. The full run passed on 2026-10-23.
+	- Needs external testing: Windows, Go only, since vm925w has no Go.
 	- Priority: Avg
 	- Opened: 20261015-133300
 	- Opened by: JC
@@ -370,6 +345,8 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- Verified: as 2026101513330015, same runs. The race tests check the mode too.
 		- 2026-10-21: The full run at `15509b0` passed the sanitized C cases, and a second run passed the fuzz. The full run stopped before CTU and the heaptrack soak, as 2026101513330015 says.
 		- Swept: as 2026101513330015.
+		- 2026-10-23: The full run at `7b2b21e` passed, leak checks and fuzz included.
+		- 2026-10-23: On vm925w, Windows 11, from a fresh clone of `round-1023` with `core.autocrlf` off: in Rust, C and Python `058-write-mode`'s writes passed, and each `mode` op printed 0666, as the mode is ignored there. So that case differs on Windows, as expected, and every other case passed.
 	- Decisions:
 		- Exact, not masked by the umask, and only on a file the `Write` creates. design.md, Decisions, says why.
 		- In Go and C 0 means no mode. Rust takes `Option<u32>`, and Python `None`.
@@ -377,56 +354,138 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Test case: shared case `058-write-mode` in all 4 languages, which reads modes back with the new `mode` op.
 	- Acceptance signoff: waits on JC after the full run, since it's about who can read a file.
 
-- Write refuses when the file changed on disk since it was read
-	- ID: 2026101513330017
-	- Type: Feature
-	- Status: Queued
-	- Needs local test suite run?: Yes, a full run after the fix, for CodeQL, CTU, and the heaptrack soak.
-	- Needs external testing: Windows, where the same-file check is by path only in C, and the missing-file check uses `_stat64`.
-	- Priority: Avg
-	- Opened: 20261015-133300
+- Leak tests and all tests cover third-party and vendored code
+	- ID: 2026101916500102
+	- Type: Enhancement
+	- Status: Stalled
+		- Held for: its child 2026102113393169, still open. The tests this item waited on passed.
+	- Needs local test suite run?: No. The full run passed on 2026-10-23.
+	- Priority: High
+	- Opened: 2026-10-19
 	- Opened by: JC
-	- Related IDs: 2026101513330014, 2026101513330015, 2026101513330016
-	- Note: Quillroute re-reads the file under its own lock. Radixmill and Lenscart both lost writes to 2 processes saving at once, and Lenscart moved its counters out of shcl because of it.
-	- Progress log:
-		- 2026-10-21: A `Write` over the file `Open` read refuses with the new `ErrChanged` when the file no longer holds what was read, byte for byte. After a good `Write` it checks against what that `Write` left. A layered document's user file that wasn't there must still not be there. `WriteWith(path, WriteOpts{Force: true})` skips the check. Go, Rust, C, and Python, plus `write FILE force` and a `scribble` op that changes a file behind the document's back.
-		- `UpgradeFile` and the first `Write` over an upgraded file gave `ErrIO` for the same thing, and now give `ErrChanged`. That reverses the Decisions row "A file that changed under `UpgradeFile` is `ErrIO`", which now says why.
-		- Verified: Go tests, vet, staticcheck; Rust tests, clippy pedantic; C API tests plain, sanitized, and as C++, the C lint stage, and the shared cases plain and sanitized; Python tests, ruff, and shared cases; `cicd.bash --quick`.
-		- Swept: `ReplaceRead` and its twins in all 4 languages give the new kind. The tests that wanted `ErrIO` for a changed file (Go, Rust, C) now want `ErrChanged`. Write failures stay `ErrIO`.
-		- Not covered, and said in design.md: a save by another program between the last check and the rename. A lock was left out.
-		- 2026-10-21: The full run at `15509b0` failed CodeQL on this: `cpp/world-writable-file-creation` at `run.c:678`, the `fopen(path, "wb")` in the C runner's `scribble` op. Lint with the C analyzers and the sanitized C tests passed, and a second run without the leak checks passed the fuzz.
-	- Decisions:
-		- Compare the text that was read, not a hash or size and mtime. Exact, already there for the backup, and costs a copy of the file in memory.
-		- On by default. `Force` is a field on `WriteOpts`, where create-only and a file mode can go later.
-		- `ErrChanged` is its own kind, for `Write` and the upgrade's backup alike.
-	- Commit: 12dcaaa
-	- Test case: shared case `056-write-changed` in all 4 languages, and Go's `TestWriteChangedOtherName`.
-	- Acceptance signoff: waits on JC, for the new kind, the reversed Decisions row, and the README line.
-
-- List the lines a load couldn't use
-	- ID: 2026101513330018
-	- Type: Feature
-	- Status: Waiting on a full CICD run
-	- Needs local test suite run?: Yes, the full run's leak checks, after 2026101513330009's CodeQL finding is fixed.
-	- Priority: Avg
-	- Opened: 20261015-133300
-	- Opened by: JC
-	- Related IDs: 2026101513330009, 2026101513330012
+	- Related IDs: 2026101619042485, 2026101707542552, 2026101711245585, 2026102113393169
 	- Requirements:
-		- Line numbers, not only a count.
-	- Note: Wovenshell builds the list from error diagnostics and drops line 0. Folderkite warns at load with the count. Cobblevale only tracks whether there were any.
+		- Make sure CICD leak tests, and all tests, include third-party and vendored code. But only code that gets run by end users.
+		- Anything wrong goes on the backlog for a fix.
+	- Notes:
+		- Pre-next-cut.
+		- This may only affect what's already written in the backlog, and/or done.
 	- Progress log:
-		- 2026-10-21: `Unused()` in all 4 languages, and an `unused` op.
-		- 2026-10-21: The full run at `15509b0` passed the C analyzers and the sanitized tests, and a second run without the leak checks passed the fuzz. The full run stopped at a CodeQL finding in `Merged`'s code, 2026101513330009, so CTU and the heaptrack soak weren't reached.
+		- 2026-10-21: The outside code users run is shcl: C's pinned `shcl.h` 3.0 plus 2.0 for the upgrade check, Go's shcl modules, and Rust's shcl crates. Test-only and cicd-only code isn't.
+		- C's sanitized builds already built both shcl versions instrumented, the fuzz and soak drivers link them, and `lsan.supp` is empty. So the leak and sanitizer runs covered shcl.
+		- The analyzers didn't. They read shcl's code with `shcl.h` as a system header, where neither reports anything, and clang skips headers anyway. gcc spent about 80s a run on it for nothing.
+		- Added `make analyze-shcl`, gcc's and clang's analyzers over both shcl versions with no style warnings. On this host it finds 1 (gcc) and 15 (clang) in 3.0, and 0 and 8 in 2.0. They're reported, not fatal, until 2026102113393169 triages them.
+		- CodeQL's root was `source/c`, so `shcl.h` sat outside it. It's now the repo root, and shcl's findings are counted apart from ours, which stay fatal.
+		- Rust, Go and Python are in the queued 2026101711245585, which already covered third-party code. Added there that it means runtime dependencies only, that the Rust runs need `shcl3` on to build shcl at all, and that the cicd scripts are left out. Added to the C++ item 2026101707542552 that the C pass analyzes shcl.
+		- 2026-10-21: It passed on the host but failed the gate in the container. See 2026102113502809.
+		- 2026-10-23: The probe's match was the fault, fixed in 2026102113502809. The container lint passes, with the same counts as on the host.
 	- Decisions:
-		- Every error's line, once each, in order, leaving out line 0. Not only the lines shcl's `LostCount` counts, since a line kept as written but read as nothing is still lost to the program.
-		- A list of `Spot`s, each a line and a layer, rather than the plain numbers the upgrade gives, so a layered document's lines say which layer they're in.
-		- C leaves out the 2.0 errors a refused open keeps in `shclw_diags`, so it gives what Go and Rust give.
-	- Verified: the new shared case passes in Go, Rust, C, and Python, and so does the fuzz with the new op.
-	- Swept: all 4 languages and runners, and fuzz.py, as in 2026101513330009.
-	- Branch: round-1021
-	- Commit: 56aedbc
-	- Test case: tests/cases/054-merged-unused, and the fuzz op.
+		- This reverses "Vendored code is left out" in the C item, 2026101619042485, for the analyzers and CodeQL. Style lints (clang-tidy, gcc-15 at C17) still stay off shcl.
+		- shcl's findings report rather than fail for now. Fatal, every full run would stay red on code fixed in another repo, and 2.0 is a frozen tag.
+	- Verified: `make analyze-shcl` ran on this host's gcc-15 and clang 19 and wrote the 4 reports. Probe vFKcU passed, and failed with `-isystem` put back for gcc, or the header flag dropped for clang. A missing `shcl.h` failed the target. The CodeQL split counted planted results under `cicd/cache/` as shcl's, and others, or one with no location, as ours. `cicd/flags-test.bash` and shellcheck passed.
+		- 2026-10-23: `bash cicd/c-checks.bash lint 3 WORK` passed in the container with gcc-15 and clang-22, probe included.
+		- 2026-10-23: The full run at `7b2b21e` passed. CodeQL counted 14 findings in 3.0's `shcl.h` and 8 in 2.0's, each matching its pin's list, and none of ours. The analyzers matched 1 and 15 in 3.0, 0 and 8 in 2.0, and CTU 10 in 3.0. The fuzz and Go's fuzzer passed.
+	- Swept: the sanitized, plain and C++ test builds, the fuzz drivers, and the heaptrack soak all link both shcl versions. The cross-file (CTU) pass reads our files only, noted on 2026102113393169. clang-tidy and `strict` read ours only, as style lints.
+	- Branch: round-1023, from `wip/round-1021-2026101916500102`.
+	- Test case: vFKcU, the analyze-shcl probe in `cicd/c-in-container.bash` lint mode.
+
+- shcl 4 adapters
+	- ID: 2026101512024163
+	- Type: Feature
+	- Status: Stalled
+	- Priority: High
+	- Opened: 2026-10-15
+	- Opened by: JC
+	- Prereq IDs: shcl 4 in each language. It's planned Rust first, then C, then Go and Python.
+	- Requirements:
+		- The same API, over shcl 4.
+	- Notes:
+		- 4 keeps every line as typed, so Text and Write get simpler. Its read-back check in setters can replace the wrapper's.
+	- Progress log:
+		- 20261015: shcl 4 isn't built in any language yet, only planned in its v4 doc. This waits on it.
+
+- Move the 3.0 pin to the first 3.0 beta
+	- ID: 2026101512024165
+	- Type: Task
+	- Status: Stalled
+	- Priority: Avg
+	- Opened: 2026-10-15
+	- Opened by: JC
+	- Requirements:
+		- Pin `v3.0.0-beta1` once it's tagged, in place of a dev commit.
+	- Notes:
+		- The tag is spelled with no dot, per shcl's own backlog.
+		- shcl's Go module path is still `.../v2`, and Go won't take a v3 tag on it. Go stays on a commit until that changes.
+		- Quillroute plans to have its release refuse a commit pin. The same check would fit here.
+
+- Triage shcl's analyzer and CodeQL findings, then make them fatal
+	- ID: 2026102113393169
+	- Type: Task
+	- Status: Queued
+	- Priority: High
+	- Opened: 2026-10-21
+	- Parent ID: 2026101916500102
+	- Related IDs: 2026101619042485
+	- Requirements:
+		- Sort each finding in `cicd/artifacts/leakcheck/c-analyze-shcl/`, and each shcl one in the leak run's `codeql.sarif`, into a real bug or a false report.
+			- On this host gcc reports a leak in 3.0's `shcl_generate`, likely from the `volatile` pointer that holds the allocation. clang reports null dereferences and stream misuse in 3.0, and null dereferences in 2.0. The container's clang-22 gives the same counts (2026-10-23).
+		- Real bugs in 3.0 get reported to shcl. 2.0 is a frozen tag, so its findings are listed as accepted, each with why.
+		- Then make the passes fatal, with a list of known findings per pin, matched exactly. A pin bump that adds a finding fails, and one that loses one asks for the list to be pruned.
+		- Also:
+			- Add shcl's two implementation files to the CTU map, so the CTU pass follows our calls into shcl.
+			- gcc's analyzer at `-O1` missed a planted leak it found at `-O0`. Check whether `-O0` finds more in our code, and what it costs.
+	- Estimated effort: Avg
+	- Progress log:
+		- 2026-10-23: Split into 2026102321270143 (the triage), 2026102321270148 (the lists made fatal), 2026102321270154 (CTU into shcl), and 2026102321270159 (gcc at `-O0`).
+
+- `make analyze` passes on a clang analyzer finding
+	- ID: 2026102322354803
+	- Type: Bug
+	- Status: Queued
+	- Severity: Avg
+	- Opened: 2026-10-23 22:35
+	- Related IDs: 2026102321270159
+	- Steps to reproduce:
+		- Run `make analyze ANALYZE_C=<file>` on a file with a leak that clang reports and gcc doesn't, such as vGBqv's probe with `GCC_ANALYZE` set to `-O1`.
+	- Incorrect behavior: clang prints `warning: Potential leak of memory pointed to by 'p' [unix.Malloc]`, and make exits 0.
+	- Expected behavior: a clang analyzer finding fails the target, as the Makefile's comment says it does.
+	- Reproduced: 2026-10-23, on the host's clang 19.
+	- Possible cause: `-Werror` doesn't reach the analyzer's own warnings. `-Xanalyzer -analyzer-werror` made clang 19 exit 1 on the same file.
+	- Notes:
+		- Nothing hides behind it today. Neither the host's clang 19 nor the container's clang-22 reports anything in our files.
+		- `analyze-shcl` and the CTU pass read clang's output through `cicd/shcl_known.py`, so they aren't affected.
+
+- Shared cases fail on a Windows clone with Git's default line ends
+	- ID: 2026102323122721
+	- Type: Bug
+	- Status: Queued
+	- Severity: Avg
+	- Opened: 2026-10-23 23:12
+	- Related IDs: 2026101512024174, 2026101513330014
+	- Steps to reproduce [Bug]:
+		- On Windows, with Git for Windows' `core.autocrlf=true` from its system gitconfig, clone the repo and run `cargo test --all-features` in `source/rust`.
+	- Incorrect behavior [Bug]:
+		- All 59 shared cases fail in Rust, and most in Python, since each case's `doc.shcl` and ops are checked out with CRLF.
+	- Expected behavior [Bug]:
+		- The cases pass on a default clone, as they do with `core.autocrlf` off.
+	- Reproduced [Bug]: 2026-10-23, on vm925w.
+	- Possible cause [Bug]: the repo has no `.gitattributes`, so test data that must stay LF, such as `tests/cases/`, gets the clone's line ends. Case 027 has CRLF on purpose and would need its own rule.
+
+- C doesn't build with mingw-w64 at the Makefile's warnings
+	- ID: 2026102323122737
+	- Type: Bug
+	- Status: Queued
+	- Severity: Avg
+	- Opened: 2026-10-23 23:12
+	- Related IDs: 2026101512024174
+	- Steps to reproduce [Bug]:
+		- Compile `shclw.c` or `run.c` with mingw-w64 gcc 16 and `-Wconversion -Werror`, as `source/c/Makefile` does.
+	- Incorrect behavior [Bug]:
+		- `shclw.c:335` and `run.c:127` fail on "conversion from 'double' to 'float' may change value" at `signbit(f)`.
+	- Expected behavior [Bug]:
+		- It builds clean, as with gcc on Linux.
+	- Reproduced [Bug]: 2026-10-23, on vm925w, with `C:\ProgramData\mingw64`.
+	- Possible cause [Bug]: mingw's `signbit` macro has a float branch that converts its argument, even for a double. Without `-Werror` it builds, and the shared cases pass.
 
 - Back up a file before a save that would lose lines
 	- ID: 2026101513330019
@@ -612,6 +671,7 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 			- For a full leak stack, rerun the test with `ASAN_OPTIONS=fast_unwind_on_malloc=0`.
 		- Every full run also runs clang-tidy over the C files as C++, with the C++ build's flags and the same `.clang-tidy`. That covers the clang analyzer and the `bugprone-*` checks.
 			- gcc's `-fanalyzer` isn't used on C++. gcc's own docs still say it's meant for C. The C item runs it on the same files.
+			- shcl's own code is analyzed by the C item's `analyze-shcl` pass, so clang-tidy stays on our files.
 			- Before the gate goes live, every existing finding is fixed, or suppressed at the line with `NOLINT(check-name)` and a one-line reason. There's no baseline file.
 			- It moves behind a flag only if a full run measures too slow.
 		- Tools follow the C item's rules: pinned, and no Coverity or Infer.
@@ -636,6 +696,7 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Requirements:
 		- For all 3:
 			- The checks cover first-party and third-party code. Vendored code is included.
+				- Third-party means what end users run: the wrapper's runtime dependencies, today shcl's Go modules and Rust crates. Test and dev dependencies, such as goleak, dhat and pytest-memray, and the cicd scripts are left out.
 				- On third-party code, run the leak, memory, and correctness checks named here, not style lints. Style findings in someone else's crate or module aren't ours to fix.
 				- CodeQL reports only on source inside the database's root. For its run, vendor the dependencies into the tree first (`cargo vendor`, `go mod vendor`, unpacked sdists for Python).
 			- Any report fails the test that made it.
@@ -646,6 +707,7 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 			- Every tool is pinned and runs in the build container or lint image, never installed on the host.
 			- Each new gate is watched to fail before it's trusted, by planting the leak it's meant to catch and seeing it go red.
 			- Known-advisory scans run on every full run: `cargo deny check advisories` or `cargo audit`, `govulncheck`, and `pip-audit`. They cover third-party code only, which is the point.
+				- Runtime dependencies only. `cargo deny` sets `exclude-dev = true`, and govulncheck stays in its default mode, which reports only what the code calls.
 		- For Rust:
 			- Safe Rust leaks only through `Rc` or `Arc` cycles, `mem::forget`, `Box::leak`, and collections that grow forever. Real leaks and memory errors come from `unsafe` and FFI, in our crates or in dependencies.
 			- Every full run builds the whole test suite with AddressSanitizer and LeakSanitizer, in a build dir of its own.
@@ -661,6 +723,7 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 			- Traps:
 				- Without `-Zbuild-std`, std isn't instrumented. ASan mostly copes, but TSan gives false reports.
 				- Without an explicit `--target`, the sanitizer flags reach build scripts and proc macros, and the build fails in odd places.
+				- Without feature `shcl3` on, neither shcl crate is built, so the sanitizer, Miri and CodeQL runs use `--all-features`.
 				- LSan reports at process exit, so a leak fails the whole test binary, not one test. Rerun with `--test-threads=1` and a test-name filter to find which.
 				- Miri can't call FFI and has limited file and network access. A test that needs them gets `#[cfg_attr(miri, ignore)]` with a one-line reason. It's not silently left out.
 				- Miri doesn't count memory reachable from a `static` as a leak, so a cache in a static that grows forever passes. The soak test catches that.
@@ -681,6 +744,7 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 				- `-race` needs cgo on some platforms. A job with `CGO_ENABLED=0` fails to build it or skips it, so check the job's env.
 				- `-race` is 2 to 20 times slower and uses 5 to 10 times the memory. Size the job's timeout for it.
 		- For Python:
+			- These cover the Python wrapper and its runtime dependencies. The cicd scripts are build tooling no user runs, so ruff is all they get.
 			- Python leaks are references held too long: module-level caches, `functools.lru_cache` on a method, closures kept in a global list, and C extensions that drop a reference count.
 			- Every full run runs the tests with `-X dev` and `-W error::ResourceWarning`, so an unclosed file or socket fails the test.
 			- Every full run runs the tests under `pytest-memray`. Each test that loops gets `@pytest.mark.limit_leaks(...)` with a margin. memray sees native allocations, so leaks in C extensions show up, third-party ones included.
@@ -714,6 +778,53 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- The repo has no GitHub Actions workflow yet.
 		- There's no CLI of its own here. The nearest thing is the ops runners the shared cases drive.
 		- Both local Macs are Intel, so this is the only Apple Silicon run.
+
+- cicd flags for a full run that changes nothing in the tree
+	- ID: 2026102319573100
+	- Type: Enhancement
+	- Status: Queued
+	- Priority: Avg
+	- Opened: 2026-10-23
+	- Opened by: JC
+	- Requirements:
+		- One command line runs every check without rewriting a tracked file.
+		- A flag to turn off each stage that has none today: format, lint, and tests.
+		- Fuzz can run with `--ci`, which today turns it off with no way back on.
+		- Give the C container a name or label, so a run's container can be found.
+	- Notes:
+		- Without `--ci`, the format stage rewrites tracked files with `gofmt -w`, `cargo fmt`, and `clang-format -i`.
+		- Until then a full test run goes in 2 steps, `--ci --leakcheck --no-sync -y` and then the fuzz by hand.
+
+- Python test reads a file in the locale's encoding
+	- ID: 2026102323122726
+	- Type: Bug
+	- Status: Queued
+	- Severity: Low
+	- Opened: 2026-10-23 23:12
+	- Steps to reproduce [Bug]:
+		- Run the Python unit tests on Windows, without `PYTHONUTF8=1`.
+	- Incorrect behavior [Bug]:
+		- `test_upgrade_on_write` fails with a `UnicodeDecodeError` from cp1252, at `test_shclw.py:135`.
+	- Expected behavior [Bug]:
+		- It passes, as it does in UTF-8 mode.
+	- Reproduced [Bug]: 2026-10-23, on vm925w with Python 3.14.
+	- Possible cause [Bug]: `read_text()` with no encoding, at lines 135, 146 and 186. The written file is UTF-8.
+
+- C test tools don't run on Windows
+	- ID: 2026102323122732
+	- Type: Bug
+	- Status: Queued
+	- Severity: Low
+	- Opened: 2026-10-23 23:12
+	- Related IDs: 2026101512024174
+	- Steps to reproduce [Bug]:
+		- Build the C driver and API tests with mingw-w64 on Windows, and run `cicd/c_cases.py` with the driver.
+	- Incorrect behavior [Bug]:
+		- `c_cases.py` compares no op, since the driver's stdout is in text mode and every line ends in CRLF.
+		- `tests/api_test.c` doesn't compile, since it includes `sys/wait.h` for the race test.
+	- Expected behavior [Bug]:
+		- The shared cases and the API tests run on Windows, so the C paths there have tests.
+	- Reproduced [Bug]: 2026-10-23, on vm925w. With CRLF turned back to LF in front of the driver, 58 of 59 cases passed, 058 differing as expected.
 
 - Say which layer a read came from
 	- ID: 2026102114101028
@@ -887,23 +998,6 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Related IDs: 2026101513330009
 	- Note: `Merged` finds them with a second parse in each language. shcl's parser sees each fold, so a call there would be cheaper and could take that code's place.
 
-- Python: run from a copied file
-	- ID: 2026101513330050
-	- Type: Feature
-	- Status: Waiting on UAT
-	- Priority: Low
-	- Opened: 20261015-133300
-	- Opened by: JC
-	- Parent ID: 2026101512024161
-	- Note: Lenscart bundles shcl's wheel in its packages. Folderkite parses shcl by hand in its Python tools, since nothing is installed there.
-	- Progress log:
-		- 2026-10-21: A `shcl.py` copied beside `shclw.py` is used first, then the installed one. The copy loads under its own name, so a program that still imports an older `shcl` keeps it. README says so.
-		- Verified: `test_copied` runs the wrapper from a package with 3.0 copied beside it and 1.2 on the path, and fails with the copy lookup taken out. `test_none` checks the message with nothing found.
-	- Decisions:
-		- The copy beside the wrapper wins over the installed one, since bundling it is a choice. Waits on JC with the parent's question.
-	- Commit: a4909af
-	- Test case: `source/python/tests/test_shclw.py`, `test_copied` and `test_none`.
-
 - Rename the project shclwrap
 	- ID: 2026101513524769
 	- Type: Task
@@ -926,6 +1020,31 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Swept: `git grep -iE 'shcl[-_]wrapper'` finds nothing.
 	- Closed: 20261015-135423
 	- Acceptance signoff: Self-closed: mechanical rename.
+
+- shcl analyzer probe fails under the container's clang
+	- ID: 2026102113502809
+	- Type: Bug
+	- Status: Done
+	- Severity: High
+	- Opened: 2026-10-21
+	- Related IDs: 2026101916500102
+	- Steps to reproduce [Bug]:
+		- Push branch `wip/round-1021-2026101916500102`, or run `cicd.bash --ci` on it.
+	- Incorrect behavior [Bug]:
+		- The lint stage stops with "analyze-shcl missed the planted double free (shcl3.clang)".
+	- Expected behavior [Bug]:
+		- clang flags the planted double free in the stand-in `shcl.h`, as it did with clang 19 on the host.
+	- Reproduced [Bug]: 2026-10-21, in the pre-push gate. The container has clang-22. Again on 2026-10-23, in the C image.
+	- Possible cause [Bug]: clang-22 handles the header flag or the probe differently. Not looked at yet.
+	- Actual cause [Bug]:
+		- clang-22 does flag it, at the same line, but reworded the message. clang 19 says "Attempt to free released memory", and clang-22 "Attempt to release already released memory". The probe looked for `warning: .*free`.
+	- Actual fix [Bug]: The probe matches the check name at the planted line, `[unix.Malloc]` for clang and `[-Wanalyzer-double-free]` for gcc, not the message.
+	- Verified: `bash cicd/c-checks.bash lint 3 WORK` passed with the probe, and printed shcl's counts: 1 and 15 in 3.0, 0 and 8 in 2.0, the same as clang 19 on the host. On that run's probe output, the old match failed both clang reports and the new one passed all 4. clang-22 without `-analyzer-opt-analyze-headers` reports nothing, so the probe still fails without it. `cicd.bash --ci --quick -y` and shellcheck passed.
+	- Swept: the leak and null probes in leakcheck mode match on `LeakSanitizer` and the check name, not message text. The analyze-shcl counts match ` warning: `, which both clang versions print.
+	- Branch: round-1023
+	- Test case: vFKcU, the analyze-shcl probe in `cicd/c-in-container.bash` lint mode.
+	- Acceptance signoff: Self-closed: the probe failed before the fix and passes after, under the container's tools.
+	- Closed: 2026-10-23
 
 - The full run's CodeQL step can't make its cache dir, since the C checks run as the caller
 	- ID: 2026101914200000
@@ -1041,6 +1160,50 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Swept: `Upgrade` and `UpgradeFile` in Go `shclw3` and Rust `v3`. The 1.2 and 2.0 adapters convert nothing. A format 3 file passed with `from` 2 that 2.0 has errors on, such as `tags: [a, b]`, is still left alone.
 	- Closed: 20261017-11325800
 	- Acceptance signoff: Self-closed: the 2.0 check is now required in every build, per 2026101613005800, and the test failed before the fix and passes after.
+
+- CICD `--leakcheck` and `--no-leakcheck`
+	- ID: 2026101916500101
+	- Type: Enhancement
+	- Status: Done
+	- Priority: High
+	- Opened: 2026-10-19
+	- Opened by: JC
+	- Related IDs: 2026101816214270
+	- Requirements:
+		- CICD should have both `--leakcheck` (e.g. useful to add back in for `--quick`), and `--no-leakcheck` (e.g. to exclude from default or with `--quiet`).
+	- Notes:
+		- Pre-next-cut.
+		- Both flags are already in the CICD flags item above. Check it against this before closing either.
+	- Progress log:
+		- 2026-10-21: Both flags were already in, from 2026101816214270, and match this. No flags runs the leak checks, `--no-leakcheck` drops them from any mix, `--quiet` included, and `--leakcheck` adds them to `--ci` or `--quick`. The later of the two wins.
+		- `--quick --leakcheck` now fetches a missing pinned header. It skipped C before, and the leak stage would then fail in the container. The leak checks need the network anyway.
+		- Added `--dry-run`, which shows the stages a mix of flags picks and stops.
+	- Verified: `cicd/flags-test.bash` passes on 14 flag mixes, and fails with either flag broken. `--quick --leakcheck` fetched a missing header, and `--quick` alone still skipped it.
+	- Branch: round-1021
+	- Test case: vFKCk, `cicd/flags-test.bash`, run in the tests stage.
+	- Acceptance signoff: Self-closed: the flags were in, and now have a regression test.
+	- Closed: 2026-10-21
+
+- Make shcl's analyzer and CodeQL findings fatal, per pin
+	- ID: 2026102321270148
+	- Type: Task
+	- Status: Done
+	- Priority: High
+	- Opened: 2026-10-23 21:27
+	- Parent ID: 2026102113393169
+	- Prereq IDs: 2026102321270143
+	- Requirements:
+		- Make the passes fatal, with a list of known findings per pin, matched exactly. A pin bump that adds a finding fails, and one that loses one asks for the list to be pruned.
+	- Progress log:
+		- 2026-10-23: Each pin's list is `source/c/shcl-known/<rev>.txt`, a line per finding with its reason. `cicd/shcl_known.py` matches a report or the SARIF against it, and names each finding that's new or gone. `make analyze-shcl` and the leak run's CodeQL step fail on either. `make analyze-shcl-report` writes the reports only, and `shcl_known.py list` prints a report as list lines, for a new pin.
+	- Decisions:
+		- A finding is matched on tool, file, line, column and check, not on the message, since clang 19 and 22 word some checks differently.
+		- This reverses 2026101916500102's "shcl's findings report rather than fail for now", as this item asked.
+	- Verified: `bash cicd/c-checks.bash lint 3 WORK` passed with gcc-15 and clang-22, both pins matching their lists, probe vGAuM included. `leakcheck-resume` over the saved `codeql.sarif` passed CodeQL, CTU and the heaptrack soak, and failed naming the finding with one line taken out of 3.0's list. The compare also failed on a dropped, an added, and a doubled line, and on a pin with no list. `cicd/cicd.bash --ci --quick -y`, `cicd/flags-test.bash`, ruff and shellcheck passed.
+	- Swept: every reader of shcl's findings: `make analyze-shcl`, the lint probe, the CodeQL split, and the lint stage's line in `cicd.bash`. The CTU pass reads our files only until 2026102321270154.
+	- Test case: vGAuM, in `cicd/c-in-container.bash` lint mode.
+	- Acceptance signoff: Self-closed: the gate was watched to fail both ways, and passes on both pins.
+	- Closed: 2026-10-23 21:53
 
 - Make shcl 3.0 the floor
 	- ID: 2026101613005800
@@ -1443,6 +1606,34 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Closed: 20261017-11325800
 	- Acceptance signoff: Self-closed: every shared case passes on all 3 versions. The memory growth goes away with 1.2 and 2.0, in 2026101613005800.
 
+- clang-tidy refuses a cast in the upgrade line lists
+	- ID: 2026102114534365
+	- Type: Bug
+	- Status: Done
+	- Severity: Avg
+	- Opened: 2026-10-21
+	- Related IDs: 2026101513330012, 2026101513330013
+	- Steps to reproduce [Bug]:
+		- Run `cicd.bash --ci` on branch `wip/round-1021-2026101513330012`.
+	- Incorrect behavior [Bug]:
+		- The C lint stage stops on `shclw.c:948`, "do not cast 'char *' to 'size_t *' through 'void *'" (bugprone-casting-through-void).
+	- Expected behavior [Bug]:
+		- clang-tidy passes, as it did before the line lists were added.
+	- Reproduced [Bug]: 2026-10-21, in the pre-push gate.
+	- Possible cause [Bug]: the lists sit inside the result's single memory block, and the code reaches them by a byte offset. The quick checks don't run clang-tidy.
+	- Actual cause [Bug]:
+		- The lists were found from a `char *` at a byte offset, then cast to `size_t *` through `void *`, which bugprone-casting-through-void refuses.
+	- Progress log:
+		- 2026-10-23: The wip work is on round-1023 now. Its shared case is `059-upgrade-lines`, since round-1023 already had a 054.
+	- Actual fix [Bug]: The lists start at the end of the diagnostics array, cast straight from `shclw_diag *`. shclw_diag holds `size_t` fields, so that end is aligned for them.
+	- Verified: clang-tidy refuses the old cast and passes the new one. `bash cicd/c-checks.bash lint 3 WORK` and `bash cicd/c-checks.bash test 3 WORK` pass, and so does `cicd/cicd.bash --ci --quick -y`.
+	- Swept: no other cast through `void *` to a typed pointer is left in the C tree, apart from `free` and `qsort` arguments. The diagnostics' pointer in the same block is a plain cast from the result's own type.
+	- Branch: round-1023, from `wip/round-1021-2026101513330012`.
+	- Commit: 2cb7404
+	- Test case: the C lint stage's clang-tidy, which failed on the old cast and passes now.
+	- Acceptance signoff: Self-closed: a mechanical fix, and the lint that failed passes.
+	- Closed: 2026-10-23 20:18
+
 - Put writes a float32 with float64 noise
 	- ID: 2026101513330006
 	- Type: Bug
@@ -1580,6 +1771,118 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Swept: Put, PutSyntax, Comment, and Remove in Go `shclw1` to `shclw3` and Rust `v1` to `v3`, each on the first, an inner, and the last step of a path, with the rest there and not there. 3.0 needs no check of its own, since shcl 3.0 refuses these itself, and the test walks it too. Remove takes every instance on every version, as decided. No other `Doc` or `ShclDoc` method edits the document. `Write` and `UpgradeFile` take a file path, not a document path.
 	- Closed: 20261017-11325800
 	- Acceptance signoff: Self-closed: reproduced, and its test failed before the fix and passes after. The narrowed path is what `Each` already gave.
+
+- Upgrade lists the lines it changed
+	- ID: 2026101513330012
+	- Type: Feature
+	- Status: Done
+	- Needs local test suite run?: No. The full run passed on 2026-10-23.
+	- Priority: Avg
+	- Opened: 20261015-133300
+	- Opened by: JC
+	- Related IDs: 2026101513330013, 2026101513330003, 2026102114534365
+	- Note: Quillroute diffs the text line by line to say how many lines were written differently.
+	- Progress log:
+		- 2026-10-21: built in all 4 languages with `Lost` and `Rewritten` line lists on the upgrade result. The quick checks passed, but clang-tidy failed the gate. See 2026102114534365.
+		- 2026-10-23: On round-1023 with the cast fixed. The shared case is now `059-upgrade-lines`.
+	- Decisions:
+		- `Upgraded.Rewritten` lists the original's lines, from 1, that the upgraded text doesn't have as typed, apart from lost ones. Lines of the original, since that's what the user can look up in the backup.
+		- It goes on `Upgraded`, not in a call like `Rewrites`, since the upgrade has both texts.
+		- Lines match as a multiset, line ends included, not by a diff. A line that only moved wasn't written differently.
+		- design.md has these under Format and upgrade, and Decisions.
+	- Verified: Go, Rust, C and Python shared cases, C plain and sanitized and as C++, the C API tests, go vet, staticcheck, clippy pedantic, ruff, the C container lint, and `cicd/cicd.bash --ci --quick -y`.
+		- 2026-10-23: The full run at `7b2b21e` passed over the new C code: CodeQL with no finding of ours, CTU, the heaptrack soak, and the 60s fuzz, 586 cases over Go, Rust, C and Python.
+	- Swept: `Upgrade` and `UpgradeFile` in Go `shclw3`, Rust `v3`, C `shclw3.c` and Python, all four ops runners, and fuzz.py, which compares the op output as is. `Open` doesn't show the lists, as it doesn't show `Unsure`.
+	- Branch: round-1023
+	- Commit: 2cb7404
+	- Test case: tests/cases/059-upgrade-lines, plus the new line in every upgrade case's want file. C `test_upgrade_file` checks the lists survive `shclw_upgrade_file`'s copy.
+	- Acceptance signoff: Self-closed: the full run it waited on passed, and it has its shared case. The `C:\new` call waits on JC under 2026101513330013.
+	- Closed: 2026-10-23 23:00
+
+- List the lines a load couldn't use
+	- ID: 2026101513330018
+	- Type: Feature
+	- Status: Done
+	- Needs local test suite run?: No. The full run passed on 2026-10-23.
+	- Priority: Avg
+	- Opened: 20261015-133300
+	- Opened by: JC
+	- Related IDs: 2026101513330009, 2026101513330012
+	- Requirements:
+		- Line numbers, not only a count.
+	- Note: Wovenshell builds the list from error diagnostics and drops line 0. Folderkite warns at load with the count. Cobblevale only tracks whether there were any.
+	- Progress log:
+		- 2026-10-21: `Unused()` in all 4 languages, and an `unused` op.
+		- 2026-10-21: The full run at `15509b0` passed the C analyzers and the sanitized tests, and a second run without the leak checks passed the fuzz. The full run stopped at a CodeQL finding in `Merged`'s code, 2026101513330009, so CTU and the heaptrack soak weren't reached.
+		- 2026-10-23: The full run at `7b2b21e` passed, leak checks and fuzz included.
+	- Decisions:
+		- Every error's line, once each, in order, leaving out line 0. Not only the lines shcl's `LostCount` counts, since a line kept as written but read as nothing is still lost to the program.
+		- A list of `Spot`s, each a line and a layer, rather than the plain numbers the upgrade gives, so a layered document's lines say which layer they're in.
+		- C leaves out the 2.0 errors a refused open keeps in `shclw_diags`, so it gives what Go and Rust give.
+	- Verified: the new shared case passes in Go, Rust, C, and Python, and so does the fuzz with the new op.
+		- 2026-10-23: `cicd/cicd.bash --ci --leakcheck --no-sync -y` passed: format, lint with the C container lint, the tests with sanitized C, CodeQL with no finding of ours, CTU, and the heaptrack soak. The 60s fuzz passed 586 cases over Go, Rust, C and Python, and Go's 30s fuzzer passed.
+	- Swept: all 4 languages and runners, and fuzz.py, as in 2026101513330009.
+	- Branch: round-1021
+	- Commit: 56aedbc
+	- Test case: tests/cases/054-merged-unused, and the fuzz op.
+	- Acceptance signoff: Self-closed: the full run it waited on passed, and it has its shared case and fuzz op.
+	- Closed: 2026-10-23 23:00
+
+- gcc's analyzer at `-O0`
+	- ID: 2026102321270159
+	- Type: Task
+	- Status: Done
+	- Priority: Avg
+	- Opened: 2026-10-23 21:27
+	- Parent ID: 2026102113393169
+	- Related IDs: 2026102322354803
+	- Requirements:
+		- gcc's analyzer at `-O1` missed a planted leak it found at `-O0`. Check whether `-O0` finds more in our code, and what it costs.
+	- Progress log:
+		- 2026-10-23: `-O0` finds nothing more in our code. Every file `make analyze` covers is clean at both levels, and shcl's findings are the same at both, on both pins.
+		- It costs about 16% more CPU on our files, 10.6s to 12.4s over 2 runs each, at load 8 to 14. On shcl it's 79s to 87s for 3.0 and 20s to 24s for 2.0, one run each.
+		- What `-O1` misses: it deletes an allocation that's only written and then freed, so a leak on an early return before the free is gone before the analyzer runs. An unused `malloc` goes the same way. `-O2` misses the same 2.
+		- The gcc lines in `make analyze` and `analyze-shcl` now run at `-O0`, from one `GCC_ANALYZE` in `source/c/Makefile`. This goes past the wording, which asked only for the check. shcl's lists needed no change.
+	- Decisions:
+		- `-O0` replaces `-O1` for gcc's analyzer rather than running beside it. `-O0` found everything `-O1` did in every probe, and the `-O1` warnings still come from the test builds, which gcc-15 builds at `-O1` with `-Werror`.
+		- clang's lines stay at `-O1`, since clang's analyzer works on the source, not the optimized code.
+	- Verified: `bash cicd/c-checks.bash lint 3 WORK` passed in 171s, with gcc-15 at `-O0` clean on our files, both pins matching their lists, and the new probe. On the host, the probe's leak failed `make analyze` with gcc's `analyzer-malloc-leak`, and with `GCC_ANALYZE` set back to `-O1` the target passed. `cicd/cicd.bash --ci --quick -y`, `lint-report.bash`, `flags-test.bash` and shellcheck passed.
+	- Swept: every gcc `-fanalyzer` line. `make analyze` and `analyze-shcl` use `GCC_ANALYZE`. The leak mode's null probe still calls gcc-15 at `-O1` itself, since it checks the tool, not the gate's flags. Go, Rust and Python have no gcc analyzer pass.
+	- Branch: round-1023
+	- Test case: vGBqv, in `cicd/c-in-container.bash` lint mode: a leak `-O1` optimizes away must fail `make analyze` with gcc's check name.
+	- Acceptance signoff: Self-closed: has a regression test, finds nothing new in our code, and costs little. It departs from the wording by changing the gate as well.
+	- Closed: 2026-10-23 22:38
+
+- Report blocks that shcl merged because they share a name
+	- ID: 2026101513330009
+	- Type: Feature
+	- Status: Done
+	- Needs local test suite run?: No. The leak checks passed on 2026-10-23.
+	- Priority: Avg
+	- Opened: 20261015-133300
+	- Opened by: JC
+	- Related IDs: 2026101513330018, 2026101513330004, 2026102115285934
+	- Requirements:
+		- List each merged block, with the lines of both copies.
+	- Note: Tallowbase, Cobblevale, and Radixmill all lost a second copy of a block without a word. shcl's H002 hint only fires when the 2 blocks are apart.
+	- Progress log:
+		- 2026-10-21: `Merged()` in all 4 languages, and a `merged` op. Each `Merge` has the kept copy's path and every copy's line, and a layer on a layered document.
+		- 2026-10-21: The full run at `15509b0` failed CodeQL on this: `cpp/suspicious-pointer-scaling` at `shclw.c:1400`, the `(char *)(lines + nl)` in `shclw_i_merges_of`'s packed result. The C analyzers and the sanitized tests passed, and a second run without the leak checks passed the 60 second fuzz.
+		- 2026-10-23: The block is allocated outside a `?:` now. The `?:` hid from CodeQL that it's raw `calloc` memory, so it read the block as all `shclw_merge`. The upgrade result's block from 2026101513330012 had the same shape and 3 more findings, fixed the same way.
+	- Decisions:
+		- A call beside `Diags`, not a field filled in at load, since it parses the text twice more.
+		- Every fold is listed, next to each other or apart, at every level of a block, and a key repeated with the same value too, as H002 counts them. A dotted line that only reopens a block isn't a copy.
+		- The wrapper finds a fold with a second parse where each folded line's name is made unique. shcl's parser would be the better place; 2026102115285934 asks for that.
+		- design.md has these under Loading and saving, Ops scripts, and Decisions.
+	- Verified: the new shared case passes in Go, Rust, C (plain and under ASan and UBSan), and Python. A 90 second fuzz of all 4 with the new ops found no difference. The C lint stage passes.
+		- 2026-10-23: `bash cicd/c-checks.bash leakcheck 3 WORK` passed: CodeQL with no open finding of ours, CTU, and the heaptrack soak. The same run at `1cf9f96`, before the fix, failed on this finding, the 3 in the upgrade result, and 2026101513330017's. Also the C container lint and tests, and `cicd.bash --ci --quick -y`.
+	- Swept: Go `shclw3`, Rust `v3`, C `shclw3.c`, and Python each have `Merged`, held by the `Doc` interface, `ShclDoc`, and Go's `docMethods` list. All 4 ops runners and fuzz.py's op list have `merged`.
+		- 2026-10-23: every packed result block in the C tree. `shclw_i_copy_strs`, `shclw_i_copy_nodes`, and `shclw_i_copy_diags` put only `char` text after their array, and the other `?:` allocations in `shclw3.c` each hold one type.
+	- Branch: round-1021, and round-1023 for the CodeQL fix.
+	- Commit: 56aedbc
+	- Test case: tests/cases/054-merged-unused, the fuzz op, and the leak run's CodeQL step.
+	- Acceptance signoff: Self-closed: the CodeQL finding was all that was left, and the leak run that failed on it passes.
+	- Closed: 2026-10-23 20:43
 
 - Upgrade swaps the 2.x banner for the current one
 	- ID: 2026101513330011
@@ -1723,6 +2026,58 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Progress log:
 		- 20261015: public, with secret scanning on. A plain `go get` works with no settings.
 	- Closed: 2026-10-15
+
+- C Makefile lists an `analyze-ctu` target it has no rule for
+	- ID: 2026102322213500
+	- Type: Bug
+	- Status: Done
+	- Priority: Low
+	- Opened: 2026-10-23
+	- Opened by: JC
+	- Requirements:
+		- Add the rule, or take the name out of `.PHONY` in `source/c/Makefile`.
+	- Notes:
+		- `make analyze-ctu` today says there's nothing to do and exits 0, so it looks like a pass.
+	- Actual cause:
+		- The name was in `.PHONY` from the first C memory gates commit (`90b409c`). The CTU pass was always in `cicd/c-in-container.bash` leak mode.
+	- Actual fix: took the name out of `.PHONY`. `make analyze-ctu` now stops with "No rule to make target" and exits 2. The Lint stage checks that every `.PHONY` name in the Makefile has a rule.
+	- Decisions:
+		- Took the name out rather than adding a rule. The CTU pass needs clang-22, the pin revs and a map built across both pins, all of which the container script already has.
+	- Verified: the new check passed on the fixed Makefile, and failed naming `analyze-ctu` on the one before the fix. It also failed on a Makefile with no `.PHONY` line. `cicd/cicd.bash --ci --quick -y` passed with it.
+	- Swept: `source/c/Makefile` is the only Makefile in the repo, and the check walks all 14 of its `.PHONY` names.
+	- Branch: round-1023
+	- Test case: vGBt9, in `cicd/cicd.bash` Lint.
+	- Acceptance signoff: Self-closed: a mechanical fix, and its check was watched to fail.
+	- Closed: 2026-10-23 22:38
+
+- CTU pass reports a null pointer to memcmp in the upgrade
+	- ID: 2026102320384131
+	- Type: Bug
+	- Status: Done
+	- Severity: Low
+	- Opened: 2026-10-23 20:38
+	- Related IDs: 2026101513330009, 2026102113393169
+	- Steps to reproduce [Bug]:
+		- Run `bash cicd/c-checks.bash leakcheck 3 WORK` and read `cicd/artifacts/leakcheck/c-leakcheck-v3/ctu-v3-shclw3.c.log`.
+	- Incorrect behavior [Bug]:
+		- `shclw3.c:1491`, in `upgraded_ends`: "Null pointer passed to 1st parameter expecting 'nonnull'" (core.NonNullParamChecker), on `memcmp(t, text, len)`.
+	- Expected behavior [Bug]:
+		- The CTU logs are empty, as the other 5 are.
+	- Reproduced [Bug]: 2026-10-23, at round-1023 with 2026101513330009's fix, the first leak run since 2026-10-21 to reach CTU. Also on the host's clang 19.
+	- Possible cause [Bug]: `t` can stay NULL when `shclw_i_place_block` succeeds with an empty result, and `memcmp` with a NULL pointer is undefined even at length 0. Not checked.
+	- Actual cause [Bug]:
+		- A false report. `shclw_i_place_block` never returns OK with no text. The path is 6 calls deep, past the analyzer's inlining depth, so it didn't follow `shclw_i_fail` and guessed that a failed allocation returned `SHCLW_OK`. With the always-inline size raised, the report went away with no code change.
+	- Notes:
+		- The CTU logs are written but nothing reads them, so this doesn't fail the run.
+	- Actual fix [Bug]:
+		- `shclw_i_fail` and `shclw_i_ok` have no branches now, with the message work moved to a helper, so the analyzer inlines them at any depth.
+		- A CTU log that isn't empty fails the leak run.
+	- Verified: the leak run passed (CodeQL, CTU with all 6 logs empty, the heaptrack soak). With the old `shclw.c` and the new check, the same run failed on this finding. Also the C container lint, the sanitized C tests, and `cicd.bash --ci --quick -y`.
+	- Swept: every function in `source/c` that returns a `shclw_kind` from an `shclw_error`. `too_new` and `not_finite` have no branches, and `set_err` maps a status. All 6 CTU logs are empty.
+	- Branch: round-1023
+	- Test case: the leak run's CTU step, which now fails on any finding.
+	- Acceptance signoff: Self-closed: a false report, and the new check was watched to fail on it.
+	- Closed: 2026-10-23 21:20
 
 - Comment on a path with several instances changes the first one on 1.2 and 2.0
 	- ID: 2026101514071600

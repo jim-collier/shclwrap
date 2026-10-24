@@ -9,6 +9,7 @@
 #   make SHCL_DIR=... SHCL2_DIR=... drive    the sanitized shclw-drive, for the shared cases
 #   make SHCL_DIR=... SHCL2_DIR=... strict   compile only, with gcc-15 at C17
 #   make SHCL_DIR=... SHCL2_DIR=... lint     clang-tidy
+#   make SHCL_DIR=... SHCL2_DIR=... analyze-shcl   the analyzers over shcl itself, held to shcl-known/
 #   make format-check | format
 
 SHCL_DIR ?=
@@ -45,7 +46,7 @@ V2_DEPS := shclw3_v2.h shclw3_v2_names.h $(SHCL2_DIR)/shcl.h
 
 FORMATTED := $(wildcard *.c *.h tests/*.c)
 
-.PHONY: all test drive drive-plain strict lint analyze analyze-ctu names format format-check clean
+.PHONY: all test drive drive-plain strict lint analyze analyze-shcl analyze-shcl-report names format format-check clean FORCE
 all: test drive strict
 
 $(OUT)/asan $(OUT)/plain $(OUT)/cxx:
@@ -120,18 +121,45 @@ lint:
 	$(CLANG_TIDY) --quiet shclw3_v2.c -- -std=c11 -I. -I$(SHCL2_DIR)
 
 # Analyzer diagnostics must be clean; -Werror makes both compiler frontends fail.
+# gcc's at -O0, since -O1 deletes a write-only malloc/free pair before the
+# analyzer sees it, leak and all. The -O1 warnings come from the test builds.
+GCC_ANALYZE := -std=c17 -O0 -g -fanalyzer
 ANALYZE_C := $(LIB) shclw-drive.c tests/api_test.c
 analyze:
 	@set -e; for file in $(ANALYZE_C); do \
-		$(CC15) -std=c17 -O1 -g $(WARN) -Werror -I. -I$(SHCL_DIR) -fanalyzer -c -o /dev/null "$$file"; \
+		$(CC15) $(GCC_ANALYZE) $(WARN) -Werror -I. -I$(SHCL_DIR) -c -o /dev/null "$$file"; \
 		$(CLANG) --analyze -std=c11 -O1 -g $(WARN) -Werror -I. -I$(SHCL_DIR) -Xanalyzer -analyzer-output=text -o /dev/null "$$file"; \
 	done
-	$(CC15) -std=c17 -O1 -g $(WARN) -Werror -isystem $(SHCL_DIR) -I. -fanalyzer -c -o /dev/null tests/shcl_impl.c
-	$(CLANG) --analyze -std=c11 -O1 -g $(WARN) -Werror -isystem $(SHCL_DIR) -I. -Xanalyzer -analyzer-output=text -o /dev/null tests/shcl_impl.c
-	$(CC15) -std=c17 -O1 -g $(WARN) -Werror -I. -isystem $(SHCL2_DIR) -fanalyzer -c -o /dev/null shclw3_v2.c
+	$(CC15) $(GCC_ANALYZE) $(WARN) -Werror -I. -isystem $(SHCL2_DIR) -c -o /dev/null shclw3_v2.c
 	$(CLANG) --analyze -std=c11 -O1 -g $(WARN) -Werror -I. -isystem $(SHCL2_DIR) -Xanalyzer -analyzer-output=text -o /dev/null shclw3_v2.c
-	$(CC15) -std=c17 -O1 -g $(WARN) -Werror -I. -isystem $(SHCL2_DIR) -fanalyzer -c -o /dev/null shclw3_v2_impl.c
-	$(CLANG) --analyze -std=c11 -O1 -g $(WARN) -Werror -I. -isystem $(SHCL2_DIR) -Xanalyzer -analyzer-output=text -o /dev/null shclw3_v2_impl.c
+
+# shcl's own code, which every program built on this runs. Not -isystem, and
+# clang told to look in headers, or neither reports a thing in shcl.h. No style
+# warnings, since it isn't ours. Each pin's findings must match its list in
+# shcl-known/ exactly, read and judged there (backlog 2026102321270143).
+# analyze-shcl-report writes the reports and checks nothing.
+SHCL_REPORT ?= $(OUT)/analyze-shcl
+SHCL_KNOWN ?= shcl-known/$(notdir $(SHCL_DIR)).txt
+SHCL2_KNOWN ?= shcl-known/$(notdir $(SHCL2_DIR)).txt
+SHCL_ANALYZED := $(foreach v,shcl3 shcl2,$(SHCL_REPORT)/$(v).gcc.txt $(SHCL_REPORT)/$(v).clang.txt)
+$(SHCL_REPORT)/shcl3.%: TU := tests/shcl_impl.c
+$(SHCL_REPORT)/shcl3.%: TU_DIR := $(SHCL_DIR)
+$(SHCL_REPORT)/shcl2.%: TU := shclw3_v2_impl.c
+$(SHCL_REPORT)/shcl2.%: TU_DIR := $(SHCL2_DIR)
+$(SHCL_REPORT):
+	mkdir -p $@
+$(SHCL_REPORT)/%.gcc.txt: FORCE | $(SHCL_REPORT)
+	$(CC15) $(GCC_ANALYZE) -I. -I$(TU_DIR) -c -o /dev/null $(TU) >$@ 2>&1 || { cat $@ >&2; exit 1; }
+$(SHCL_REPORT)/%.clang.txt: FORCE | $(SHCL_REPORT)
+	$(CLANG) --analyze -std=c11 -O1 -g -I. -I$(TU_DIR) -Xanalyzer -analyzer-opt-analyze-headers -Xanalyzer -analyzer-output=text -o /dev/null $(TU) >$@ 2>&1 || { cat $@ >&2; exit 1; }
+analyze-shcl-report: $(SHCL_ANALYZED)
+analyze-shcl: analyze-shcl-report
+	@rc=0; \
+	for tool in gcc clang; do \
+		python3 ../../cicd/shcl_known.py analyzer $(SHCL_KNOWN) $$tool $(SHCL_REPORT)/shcl3.$$tool.txt || rc=1; \
+		python3 ../../cicd/shcl_known.py analyzer $(SHCL2_KNOWN) $$tool $(SHCL_REPORT)/shcl2.$$tool.txt || rc=1; \
+	done; exit $$rc
+FORCE:
 
 format:
 	$(CLANG_FORMAT) -i $(FORMATTED)

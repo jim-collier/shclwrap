@@ -73,3 +73,15 @@ void shclw_i_v2_reads(shclw_i_v2_doc *v2, shclw_i_v2_elem each, void *ctx) {
 		}
 	}
 }
+
+void shclw_i_v2_paths(shclw_i_v2_doc *v2, shclw_i_v2_path each, void *ctx) {
+	shcl_doc *d = doc_of(v2);
+	shcl_str *paths = NULL;
+	size_t n = shcl_paths(d, &paths);
+	for (size_t k = 0; k < n; k++) {
+		size_t *lines = NULL;
+		size_t count = shcl_lines(d, paths[k].p, paths[k].n, &lines);
+		int reads = count == 1 && shcl_read_string_array(d, paths[k].p, paths[k].n).status == SHCL_GOOD;
+		each(ctx, paths[k].p, paths[k].n, lines, count, reads);
+	}
+}

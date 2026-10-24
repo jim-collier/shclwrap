@@ -238,7 +238,11 @@ impl fmt::Display for Error {
 impl std::error::Error for Error {}
 
 /// What an upgrade made of a file. `from` is the format it was written for,
-/// and `unsure` counts lines it couldn't convert for sure.
+/// and `unsure` counts lines it couldn't convert for sure. `lost` lists the
+/// lines of the original, from 1, with a value the old shcl read that the
+/// upgraded file doesn't have. `rewritten` lists the rest of the original's
+/// lines that the upgraded text doesn't have as typed. A line that only moved
+/// isn't one.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Upgraded {
 	pub text: String,
@@ -246,6 +250,39 @@ pub struct Upgraded {
 	pub changed: bool,
 	pub unsure: usize,
 	pub backup: String,
+	pub lost: Vec<usize>,
+	pub rewritten: Vec<usize>,
+}
+
+/// The lines of `was`, from 1, that `now` doesn't have as typed, leaving out
+/// the ones in `lost`. Lines are matched as a multiset, so a line that only
+/// moved isn't listed (design.md, Decisions).
+#[must_use]
+pub fn rewritten_lines(was: &str, now: &str, lost: &[usize]) -> Vec<usize> {
+	let mut have: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
+	for l in text_lines(now) {
+		*have.entry(l).or_default() += 1;
+	}
+	let mut out = Vec::new();
+	for (i, l) in text_lines(was).into_iter().enumerate() {
+		if lost.contains(&(i + 1)) {
+			continue;
+		}
+		match have.get_mut(l) {
+			Some(n) if *n > 0 => *n -= 1,
+			_ => out.push(i + 1),
+		}
+	}
+	out
+}
+
+// Split on LF and keep any CR, so a line whose ending changed counts as
+// written differently.
+fn text_lines(s: &str) -> Vec<&str> {
+	if s.is_empty() {
+		return Vec::new();
+	}
+	s.strip_suffix('\n').unwrap_or(s).split('\n').collect()
 }
 
 /// A value for `put`, with the Rust type folded down to the few shcl takes.
@@ -1437,6 +1474,11 @@ impl<L: Lib> Runner<'_, L> {
 		match L::upgrade(self.input, n) {
 			Ok(u) => {
 				self.say(&format!("from {} changed {} unsure {}", u.from, u.changed, u.unsure));
+				self.say(&format!(
+					"lost {} rewritten {}",
+					line_list(&u.lost),
+					line_list(&u.rewritten)
+				));
 				self.block(&u.text);
 			}
 			Err(e) => self.result(Some(e)),
@@ -1621,6 +1663,12 @@ fn join_floats(v: &[f64]) -> String {
 
 #[cfg(feature = "shcl3")]
 pub mod v3;
+
+// `[3 4]`, as Go prints a slice.
+fn line_list(lines: &[usize]) -> String {
+	let items: Vec<String> = lines.iter().map(usize::to_string).collect();
+	format!("[{}]", items.join(" "))
+}
 
 #[cfg(unix)]
 fn perm_bits(m: &fs::Metadata) -> u32 {

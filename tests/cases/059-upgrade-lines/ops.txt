@@ -1,0 +1,5 @@
+# The upgrade lists the lines of the original it lost, and the rest it
+# wrote differently. 2.0 read list as one string, and 3.0 can't hold that
+# with c under it. dir's line break is carried, so it's only rewritten.
+upgrade	2
+upgrade

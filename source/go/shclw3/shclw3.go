@@ -317,10 +317,11 @@ func Upgrade(text string, from int) (Upgraded, error) {
 	if err := oldErrors(old); err != nil {
 		return Upgraded{Text: text, From: u.Format}, err
 	}
-	fixed, err := carryReads(old, out.Text, FormatOf(text) == 1)
+	fixed, lost, err := carryReads(old, out.Text, FormatOf(text) == 1)
 	if err != nil {
 		return Upgraded{Text: text, From: u.Format}, err
 	}
+	out.Lost = lost
 	switch {
 	case banner:
 		fixed, err = shclw.PlaceBlock(shclw.SameEnds(text, fixed, infoEdit), in != text, infoEdit)
@@ -337,6 +338,7 @@ func Upgrade(text string, from int) (Upgraded, error) {
 		return Upgraded{Text: text, From: u.Format}, err
 	}
 	out.Text, out.Changed = fixed, fixed != text
+	out.Rewritten = shclw.RewrittenLines(text, fixed, lost)
 	return out, nil
 }
 
@@ -425,8 +427,9 @@ func oldErrors(old *shcl2.Document) *shclw.Error {
 // every path 2.0 reads one value at is read back against 2.0. A name 2.0 read
 // with an escape resolved can't be renamed here, so it's refused, unless the
 // file names format 1, since 1.2 read names as typed. So is a value that
-// still reads differently.
-func carryReads(old *shcl2.Document, up string, namesAsTyped bool) (string, error) {
+// still reads differently. The lines with a value 2.0 read that up doesn't
+// have at all come back as lost, in order.
+func carryReads(old *shcl2.Document, up string, namesAsTyped bool) (string, []int, error) {
 	d, _ := shcl.ParseKeepLines(up, shcl.Standard)
 	var bad []Diag
 	type setTo struct {
@@ -477,7 +480,14 @@ func carryReads(old *shcl2.Document, up string, namesAsTyped bool) (string, erro
 			bad = append(bad, carryDiag(old.Line(s.path), "the upgraded file doesn't read this value as shcl 2.0 read it"))
 		}
 	}
+	var lost []int
 	for _, p := range old.Paths() {
+		// Instances past the ones 3.0 still has are gone.
+		for _, l := range old.Lines(p)[min(now.Count(p), old.Count(p)):] {
+			if l > 0 {
+				lost = append(lost, l)
+			}
+		}
 		if old.Count(p) != 1 {
 			continue
 		}
@@ -485,15 +495,19 @@ func carryReads(old *shcl2.Document, up string, namesAsTyped bool) (string, erro
 		if was.Status == shcl2.Good && is.Status == shcl.Good && !slices.Equal(was.Value, is.Value) {
 			bad = append(bad, carryDiag(old.Line(p), "the upgraded file doesn't read this value as shcl 2.0 read it"))
 		}
+		if now.Count(p) == 1 && was.Status == shcl2.Good && is.Status != shcl.Good && now.ReadRaw(p).Status != shcl.Good {
+			lost = append(lost, old.Line(p))
+		}
 	}
 	if len(bad) == 0 {
-		return text, nil
+		slices.Sort(lost)
+		return text, slices.Compact(lost), nil
 	}
 	lines := map[int]bool{}
 	for _, b := range bad {
 		lines[b.Line] = true
 	}
-	return up, &shclw.Error{Kind: shclw.ErrRefused, Diags: bad,
+	return up, nil, &shclw.Error{Kind: shclw.ErrRefused, Diags: bad,
 		Msg: fmt.Sprintf("%d lines don't read as shcl 2.0 read them; fix them and upgrade again", len(lines))}
 }
 

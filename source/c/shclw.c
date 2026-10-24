@@ -60,9 +60,9 @@ const char *shclw_kind_name(shclw_kind k) {
 
 const char *shclw_severity_name(shclw_severity s) { return s == SHCLW_SEV_ERROR ? "error" : "hint"; }
 
-shclw_kind shclw_i_fail(shclw_error *err, shclw_kind kind, const char *path, const char *why, int sys_errno) {
+static void set_error(shclw_error *err, shclw_kind kind, const char *path, const char *why, int sys_errno) {
 	if (!err) {
-		return kind;
+		return;
 	}
 	err->kind = kind;
 	err->sys_errno = sys_errno;
@@ -78,15 +78,26 @@ shclw_kind shclw_i_fail(shclw_error *err, shclw_kind kind, const char *path, con
 	if (at > 0 && sys_errno && (size_t)at < sizeof err->msg) {
 		(void)snprintf(err->msg + at, sizeof err->msg - (size_t)at, ": %s", strerror(sys_errno));
 	}
+}
+
+// No branches, so clang's analyzer inlines it at any call depth and sees that
+// a failure keeps its kind. Past its depth limit it guessed SHCLW_OK.
+shclw_kind shclw_i_fail(shclw_error *err, shclw_kind kind, const char *path, const char *why, int sys_errno) {
+	set_error(err, kind, path, why, sys_errno);
 	return kind;
 }
 
-shclw_kind shclw_i_ok(shclw_error *err) {
+static void clear_error(shclw_error *err) {
 	if (err) {
 		err->kind = SHCLW_OK;
 		err->sys_errno = 0;
 		err->msg[0] = '\0';
 	}
+}
+
+// No branches, as with shclw_i_fail.
+shclw_kind shclw_i_ok(shclw_error *err) {
+	clear_error(err);
 	return SHCLW_OK;
 }
 
@@ -896,10 +907,12 @@ shclw_kind shclw_i_replace_read(const char *path, const char *was, size_t was_le
 	return k;
 }
 
-shclw_upgraded *shclw_i_upgraded(const char *text, size_t len, int64_t from, bool changed, size_t unsure,
-                                 const char *backup, const shclw_diag *diags, size_t n_diags) {
+static shclw_upgraded *upgraded_block(const char *text, size_t len, int64_t from, bool changed, size_t unsure,
+                                      const char *backup, const shclw_diag *diags, size_t n_diags, const size_t *lost,
+                                      size_t n_lost, const size_t *rewritten, size_t n_rewritten) {
 	size_t blen = backup ? strlen(backup) : 0;
-	if (len >= SIZE_MAX / 4 || blen >= SIZE_MAX / 4 || n_diags > (SIZE_MAX / 4) / sizeof(shclw_diag)) {
+	if (len >= SIZE_MAX / 4 || blen >= SIZE_MAX / 4 || n_diags > (SIZE_MAX / 4) / sizeof(shclw_diag) ||
+	    n_lost > (SIZE_MAX / 4) / sizeof(size_t) || n_rewritten > (SIZE_MAX / 4) / sizeof(size_t)) {
 		return NULL;
 	}
 	// The diagnostics go through their own block first, since its layout is
@@ -909,12 +922,18 @@ shclw_upgraded *shclw_i_upgraded(const char *text, size_t len, int64_t from, boo
 	if (!ds) {
 		return NULL;
 	}
-	size_t head = sizeof(shclw_upgraded) + n * sizeof(shclw_diag);
+	// The line lists sit after the diagnostics. shclw_diag holds size_t
+	// fields, so its end is aligned for them.
+	size_t head = sizeof(shclw_upgraded) + n * sizeof(shclw_diag) + (n_lost + n_rewritten) * sizeof(size_t);
 	size_t strings = 0;
 	for (size_t i = 0; i < n; i++) {
 		strings += ds[i].code.n + ds[i].message.n + 2;
 	}
-	shclw_upgraded *u = strings < SIZE_MAX / 4 ? (shclw_upgraded *)malloc(head + strings + len + blen + 2) : NULL;
+	// Not a ?:, as in shclw_i_merges_of.
+	shclw_upgraded *u = NULL;
+	if (strings < SIZE_MAX / 4) {
+		u = (shclw_upgraded *)malloc(head + strings + len + blen + 2);
+	}
 	if (!u) {
 		free(ds);
 		return NULL;
@@ -949,7 +968,126 @@ shclw_upgraded *shclw_i_upgraded(const char *text, size_t len, int64_t from, boo
 	u->unsure = unsure;
 	u->diags = n ? to : NULL;
 	u->n_diags = n;
+	size_t *lines = (size_t *)(to + n);
+	u->lost = n_lost ? lines : NULL;
+	u->n_lost = n_lost;
+	if (n_lost) {
+		memcpy(lines, lost, n_lost * sizeof(size_t));
+	}
+	u->rewritten = n_rewritten ? lines + n_lost : NULL;
+	u->n_rewritten = n_rewritten;
+	if (n_rewritten) {
+		memcpy(lines + n_lost, rewritten, n_rewritten * sizeof(size_t));
+	}
 	return u;
+}
+
+shclw_upgraded *shclw_i_upgraded(const char *text, size_t len, int64_t from, bool changed, size_t unsure,
+                                 const char *backup, const shclw_diag *diags, size_t n_diags) {
+	return upgraded_block(text, len, from, changed, unsure, backup, diags, n_diags, NULL, 0, NULL, 0);
+}
+
+shclw_upgraded *shclw_i_upgraded_lines(const shclw_upgraded *u, const char *backup, const size_t *lost, size_t n_lost,
+                                       const size_t *rewritten, size_t n_rewritten) {
+	return upgraded_block(u->text.p, u->text.n, u->from, u->changed, u->unsure, backup ? backup : u->backup.p, u->diags,
+	                      u->n_diags, lost, n_lost, rewritten, n_rewritten);
+}
+
+static int by_text(const void *a, const void *b) {
+	const shclw_string *x = (const shclw_string *)a, *y = (const shclw_string *)b;
+	size_t n = x->n < y->n ? x->n : y->n;
+	int c = n ? memcmp(x->p, y->p, n) : 0;
+	return c ? c : (x->n > y->n) - (x->n < y->n);
+}
+
+// text split on LF, keeping any CR, so a line whose ending changed counts as
+// written differently. False only when memory ran out.
+static bool text_lines(const char *text, size_t len, shclw_string **lines, size_t *n) {
+	*lines = NULL;
+	*n = 0;
+	if (!len) {
+		return true;
+	}
+	size_t count = 1;
+	for (size_t i = 0; i + 1 < len; i++) {
+		count += text[i] == '\n';
+	}
+	shclw_string *out = (shclw_string *)shclw_i_alloc(count * sizeof(shclw_string));
+	if (!out) {
+		return false;
+	}
+	const char *start = text, *end = text + len;
+	if (end[-1] == '\n') {
+		end--;
+	}
+	for (size_t k = 0; k < count; k++) {
+		const char *nl = (const char *)memchr(start, '\n', (size_t)(end - start));
+		const char *stop = nl ? nl : end;
+		out[k].p = start;
+		out[k].n = (size_t)(stop - start);
+		start = stop + 1;
+	}
+	*lines = out;
+	*n = count;
+	return true;
+}
+
+bool shclw_i_rewritten_lines(const char *was, size_t was_len, const char *now, size_t now_len, const size_t *lost,
+                             size_t n_lost, size_t **out, size_t *n) {
+	*out = NULL;
+	*n = 0;
+	size_t n_was = 0, n_now = 0;
+	shclw_string *olds = NULL, *news = NULL;
+	bool ok = text_lines(was, was_len, &olds, &n_was);
+	ok = text_lines(now, now_len, &news, &n_now) && ok;
+	// taken[k] counts the matches used from the run of equal lines at k
+	size_t *taken = (size_t *)calloc(n_now ? n_now : 1, sizeof(size_t));
+	size_t *list = (size_t *)shclw_i_alloc((n_was ? n_was : 1) * sizeof(size_t));
+	if (!ok || !taken || !list) {
+		free(olds);
+		free(news);
+		free(taken);
+		free(list);
+		return false;
+	}
+	if (n_now) {
+		qsort(news, n_now, sizeof(shclw_string), by_text);
+	}
+	size_t got = 0, at_lost = 0;
+	for (size_t i = 0; i < n_was; i++) {
+		while (at_lost < n_lost && lost[at_lost] < i + 1) {
+			at_lost++;
+		}
+		if (at_lost < n_lost && lost[at_lost] == i + 1) {
+			continue;
+		}
+		// the first of the run of equal lines
+		size_t lo = 0, hi = n_now;
+		while (lo < hi) {
+			size_t mid = lo + (hi - lo) / 2;
+			if (by_text(&news[mid], &olds[i]) < 0) {
+				lo = mid + 1;
+			} else {
+				hi = mid;
+			}
+		}
+		size_t next = lo + (lo < n_now ? taken[lo] : 0);
+		if (next < n_now && by_text(&news[next], &olds[i]) == 0) {
+			taken[lo]++;
+			continue;
+		}
+		list[got++] = i + 1;
+	}
+	free(olds);
+	free(news);
+	free(taken);
+	if (!got) {
+		free(list);
+		return true;
+	}
+	*out = list;
+	*n = got;
+	return true;
 }
 
 shclw_i_file_id shclw_i_file_id_of(const char *path) {
@@ -1390,7 +1528,12 @@ shclw_merge *shclw_i_merges_of(const shclw_i_source *srcs, size_t n_srcs, size_t
 		qsort(c.acc, c.n_acc, sizeof *c.acc, by_merge);
 	}
 	size_t units = (bytes + chars) / sizeof(shclw_merge) + 1;
-	shclw_merge *out = ok ? (shclw_merge *)calloc(units, sizeof(shclw_merge)) : NULL;
+	// Not a ?:, which hides from CodeQL that the block is raw calloc memory
+	// and not all shclw_merge (cpp/suspicious-pointer-scaling).
+	shclw_merge *out = NULL;
+	if (ok) {
+		out = (shclw_merge *)calloc(units, sizeof(shclw_merge));
+	}
 	if (out) {
 		size_t *lines = (size_t *)(out + c.n_acc);
 		size_t nl = 0;

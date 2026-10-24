@@ -2,6 +2,7 @@
 2	error	E005	unterminated raw block
 > upgrade
 from 3 changed false unsure 0
+lost [] rewritten []
 | a: 1
 | b: ```
 | raw line
