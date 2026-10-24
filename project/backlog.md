@@ -203,7 +203,8 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 - CTU pass follows our calls into shcl
 	- ID: 2026102321270154
 	- Type: Task
-	- Status: Queued
+	- Status: Waiting on automated testing
+	- Needs local test suite run?: Yes, a fresh leak run, `bash cicd/c-checks.bash leakcheck 3 WORK` or a full run, so CodeQL reads the new `shclw3.c` line. Then signoff, below.
 	- Priority: High
 	- Opened: 2026-10-23 21:27
 	- Parent ID: 2026102113393169
@@ -214,6 +215,19 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Progress log:
 		- 2026-10-23: Mapping the 2 impl files adds nothing, since `clang-extdef-mapping` maps only the main file's definitions. Mapped with `shcl.h` itself as the main file, plus `-DSHCL_IMPLEMENTATION`, and `-include shclw3_v2_names.h` for 2.0, it adds 247 entries.
 		- On this host's clang 19 the pass then takes about 81s, up from about 75s, and reports 12: 11 inside 3.0's `shcl.h` (1173, 1186, 3734, 3749) and 1 in ours, `shclw3.c:1300`. None is triaged yet. 1186's is a use after free in `arena_guard`, and ours looks like a path where `i < n` isn't known.
+		- 2026-10-23: The leak run maps both `shcl.h` pins that way, built as each impl file builds it. This departs from the wording: the impl files themselves aren't mapped, since that maps nothing.
+		- Every shcl finding is false, and all have one cause. The pass treats `arena_panic` as a call that returns, though every way out of it is `longjmp`, `exit` or `abort`. The use after free is in `migrate_text`: it frees `own` on the recovery path, then calls `arena_panic`, which never comes back.
+		- clang-22 in the container gives 10, listed in 3.0's list as `ctu` lines, once per file of ours that reaches each one. clang 19 puts the use after free at 1186, inside `arena_guard`, instead of at 3737. 2.0 gives none.
+		- Ours at `shclw3.c:1300` was false too. `check_old` is a callback the 2.0 walk calls only with `i < n`, but the pass starts there knowing neither. It now checks `i >= n` as well.
+		- `cicd/shcl_known.py ctu` reads the logs. A finding in our files, a clang error, or output with no diagnostic fails it. Findings in a pin's `shcl.h` must match that pin's list.
+	- Decisions:
+		- A finding is counted once per file of ours it's reached from, since each of those is a separate path in.
+		- The list holds clang-22's set, the gate's, not the host's clang 19.
+	- Verified: `bash cicd/c-checks.bash leakcheck-resume 3 WORK` passed CodeQL from the saved report, the new probe, CTU with 10 shcl findings matching the list and none of ours, and the heaptrack soak. A run before the list had the clang-22 lines failed, naming each new and gone line. With shcl taken out of the probe's map, the run failed at the probe. On the host's clang 19, `shclw3.c:1300` was reported before the fix and not after. The check also failed on a clang crash line, on output with no diagnostic, on an error inside `shcl.h`, on a doubled log, on a gone line, and on a pin with no list. `analyzer` and `codeql` modes still match the saved reports with the `ctu` lines in the list. `cicd/cicd.bash --ci --quick -y`, `lint-report.bash`, ruff and shellcheck passed.
+	- Swept: the leak run's CTU step is the only CTU pass in the repo. The Makefile's `.PHONY` names an `analyze-ctu` target that has no rule. `analyzer` and `codeql` compare only their own tool's lines, so `ctu` lines don't reach them. `check_old` is the only `shclw_i_v2_elem` callback, and the other `values[i]` reads in `shclw3.c` loop over the array's own count. The CTU pass is C only; Go, Rust and Python index with bounds checks.
+	- Branch: round-1023
+	- Test case: vGBSI, in `cicd/c-in-container.bash` leak mode: a planted null dereference in a stand-in `shcl.h`, reached only through our call, must show, fail unlisted, pass listed, and fail on a finding of ours.
+	- Acceptance signoff: waits on JC, after the leak run, for the use after free in `migrate_text` judged false. It's a memory safety call.
 
 - gcc's analyzer at `-O0`
 	- ID: 2026102321270159

@@ -1297,7 +1297,8 @@ static void check_old(void *ctx, const char *path, size_t plen, size_t line, siz
 	if (c->differs || c->is.status != SHCL_GOOD) {
 		return;
 	}
-	if (c->is.n != n || c->is.values[i].n != vlen || (vlen && memcmp(c->is.values[i].p, v, vlen) != 0)) {
+	// The walk keeps i < n, but clang's CTU pass starts here without it.
+	if (c->is.n != n || i >= n || c->is.values[i].n != vlen || (vlen && memcmp(c->is.values[i].p, v, vlen) != 0)) {
 		c->differs = true;
 		keep_old(c->bad, line, "W002", not_as_read, sizeof not_as_read - 1);
 	}
