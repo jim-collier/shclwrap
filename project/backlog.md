@@ -795,6 +795,18 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- Without `--ci`, the format stage rewrites tracked files with `gofmt -w`, `cargo fmt`, and `clang-format -i`.
 		- Until then a full test run goes in 2 steps, `--ci --leakcheck --no-sync -y` and then the fuzz by hand.
 
+- Two cicd runs at once break each other's C lint
+	- ID: 2026102323244600
+	- Type: Bug
+	- Status: Queued
+	- Priority: Low
+	- Opened: 2026-10-23
+	- Opened by: JC
+	- Requirements:
+		- A second run, such as a push hook started while another run is going, either waits for the first or uses its own artifacts folder.
+	- Notes:
+		- On 2026-10-23 two `--ci` runs overlapped on `cicd/artifacts/c-analyze-shcl/`, and one failed with `shcl3.gcc.txt` missing. The same push passed when run alone.
+
 - Python test reads a file in the locale's encoding
 	- ID: 2026102323122726
 	- Type: Bug
