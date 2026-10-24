@@ -430,7 +430,8 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 - C doesn't build with mingw-w64 at the Makefile's warnings
 	- ID: 2026102323122737
 	- Type: Bug
-	- Status: Queued
+	- Status: Waiting on automated testing
+	- Needs external testing: Windows, on vm925w: the C compile in `win-tests.ps1`, now with `-Werror`, and the C shared cases (`-Only c`).
 	- Severity: Avg
 	- Opened: 2026-10-23 23:12
 	- Related IDs: 2026101512024174
@@ -442,6 +443,18 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- It builds clean, as with gcc on Linux.
 	- Reproduced [Bug]: 2026-10-23, on vm925w, with `C:\ProgramData\mingw64`.
 	- Possible cause [Bug]: mingw's `signbit` macro has a float branch that converts its argument, even for a double. Without `-Werror` it builds, and the shared cases pass.
+	- Actual cause [Bug]:
+		- mingw-w64's `signbit` passes its argument uncast to each branch, so a double meets `__signbitf`. gcc checks the branch it doesn't take too. Upstream added the casts to `isnan` and `fpclassify`, not `signbit`. mingw-w64 12's headers have it in `isnan` and `isfinite` too.
+	- Progress log:
+		- 2026-10-24: Reproduced on Linux with mingw-w64 gcc 16.2 and 14.0.0 headers in the C container, at exactly `shclw.c:335` and `run.c:127`. gcc 14 with 12.0.0 headers fails 8 sites, `isfinite` and `isnan` too.
+		- Verified: the `mingw` target fails before the fix and passes after, on both. A mingw build of the driver at `-Werror` passed 58 of 59 shared cases under wine, 058 differing as on Windows. Also the container lint, the sanitized C tests, and `cicd.bash --ci --quick -y`.
+		- Swept: every `signbit`, `isnan`, `isinf` and `isfinite` in `source/c` goes through `shclw_adapter.h`, `api_test.c:526` included. Go, Rust and Python don't have the macro. shcl.h's own `signbit` builds without the warnings.
+		- Upstream draft in `private/claude_simple/upstream/2026102323122737/`.
+	- Decisions:
+		- On mingw only, `shclw_adapter.h` maps the 4 to gcc's builtins, as glibc does, so the call sites stay plain C. Not for C++, where `<cmath>` replaces them.
+	- Actual fix [Bug]: the builtins on mingw, and a `mingw` Makefile target that the container's lint and quick modes run, with mingw-w64 pinned in the C image.
+	- Commit: 3698622
+	- Test case: vGSU9, `make mingw`, in the container's lint and quick modes. Fails on HEAD's header, passes with the fix.
 
 - Back up a file before a save that would lose lines
 	- ID: 2026101513330019
