@@ -826,6 +826,20 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Decisions:
 		- JC, 2026-10-24: a `--fuzz` flag turns fuzz back on under `--ci`, so `--ci --leakcheck --fuzz --no-sync -y` is the one full line.
 
+- The docs check flags the backlog template and a quoted clang message
+	- ID: 2026102411444751
+	- Type: Bug
+	- Status: Queued
+	- Severity: Low
+	- Opened: 2026-10-24 11:44
+	- Steps to reproduce [Bug]:
+		- Run the markdown check on `project/backlog.md`.
+	- Incorrect behavior [Bug]:
+		- It reports 4 ellipses, all in the template's placeholder rows, and an ordinal written as digits inside clang's own warning text, quoted on a closed item.
+	- Expected behavior [Bug]:
+		- Placeholders in the template and quoted tool output pass, so a round's docs gate on the backlog is clean.
+	- Reproduced [Bug]: 2026-10-24, on dev and on round-1024, with the same hits.
+
 - Say which layer a read came from
 	- ID: 2026102114101028
 	- Type: Enhancement
