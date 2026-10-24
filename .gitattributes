@@ -1,0 +1,5 @@
+# LF everywhere, whatever core.autocrlf says. gofmt and bash want it.
+* text=auto eol=lf
+
+# Read byte for byte, and some cases have CRLF on purpose.
+tests/cases/** -text

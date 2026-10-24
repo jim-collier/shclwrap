@@ -309,6 +309,8 @@ if ((doPy)); then
 fi
 bash "${here}/flags-test.bash" >/dev/null
 fEcho "OK: cicd flag mixes"
+TMPDIR="${work}" bash "${here}/eol-test.bash" >/dev/null
+fEcho "OK: line ends under core.autocrlf=true"
 if ((doC && doQuick)); then
 	bash "${here}/c-checks.bash" quick 3 "${work}"
 	fEcho "OK: gcc-15 at C17, C API tests, and shared cases over shcl 3, plain build"
