@@ -543,24 +543,55 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 - Put fills in a commented default line
 	- ID: 2026101513330020
 	- Type: Feature
-	- Status: Queued
+	- Status: Waiting on automated testing
+	- Needs local test suite run?: Yes, one full run, plain, for CodeQL, CTU and the fuzz over the C change.
 	- Priority: Avg
 	- Opened: 20261015-133300
 	- Opened by: JC
+	- Related IDs: 2026101513330021, 2026101513330022
 	- Requirements:
 		- Setting a key whose commented `key: value ## Default` line is in the file fills in that line, so the lines below it don't move.
 	- Note: shcl adds a new line above the comment. Wovenshell writes the line by hand, and reprints its launch messages with the new line numbers. Folderkite rebuilds its whole defaults list on every save.
+	- Progress log:
+		- 2026-10-24: `Put` and `PutSyntax` of a path that isn't set fill in its commented `## Default` line, in Go, Rust, C, and Python. The `#` and the note come off and the value is the put's, so the lines under it keep their numbers. design.md and a README line updated.
+		- On the current pin 3.0 adds the key at the end of its block, not above the comment as the Note says.
+		- A set shcl refuses leaves the line commented. The `has` line after the refused `syntax` in 061 gave true in Rust before that fix and false after.
+		- Verified: Go tests, vet and staticcheck, Rust tests and clippy pedantic, Python tests, ruff and shared cases, the C container lint, the C API tests and shared cases plain, sanitized and as C++, 90s of fuzz through all 4 drivers with the new op, and `cicd.bash --ci --quick -y`.
+		- Swept: Put and PutSyntax in all 4 adapters, the layered path in each, Diags and Errors in all 4 (Unused reads Diags), and all 4 ops runners. Comment and Remove set no value, so they don't fill in.
+	- Decisions:
+		- Only a line with the `## Default` note is filled in, and the note comes off. A commented line without it may be the user's own.
+		- Names match without ASCII case, and the first matching line in the file wins.
+		- The text is parsed again with the line filled in, since shcl has no call for it. `Diags` stay the load's, and keys earlier puts added get their real lines.
+	- Branch: round-1024
+	- Commit: a18e5f5
+	- Test case: shared case `061-commented-defaults` and new lines in `041-wovenshell`, in all 4 languages, plus the `commented` op in the fuzz.
+	- Acceptance signoff: waits on JC after the full run, for the README line and the calls in Decisions.
 
 - Read the commented defaults in a file
 	- ID: 2026101513330021
 	- Type: Feature
-	- Status: Queued
+	- Status: Waiting on automated testing
+	- Needs local test suite run?: Yes, the same full run as 2026101513330020.
 	- Priority: Avg
 	- Opened: 20261015-133300
 	- Opened by: JC
+	- Related IDs: 2026101513330020
 	- Requirements:
 		- List commented `key: value` lines, each with the path it would set.
 	- Note: shcl gives comment lines no path. Wovenshell has its own indent walker for this, and Folderkite strips and re-adds its list.
+	- Progress log:
+		- 2026-10-24: `Commented()` in Go, Rust, C (`shclw_commented`), and Python, plus a `commented` op. Each line has its path, its value as typed, its line, and whether it has the `## Default` note. design.md and a README line updated.
+		- Prose that reads as `key: value` is listed too, such as the 1.2 banner's `# SHCL:` line in Wovenshell's file.
+		- Verified: as 2026101513330020, in the same run.
+		- Swept: all 4 adapters and ops runners, the layered path in each, and fuzz.py's generator and op list.
+	- Decisions:
+		- The path comes from shcl's own parse of the text with that line uncommented, not from an indent walker.
+		- A `##` line, a line in a raw body, and one that adds an error or moves another field once uncommented aren't listed. A key that's also set in its block is listed under its plain path.
+		- It costs about a load per commented line. Wovenshell's file has about 70.
+	- Branch: round-1024
+	- Commit: a18e5f5
+	- Test case: shared case `061-commented-defaults` and new lines in `041-wovenshell`, in all 4 languages, plus the `commented` op in the fuzz.
+	- Acceptance signoff: waits on JC after the full run, for the README line and the calls in Decisions.
 
 - Comment doesn't stack, and leaves the user's own notes
 	- ID: 2026101513330022
