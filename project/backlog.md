@@ -28,7 +28,7 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 - Updates to CICD script flags
 	- ID: 2026101816214270
 	- Type: Enhancement
-	- Status: Waiting on UAT
+	- Status: Done
 	- Priority: High
 	- Opened: 2026-10-18
 	- Opened by: JC
@@ -47,7 +47,9 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- It doesn't fetch anything. If a pinned `shcl.h` isn't cached, C is skipped with a warning.
 		- No flags now runs the leak checks too. `--no-leakcheck` skips them, and `--leakcheck` adds them to `--ci` or `--quick`.
 	- Branch: ci-flags
-	- Test case: None. Each flag mix was checked by hand, plus `--quick` with a header missing from the cache.
+	- Test case: `cicd/flags-test.bash`, 14 flag mixes against `--dry-run`, since b098cf0.
+	- Acceptance signoff: Self-closed: the flag test covers every mix the requirements name.
+	- Closed: 2026-10-24
 
 - Sort shcl's analyzer and CodeQL findings
 	- ID: 2026102321270143
@@ -243,7 +245,7 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 - Python: run from a copied file
 	- ID: 2026101513330050
 	- Type: Feature
-	- Status: Waiting on UAT
+	- Status: Done
 	- Priority: Low
 	- Opened: 20261015-133300
 	- Opened by: JC
