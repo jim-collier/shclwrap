@@ -22,6 +22,8 @@
 #include <io.h>
 #else
 #include <dirent.h>
+#include <fcntl.h>
+#include <unistd.h>
 #endif
 
 typedef struct {
@@ -675,7 +677,16 @@ static void scribble(runner *r, const fields *f) {
 	}
 	const char *text = arg(f, 2);
 	size_t n = strlen(text);
+#ifdef _WIN32
 	FILE *out = fopen(path, "wb");
+#else
+	// 0644 as Go's runner has it, not fopen's 0666.
+	int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644);
+	FILE *out = fd < 0 ? NULL : fdopen(fd, "wb");
+	if (fd >= 0 && !out) {
+		(void)close(fd);
+	}
+#endif
 	bool ok = out && fwrite(text, 1, n, out) == n;
 	ok = (out && fclose(out) == 0) && ok;
 	free(path);

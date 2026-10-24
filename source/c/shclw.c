@@ -918,7 +918,11 @@ static shclw_upgraded *upgraded_block(const char *text, size_t len, int64_t from
 	for (size_t i = 0; i < n; i++) {
 		strings += ds[i].code.n + ds[i].message.n + 2;
 	}
-	shclw_upgraded *u = strings < SIZE_MAX / 4 ? (shclw_upgraded *)malloc(head + strings + len + blen + 2) : NULL;
+	// Not a ?:, as in shclw_i_merges_of.
+	shclw_upgraded *u = NULL;
+	if (strings < SIZE_MAX / 4) {
+		u = (shclw_upgraded *)malloc(head + strings + len + blen + 2);
+	}
 	if (!u) {
 		free(ds);
 		return NULL;
@@ -1513,7 +1517,12 @@ shclw_merge *shclw_i_merges_of(const shclw_i_source *srcs, size_t n_srcs, size_t
 		qsort(c.acc, c.n_acc, sizeof *c.acc, by_merge);
 	}
 	size_t units = (bytes + chars) / sizeof(shclw_merge) + 1;
-	shclw_merge *out = ok ? (shclw_merge *)calloc(units, sizeof(shclw_merge)) : NULL;
+	// Not a ?:, which hides from CodeQL that the block is raw calloc memory
+	// and not all shclw_merge (cpp/suspicious-pointer-scaling).
+	shclw_merge *out = NULL;
+	if (ok) {
+		out = (shclw_merge *)calloc(units, sizeof(shclw_merge));
+	}
 	if (out) {
 		size_t *lines = (size_t *)(out + c.n_acc);
 		size_t nl = 0;

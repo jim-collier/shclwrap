@@ -248,32 +248,6 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- Each project's other workarounds have their own items, with the project named in the item.
 		- 2026-10-21: waits on a go-ahead to edit the other repos, and which one goes first. Asked in the round's questions file.
 
-- Report blocks that shcl merged because they share a name
-	- ID: 2026101513330009
-	- Type: Feature
-	- Status: Queued
-	- Needs local test suite run?: Yes, a full run after the fix, for CodeQL, CTU, and the heaptrack soak.
-	- Priority: Avg
-	- Opened: 20261015-133300
-	- Opened by: JC
-	- Related IDs: 2026101513330018, 2026101513330004, 2026102115285934
-	- Requirements:
-		- List each merged block, with the lines of both copies.
-	- Note: Tallowbase, Cobblevale, and Radixmill all lost a second copy of a block without a word. shcl's H002 hint only fires when the 2 blocks are apart.
-	- Progress log:
-		- 2026-10-21: `Merged()` in all 4 languages, and a `merged` op. Each `Merge` has the kept copy's path and every copy's line, and a layer on a layered document.
-		- 2026-10-21: The full run at `15509b0` failed CodeQL on this: `cpp/suspicious-pointer-scaling` at `shclw.c:1400`, the `(char *)(lines + nl)` in `shclw_i_merges_of`'s packed result. The C analyzers and the sanitized tests passed, and a second run without the leak checks passed the 60 second fuzz.
-	- Decisions:
-		- A call beside `Diags`, not a field filled in at load, since it parses the text twice more.
-		- Every fold is listed, next to each other or apart, at every level of a block, and a key repeated with the same value too, as H002 counts them. A dotted line that only reopens a block isn't a copy.
-		- The wrapper finds a fold with a second parse where each folded line's name is made unique. shcl's parser would be the better place; 2026102115285934 asks for that.
-		- design.md has these under Loading and saving, Ops scripts, and Decisions.
-	- Verified: the new shared case passes in Go, Rust, C (plain and under ASan and UBSan), and Python. A 90 second fuzz of all 4 with the new ops found no difference. The C lint stage passes.
-	- Swept: Go `shclw3`, Rust `v3`, C `shclw3.c`, and Python each have `Merged`, held by the `Doc` interface, `ShclDoc`, and Go's `docMethods` list. All 4 ops runners and fuzz.py's op list have `merged`.
-	- Branch: round-1021
-	- Commit: 56aedbc
-	- Test case: tests/cases/054-merged-unused, and the fuzz op.
-
 - Upgrade lists the lines it changed
 	- ID: 2026101513330012
 	- Type: Feature
@@ -405,8 +379,8 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 - Write refuses when the file changed on disk since it was read
 	- ID: 2026101513330017
 	- Type: Feature
-	- Status: Queued
-	- Needs local test suite run?: Yes, a full run after the fix, for CodeQL, CTU, and the heaptrack soak.
+	- Status: Waiting on automated testing
+	- Needs local test suite run?: No. The leak checks passed on 2026-10-23.
 	- Needs external testing: Windows, where the same-file check is by path only in C, and the missing-file check uses `_stat64`.
 	- Priority: Avg
 	- Opened: 20261015-133300
@@ -420,6 +394,9 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- Swept: `ReplaceRead` and its twins in all 4 languages give the new kind. The tests that wanted `ErrIO` for a changed file (Go, Rust, C) now want `ErrChanged`. Write failures stay `ErrIO`.
 		- Not covered, and said in design.md: a save by another program between the last check and the rename. A lock was left out.
 		- 2026-10-21: The full run at `15509b0` failed CodeQL on this: `cpp/world-writable-file-creation` at `run.c:678`, the `fopen(path, "wb")` in the C runner's `scribble` op. Lint with the C analyzers and the sanitized C tests passed, and a second run without the leak checks passed the fuzz.
+		- 2026-10-23: The C runner's `scribble` op makes its file with `open` at 0644 on POSIX, as Go's runner does, not with `fopen` at 0666.
+			- Verified: the leak run passed, as on 2026101513330009, and failed at `1cf9f96` on `run.c:678`. Also the C container lint and tests, and `cicd.bash --ci --quick -y`.
+			- Swept: the Rust and Python runners write at their default, 0666 less the umask, and nothing scans them for it. The library's own create stays at 0666 less the umask, as shcl's is, unless a mode is given.
 	- Decisions:
 		- Compare the text that was read, not a hash or size and mtime. Exact, already there for the backup, and costs a copy of the file in memory.
 		- On by default. `Force` is a field on `WriteOpts`, where create-only and a file mode can go later.
@@ -761,6 +738,24 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- Without `--ci`, the format stage rewrites tracked files with `gofmt -w`, `cargo fmt`, and `clang-format -i`.
 		- Until then a full test run goes in 2 steps, `--ci --leakcheck --no-sync -y` and then the fuzz by hand.
 
+- CTU pass reports a null pointer to memcmp in the upgrade
+	- ID: 2026102320384131
+	- Type: Bug
+	- Status: Queued
+	- Severity: Low
+	- Opened: 2026-10-23 20:38
+	- Related IDs: 2026101513330009, 2026102113393169
+	- Steps to reproduce [Bug]:
+		- Run `bash cicd/c-checks.bash leakcheck 3 WORK` and read `cicd/artifacts/leakcheck/c-leakcheck-v3/ctu-v3-shclw3.c.log`.
+	- Incorrect behavior [Bug]:
+		- `shclw3.c:1491`, in `upgraded_ends`: "Null pointer passed to 1st parameter expecting 'nonnull'" (core.NonNullParamChecker), on `memcmp(t, text, len)`.
+	- Expected behavior [Bug]:
+		- The CTU logs are empty, as the other 5 are.
+	- Reproduced [Bug]: 2026-10-23, at round-1023 with 2026101513330009's fix, the first leak run since 2026-10-21 to reach CTU.
+	- Possible cause [Bug]: `t` can stay NULL when `shclw_i_place_block` succeeds with an empty result, and `memcmp` with a NULL pointer is undefined even at length 0. Not checked.
+	- Notes:
+		- The CTU logs are written but nothing reads them, so this doesn't fail the run.
+
 - Say which layer a read came from
 	- ID: 2026102114101028
 	- Type: Enhancement
@@ -949,6 +944,37 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- The copy beside the wrapper wins over the installed one, since bundling it is a choice. Waits on JC with the parent's question.
 	- Commit: a4909af
 	- Test case: `source/python/tests/test_shclw.py`, `test_copied` and `test_none`.
+
+- Report blocks that shcl merged because they share a name
+	- ID: 2026101513330009
+	- Type: Feature
+	- Status: Done
+	- Needs local test suite run?: No. The leak checks passed on 2026-10-23.
+	- Priority: Avg
+	- Opened: 20261015-133300
+	- Opened by: JC
+	- Related IDs: 2026101513330018, 2026101513330004, 2026102115285934
+	- Requirements:
+		- List each merged block, with the lines of both copies.
+	- Note: Tallowbase, Cobblevale, and Radixmill all lost a second copy of a block without a word. shcl's H002 hint only fires when the 2 blocks are apart.
+	- Progress log:
+		- 2026-10-21: `Merged()` in all 4 languages, and a `merged` op. Each `Merge` has the kept copy's path and every copy's line, and a layer on a layered document.
+		- 2026-10-21: The full run at `15509b0` failed CodeQL on this: `cpp/suspicious-pointer-scaling` at `shclw.c:1400`, the `(char *)(lines + nl)` in `shclw_i_merges_of`'s packed result. The C analyzers and the sanitized tests passed, and a second run without the leak checks passed the 60 second fuzz.
+		- 2026-10-23: The block is allocated outside a `?:` now. The `?:` hid from CodeQL that it's raw `calloc` memory, so it read the block as all `shclw_merge`. The upgrade result's block from 2026101513330012 had the same shape and 3 more findings, fixed the same way.
+	- Decisions:
+		- A call beside `Diags`, not a field filled in at load, since it parses the text twice more.
+		- Every fold is listed, next to each other or apart, at every level of a block, and a key repeated with the same value too, as H002 counts them. A dotted line that only reopens a block isn't a copy.
+		- The wrapper finds a fold with a second parse where each folded line's name is made unique. shcl's parser would be the better place; 2026102115285934 asks for that.
+		- design.md has these under Loading and saving, Ops scripts, and Decisions.
+	- Verified: the new shared case passes in Go, Rust, C (plain and under ASan and UBSan), and Python. A 90 second fuzz of all 4 with the new ops found no difference. The C lint stage passes.
+		- 2026-10-23: `bash cicd/c-checks.bash leakcheck 3 WORK` passed: CodeQL with no open finding of ours, CTU, and the heaptrack soak. The same run at `1cf9f96`, before the fix, failed on this finding, the 3 in the upgrade result, and 2026101513330017's. Also the C container lint and tests, and `cicd.bash --ci --quick -y`.
+	- Swept: Go `shclw3`, Rust `v3`, C `shclw3.c`, and Python each have `Merged`, held by the `Doc` interface, `ShclDoc`, and Go's `docMethods` list. All 4 ops runners and fuzz.py's op list have `merged`.
+		- 2026-10-23: every packed result block in the C tree. `shclw_i_copy_strs`, `shclw_i_copy_nodes`, and `shclw_i_copy_diags` put only `char` text after their array, and the other `?:` allocations in `shclw3.c` each hold one type.
+	- Branch: round-1021, and round-1023 for the CodeQL fix.
+	- Commit: 56aedbc
+	- Test case: tests/cases/054-merged-unused, the fuzz op, and the leak run's CodeQL step.
+	- Acceptance signoff: Self-closed: the CodeQL finding was all that was left, and the leak run that failed on it passes.
+	- Closed: 2026-10-23 20:43
 
 - clang-tidy refuses a cast in the upgrade line lists
 	- ID: 2026102114534365
