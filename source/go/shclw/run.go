@@ -432,6 +432,7 @@ func (r *runner) upgrade(from string) {
 		return
 	}
 	r.out(fmt.Sprintf("from %d changed %t unsure %d", u.From, u.Changed, u.Unsure))
+	r.out(fmt.Sprintf("lost %v rewritten %v", u.Lost, u.Rewritten))
 	r.block(u.Text)
 }
 

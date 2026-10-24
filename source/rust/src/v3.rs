@@ -335,7 +335,8 @@ pub fn upgrade(text: &str, from: u32) -> Result<Upgraded, Error> {
 	if let Some(e) = errors {
 		return Err(e);
 	}
-	let fixed = carry_reads(&old, &out.text, format_of(text) == 1)?;
+	let (fixed, lost) = carry_reads(&old, &out.text, format_of(text) == 1)?;
+	out.lost = lost;
 	out.text = if banner {
 		crate::info::place_block(&crate::info::same_ends(text, &fixed, &e), input != text, &e)?
 	} else if !out.changed && fixed == out.text {
@@ -348,6 +349,7 @@ pub fn upgrade(text: &str, from: u32) -> Result<Upgraded, Error> {
 		crate::info::same_ends(text, &fixed, &e)
 	};
 	out.changed = out.text != text;
+	out.rewritten = crate::rewritten_lines(text, &out.text, &out.lost);
 	Ok(out)
 }
 
@@ -453,8 +455,9 @@ fn old_errors(old: &shcl2::Document) -> Option<Error> {
 /// every path 2.0 reads one value at is read back against 2.0. A name 2.0 read
 /// with an escape resolved can't be renamed here, so it's refused, unless the
 /// file names format 1, since 1.2 read names as typed. So is a value that
-/// still reads differently.
-fn carry_reads(old: &shcl2::Document, up: &str, names_as_typed: bool) -> Result<String, Error> {
+/// still reads differently. The lines with a value 2.0 read that `up` doesn't
+/// have at all come back as lost, in order.
+fn carry_reads(old: &shcl2::Document, up: &str, names_as_typed: bool) -> Result<(String, Vec<usize>), Error> {
 	let mut d = shcl::Document::parse_keep_lines(up, shcl::Strictness::Standard).unwrap_or_else(|le| le.document);
 	let mut bad = Vec::new();
 	let mut sets: Vec<(String, Vec<String>)> = Vec::new();
@@ -508,8 +511,12 @@ fn carry_reads(old: &shcl2::Document, up: &str, names_as_typed: bool) -> Result<
 			));
 		}
 	}
+	let mut lost = Vec::new();
 	for p in old.paths() {
-		if old.count(&p) != 1 {
+		// Instances past the ones 3.0 still has are gone.
+		let (had, has) = (old.count(&p), now.count(&p));
+		lost.extend(old.lines(&p).into_iter().skip(has.min(had)).filter(|&l| l > 0));
+		if had != 1 {
 			continue;
 		}
 		let (was, is) = (old.read_string_array(&p), now.read_string_array(&p));
@@ -519,9 +526,18 @@ fn carry_reads(old: &shcl2::Document, up: &str, names_as_typed: bool) -> Result<
 				"the upgraded file doesn't read this value as shcl 2.0 read it",
 			));
 		}
+		if has == 1
+			&& was.status == shcl2::Status::Good
+			&& is.status != shcl::Status::Good
+			&& now.read_raw(&p).status != shcl::Status::Good
+		{
+			lost.push(old.line(&p));
+		}
 	}
 	if bad.is_empty() {
-		return Ok(text);
+		lost.sort_unstable();
+		lost.dedup();
+		return Ok((text, lost));
 	}
 	let mut lines: Vec<usize> = bad.iter().map(|d| d.line).collect();
 	lines.sort_unstable();
@@ -575,6 +591,7 @@ fn upgraded(u: shcl::Upgrade) -> Upgraded {
 		changed: !u.current,
 		unsure: u.lost,
 		backup: u.backup,
+		..Upgraded::default()
 	}
 }
 

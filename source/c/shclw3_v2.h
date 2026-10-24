@@ -39,6 +39,12 @@ typedef void (*shclw_i_v2_elem)(void *ctx, const char *path, size_t plen, size_t
 // Every value 2.0 reads at a path with one field, as strings, through each.
 void shclw_i_v2_reads(shclw_i_v2_doc *d, shclw_i_v2_elem each, void *ctx);
 
+// Called once per path 2.0 has, in order, with each instance's line, and
+// whether 2.0 reads one string array at a path with one field.
+typedef void (*shclw_i_v2_path)(void *ctx, const char *path, size_t plen, const size_t *lines, size_t n, int reads);
+// Every path 2.0 has, through each.
+void shclw_i_v2_paths(shclw_i_v2_doc *d, shclw_i_v2_path each, void *ctx);
+
 #ifdef __cplusplus
 }
 #endif

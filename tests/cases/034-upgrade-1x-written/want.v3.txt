@@ -10,6 +10,7 @@
 33	hint	H007	the file names format 1, older than this reader's format 3, so some lines may read differently than written; shcl upgrade --from-2x rewrites it
 > upgrade
 from 1 changed true unsure 0
+lost [] rewritten [9 18 22 24 26 33 35]
 | # app settings
 | server:
 | \thost: example.org
@@ -49,6 +50,7 @@ from 1 changed true unsure 0
 | ##
 > upgrade	2
 from 1 changed true unsure 0
+lost [] rewritten [9 18 22 24 26 33 35]
 | # app settings
 | server:
 | \thost: example.org

@@ -1,5 +1,6 @@
 > upgrade
 from 1 changed true unsure 0
+lost [] rewritten [2 3 8 10]
 | paths:
 | \t"c:\\\\tools": "C:\\tools"
 | \tplain: [a, b]

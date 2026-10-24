@@ -2,11 +2,13 @@
 3
 > upgrade
 from 3 changed false unsure 0
+lost [] rewritten []
 | tags: a, b
 | sel: x
 | ##    Format   3
 > upgrade	2
 from 3 changed true unsure 0
+lost [] rewritten [1]
 | tags: [a, b]
 | sel: x
 | 

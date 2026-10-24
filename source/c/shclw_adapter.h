@@ -97,6 +97,16 @@ shclw_diag *shclw_i_copy_diags(const shclw_diag *diags, size_t n, size_t *count)
 // backup may be NULL for none. NULL only when memory ran out.
 shclw_upgraded *shclw_i_upgraded(const char *text, size_t len, int64_t from, bool changed, size_t unsure,
                                  const char *backup, const shclw_diag *diags, size_t n_diags);
+// u again, with backup in place of its own when not NULL, and the line lists.
+// u is left alone. NULL only when memory ran out.
+shclw_upgraded *shclw_i_upgraded_lines(const shclw_upgraded *u, const char *backup, const size_t *lost, size_t n_lost,
+                                       const size_t *rewritten, size_t n_rewritten);
+// The lines of was, from 1, that now doesn't have as typed, leaving out the
+// ones in lost, which is sorted. Lines are matched as a multiset, so a line
+// that only moved isn't listed (design.md, Decisions). The caller frees
+// *out, which is NULL with none. False only when memory ran out.
+bool shclw_i_rewritten_lines(const char *was, size_t was_len, const char *now, size_t now_len, const size_t *lost,
+                             size_t n_lost, size_t **out, size_t *n);
 
 // Nothing at path, not even a dangling link.
 bool shclw_i_missing(const char *path);

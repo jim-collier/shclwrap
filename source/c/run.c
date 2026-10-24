@@ -975,6 +975,18 @@ static void check(runner *r, const fields *f) {
 	shclw_free(schema);
 }
 
+// [3 4], as Go prints a slice
+static void line_list(buf *b, const size_t *v, size_t n) {
+	putc_(b, '[');
+	for (size_t i = 0; i < n; i++) {
+		if (i) {
+			putc_(b, ' ');
+		}
+		put_size(b, v[i]);
+	}
+	putc_(b, ']');
+}
+
 static void upgrade(runner *r, const char *from) {
 	int64_t n = 0;
 	if (*from && !parse_int(from, &n)) {
@@ -994,6 +1006,11 @@ static void upgrade(runner *r, const char *from) {
 		put_i64(&r->out, u->from);
 		puts_(&r->out, u->changed ? " changed true unsure " : " changed false unsure ");
 		put_size(&r->out, u->unsure);
+		nl(&r->out);
+		puts_(&r->out, "lost ");
+		line_list(&r->out, u->lost, u->n_lost);
+		puts_(&r->out, " rewritten ");
+		line_list(&r->out, u->rewritten, u->n_rewritten);
 		nl(&r->out);
 		block(r, u->text.p, u->text.n);
 	}

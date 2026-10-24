@@ -292,6 +292,11 @@ Go names are listed. Rust uses the same words in snake case, and `ShclDoc` has t
 	- In C, 2.0's `shcl.h` and 3.0's declare the same names, so 2.0's goes in 2 files of its own with each call renamed. The C upgrade gives 2.0's errors in its result, `shclw_upgraded`, since C's error has no list.
 	- 2.x's `#` info block is swapped for the current one where it sits, in a file with no Format line. shcl leaves a clean file's block alone, and puts the new block at the end of a file it writes out again.
 	- When shcl writes a CRLF file out again with LF only, the upgrade puts the CRLF back, unless that would change a value.
+	- `Lost` and `Rewritten` list lines of the original, from 1, so a program can point the user at them in the backup (2026101513330012, 2026101513330013).
+		- `Lost` is each line with a value 2.0 read taht the upgraded file doesn't have at all, such as a 2.x comma list with lines under it. A value that comes through reading differently is refused instead, as above.
+		- `Rewritten` is every other line the upgraded text doesn't have as typed, like `tags: a, b` written as `tags: [a, b]`, or 2.x's info block. A line that only moved isn't one, and lines the upgrade added aren't listed.
+		- `Unsure` is still shcl's own count.
+		- C has them as `lost` and `rewritten`, with `n_lost` and `n_rewritten`, in the result's one block.
 	- The files 1.2 and 2.0 wrote come forward this way. One with no Format line or 2.x info block that loads clean on 3.0 is taken as current, so a program taht knows its files are older passes `from` 2. A file the wrapper's own 1.2 or 2.0 adapter wrote has an info block naming format 1 or 2, and the upgrade puts 3.0's in its place.
 
 - `d.InfoBlock(on)` puts the info block at the end of what the save writes, or with `on` false leaves it out.
@@ -378,7 +383,7 @@ An ops script is one op per line, with fields split by tabs. `\t`, `\n`, `\r`, a
 | `remove PATH`                           | how many instances went
 | `info on\|off`, `stamp`                 | `ok` or `error KIND`, from `InfoBlock` and `StampFormat`
 | `check FILE [all\|drop]`                | the schema check, with the load's own diagnostics for `all`, and then dropped ones for `drop`
-| `format`, `upgrade [FROM]`              | the format number, or the upgrade's result and text
+| `format`, `upgrade [FROM]`              | the format number, or the upgrade's result, its lost and rewritten lines, and text
 | `write FILE [force] [create] [mode=M]`  | `ok` and the saved file, or `error KIND`. The flags are `WriteOpts`'s, with M in octal.
 | `mode FILE`                             | the file's permission bits, in octal
 | `readonly`                              | `true` or `false`, from `ReadOnly`
@@ -469,6 +474,10 @@ An ops script is one op per line, with fields split by tabs. `\t`, `\n`, `\r`, a
 - The upgrade writes each 2.x value so 3.0 reads what 2.0 read, rather than keep `migrate`'s backslashes as typed, which read as text now. A line it can't carry that way is refused, rather than counted in `Unsure`, as with 2.0's errors, and `Open` doesn't show `Unsure` at all (2026101910455900).
 	- So a 3.0 file with no Format line and an error that 2.0 reads clean, which `Open` takes as 2.x, has its backslash escapes read the 2.x way too. A program that writes its files with `StampFormat` or `InfoBlock` never has that happen.
 	- A file `Open` takes as current keeps its backslashes as typed, even one 2.x wrote, when nothing in it says so.
+
+- An upgrade lists lines of the original, not of the upgraded text, since the original is what the user wrote and the backup keeps (2026101513330012, 2026101513330013). The lists go on `Upgraded` beside `Unsure`, rather than in a call of their own like `Rewrites`, since the upgrade already has both texts and `Rewrites` is a document's.
+	- A line is lost only when the upgraded file has no value where 2.0 read one. A line whose value comes through written another way is rewritten. So a 1.x line break in a bare value like `C:\new` is rewritten, not lost, since the upgrade carries it as 2.0 read it and 3.0 can write it. A program that counted that line lost sees one fewer.
+	- Rewritten lines are matched as a multiset of whole lines, line ends included, rather than by a line diff. A line that only moved, as shcl's write order can do, wasn't written differently, and it stays linear in the file's size.
 
 - `Open` upgrades an old file in memory, rather than leave it to the program to call `UpgradeFile` first. A program that only reads then never writes, and one that saves gets the backup on its first `Write` (2026101613005800).
 	- It upgrades as `Upgrade` with `from` 0 does, never 2. shcl says a program calling its upgrade on every start must not pass 2, since a 3.0 file that picks up an error would then be read by 2.x rules.

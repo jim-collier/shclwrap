@@ -316,7 +316,10 @@ int64_t shclw_format_of(const char *text, size_t len);
 // from is the format it was written for. unsure counts lines the upgrade
 // couldn't convert for sure. backup names the copy shclw_upgrade_file made,
 // and is "" with none. diags is shcl 2.0's errors on a file refused for them,
-// which Go and Rust put on the error.
+// which Go and Rust put on the error. lost lists the lines of the original,
+// from 1, with a value the old shcl read that the upgraded file doesn't have.
+// rewritten lists the rest of the original's lines that the upgraded text
+// doesn't have as typed. A line that only moved isn't one.
 typedef struct {
 	shclw_string text;
 	int64_t from;
@@ -325,6 +328,10 @@ typedef struct {
 	shclw_string backup;
 	shclw_diag *diags;
 	size_t n_diags;
+	size_t *lost;
+	size_t n_lost;
+	size_t *rewritten;
+	size_t n_rewritten;
 } shclw_upgraded;
 
 // Converts a file written for an older format. With from 0 the file's Format

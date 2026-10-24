@@ -1,0 +1,7 @@
+# 2.x lines 3.0 writes differently, and one it can't keep
+name: app
+dir: C:\new
+tags: a, b
+list: x, y
+  c: 2
+keep: "as typed"

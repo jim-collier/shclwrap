@@ -213,13 +213,46 @@ class Error(Exception):
 @dataclass
 class Upgraded:
 	"""What an upgrade made of a file. from_ is the format it was written for.
-	unsure counts lines the upgrade couldn't convert for sure."""
+	unsure counts lines the upgrade couldn't convert for sure. lost lists the
+	lines of the original, from 1, with a value the old shcl read that the
+	upgraded file doesn't have. rewritten lists the rest of the original's
+	lines that the upgraded text doesn't have as typed. A line that only moved
+	isn't one."""
 
 	text: str
 	from_: int
 	changed: bool = False
 	unsure: int = 0
 	backup: str = ""
+	lost: list[int] = field(default_factory=list)
+	rewritten: list[int] = field(default_factory=list)
+
+
+def rewritten_lines(was: str, now: str, lost: Sequence[int]) -> list[int]:
+	"""The lines of was, from 1, that now doesn't have as typed, leaving out
+	the ones in lost. Lines are matched as a multiset, so a line that only
+	moved isn't listed (design.md, Decisions)."""
+	have: dict[str, int] = {}
+	for line in _text_lines(now):
+		have[line] = have.get(line, 0) + 1
+	gone = set(lost)
+	out: list[int] = []
+	for i, line in enumerate(_text_lines(was), 1):
+		if i in gone:
+			continue
+		if have.get(line, 0) > 0:
+			have[line] -= 1
+			continue
+		out.append(i)
+	return out
+
+
+def _text_lines(s: str) -> list[str]:
+	# Split on LF and keep any CR, so a line whose ending changed counts as
+	# written differently.
+	if not s:
+		return []
+	return s.removesuffix("\n").split("\n")
 
 
 # Puts, as the few kinds shcl has setters for.
@@ -1526,7 +1559,7 @@ def upgrade(text: str, from_: int = 0) -> Upgraded:
 		raise Error(ErrKind.Ambiguous, msg=f"{u.ambiguous} lines read two ways")
 	if old_err is not None:
 		raise old_err
-	fixed = _carry_reads(old, out.text, format_of(text) == 1)
+	fixed, out.lost = _carry_reads(old, out.text, format_of(text) == 1)
 	if banner:
 		fixed = _place_block(_same_ends(text, fixed), src != text)
 	elif fixed == out.text and not out.changed:
@@ -1538,6 +1571,7 @@ def upgrade(text: str, from_: int = 0) -> Upgraded:
 	else:
 		fixed = _same_ends(text, fixed)
 	out.text, out.changed = fixed, fixed != text
+	out.rewritten = rewritten_lines(text, fixed, out.lost)
 	return out
 
 
@@ -1579,9 +1613,10 @@ def _carry_diag(line: int, msg: str) -> Diag:
 	return Diag(line, Severity.Error, "W002", msg)
 
 
-def _carry_reads(old: Any, up: str, names_as_typed: bool) -> str:
+def _carry_reads(old: Any, up: str, names_as_typed: bool) -> tuple[str, list[int]]:
 	"""up, made to read each value the way shcl 2.0 read it in old
-	(2026101910455900). Go's carryReads has the reasons."""
+	(2026101910455900), and the lines with a value 2.0 read that up doesn't
+	have at all. Go's carryReads has the reasons."""
 	d = shcl.Document.parse_keep_lines(up, shcl.Strictness.Standard)
 	bad: list[Diag] = []
 	sets: list[tuple[str, list[str]]] = []
@@ -1619,14 +1654,25 @@ def _carry_reads(old: Any, up: str, names_as_typed: bool) -> str:
 		g = now.read_string_array(p)
 		if g.status != shcl.Status.Good or g.value != want:
 			bad.append(_carry_diag(old.line(p), differs))
+	lost: set[int] = set()
 	for p in old.paths():
-		if old.count(p) != 1:
+		had, has = old.count(p), now.count(p)
+		# Instances past the ones 3.0 still has are gone.
+		lost.update(line for line in old.lines(p)[min(had, has) :] if line > 0)
+		if had != 1:
 			continue
 		was, now_is = old.read_string_array(p), now.read_string_array(p)
 		if was.status == shcl2.Status.Good and now_is.status == shcl.Status.Good and was.value != now_is.value:
 			bad.append(_carry_diag(old.line(p), differs))
+		if (
+			has == 1
+			and was.status == shcl2.Status.Good
+			and now_is.status != shcl.Status.Good
+			and now.read_raw(p).status != shcl.Status.Good
+		):
+			lost.add(old.line(p))
 	if not bad:
-		return text
+		return text, sorted(lost)
 	n = len({b.line for b in bad})
 	msg = f"{n} lines don't read as shcl 2.0 read them; fix them and upgrade again"
 	raise Error(ErrKind.Refused, msg=msg, diags=bad)
@@ -2058,6 +2104,7 @@ class _Runner:
 			self.result(e)
 			return
 		self.out(f"from {u.from_} changed {_bool(u.changed)} unsure {u.unsure}")
+		self.out(f"lost {_line_list(u.lost)} rewritten {_line_list(u.rewritten)}")
 		self.block(u.text)
 
 	def scribble(self, name: str, text: str) -> None:
@@ -2105,6 +2152,11 @@ class _Runner:
 			return
 		self.out("ok")
 		self.block(text)
+
+
+def _line_list(lines: list[int]) -> str:
+	# [3 4], as Go prints a slice
+	return "[" + " ".join(map(str, lines)) + "]"
 
 
 def _bool(b: bool) -> str:

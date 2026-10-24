@@ -1,5 +1,6 @@
 > upgrade	2
 from 2 changed true unsure 0
+lost [] rewritten [1 2 3 4 5 6 7]
 | ##\r
 | ## This config file format is SHCL.\r
 | ## "Simple Hierarchical Config Language"\r

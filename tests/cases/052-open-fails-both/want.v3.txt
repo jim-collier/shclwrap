@@ -3,6 +3,7 @@
 3	error	E019	malformed array, no closing ']' on the line; quote the value if it is text
 > upgrade
 from 3 changed false unsure 0
+lost [] rewritten []
 | a: 1
 | a(5): 2
 | b: [x, y

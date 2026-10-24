@@ -225,12 +225,48 @@ func KindOf(err error) ErrKind {
 
 // Upgraded is what an upgrade made of a file. From is the format it was
 // written for. Unsure counts lines the upgrade couldn't convert for sure.
+// Lost lists the lines of the original, from 1, with a value the old shcl
+// read that the upgraded file doesn't have. Rewritten lists the rest of the
+// original's lines that the upgraded text doesn't have as typed. A line that
+// only moved isn't one.
 type Upgraded struct {
-	Text    string
-	From    int
-	Changed bool
-	Unsure  int
-	Backup  string
+	Text      string
+	From      int
+	Changed   bool
+	Unsure    int
+	Backup    string
+	Lost      []int
+	Rewritten []int
+}
+
+// RewrittenLines lists the lines of was, from 1, that now doesn't have as
+// typed, leaving out the ones in lost. Lines are matched as a multiset, so a
+// line that only moved isn't listed (design.md, Decisions).
+func RewrittenLines(was, now string, lost []int) []int {
+	have := map[string]int{}
+	for _, l := range textLines(now) {
+		have[l]++
+	}
+	var out []int
+	for i, l := range textLines(was) {
+		switch {
+		case slices.Contains(lost, i+1):
+		case have[l] > 0:
+			have[l]--
+		default:
+			out = append(out, i+1)
+		}
+	}
+	return out
+}
+
+// textLines splits on LF and keeps any CR, so a line whose ending changed
+// counts as written differently.
+func textLines(s string) []string {
+	if s == "" {
+		return nil
+	}
+	return strings.Split(strings.TrimSuffix(s, "\n"), "\n")
 }
 
 // WriteOpts change what a Write does. The zero value is a plain Write.

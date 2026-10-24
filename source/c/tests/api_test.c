@@ -1022,6 +1022,12 @@ static void test_upgrade_file(void) {
 	CHECK(u && !strncmp(u->backup.p, dir, strlen(dir)) && u->backup.p[strlen(dir)] == '/');
 	CHECK(u && file_is(u->backup.p, clean2x) && mode_of(u->backup.p) == 0600 && mode_of(path) == 0600);
 	CHECK(count_dir(dir) == 2);
+	// the line lists come through the copy that adds the backup's name
+	shclw_upgraded *mem = NULL;
+	CHECK(shclw_upgrade(clean2x, strlen(clean2x), 2, &mem, NULL) == SHCLW_OK && mem && mem->n_rewritten > 0);
+	CHECK(u && mem && u->n_rewritten == mem->n_rewritten && u->n_lost == mem->n_lost &&
+	      !memcmp(u->rewritten, mem->rewritten, mem->n_rewritten * sizeof(size_t)));
+	free(mem);
 	free(u);
 	CHECK(shclw_upgrade_file(path, 0, &u, NULL) == SHCLW_OK && u && !u->changed && u->backup.n == 0);
 	CHECK(count_dir(dir) == 2);

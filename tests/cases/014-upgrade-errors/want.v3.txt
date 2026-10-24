@@ -4,6 +4,7 @@
 Good	1	[ab]
 > upgrade
 from 3 changed false unsure 0
+lost [] rewritten []
 | x: [ab]
 | y: 1
 | z: [ab] c
