@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # shellcheck disable=1091
+# shellcheck disable=2016  ## jq's $vars sit in single quotes.
 
 set -Eeuo pipefail
 
@@ -42,6 +43,22 @@ make_c(){
 
 case "${mode}" in
 	lint)
+		## Test vFKcU: the analyze-shcl rules must see a double free planted in a stand-in shcl.h.
+		probe_dir="/work/shcl-analyze-probe"
+		mkdir -p "${probe_dir}/inc"
+		cat > "${probe_dir}/inc/shcl.h" <<'EOF'
+#include <stdlib.h>
+void shcl_probe_use(int *p);
+#ifdef SHCL_IMPLEMENTATION
+void shcl_probe(void) { int *p = malloc(sizeof *p); if (!p) return; shcl_probe_use(p); free(p); free(p); }
+#endif
+EOF
+		make_c -j "${jobs}" analyze-shcl SHCL_DIR="${probe_dir}/inc" SHCL2_DIR="${probe_dir}/inc" SHCL_REPORT="${probe_dir}/out" >/dev/null
+		## By check name at the planted line. clang 22 reworded clang 19's "Attempt to free released memory".
+		for log in shcl3.gcc shcl3.clang shcl2.gcc shcl2.clang; do
+			grep -qE '/shcl\.h:4:[0-9]+: warning: .*\[(-Wanalyzer-double-free|unix\.Malloc)\]' "${probe_dir}/out/${log}.txt" || { echo "analyze-shcl missed the planted double free (${log})" >&2; exit 1; }
+		done
+		make_c -j "${jobs}" analyze-shcl SHCL_REPORT=/artifacts/c-analyze-shcl
 		make_c lint strict analyze format-check
 		;;
 	test)
@@ -122,14 +139,18 @@ EOF
 		chmod +x /work/codeql-build.bash
 		bash -n /work/codeql-build.bash
 		bash /work/codeql-build.bash validate
-		"${codeql}" database create --language=cpp --source-root="${root}/source/c" \
+		## The repo root, not source/c, so shcl.h under cicd/cache is inside it. CodeQL reports only on files there.
+		"${codeql}" database create --language=cpp --source-root="${root}" \
 			--command="bash /work/codeql-build.bash capture" \
 			/work/codeql-db
 		"${codeql}" database analyze /work/codeql-db "${queries}" \
 			/work/codeql-queries/cpp/ql/src/AlertSuppression.ql \
 			--format=sarif-latest --output="${artifact_dir}/codeql.sarif"
 		fi
-		jq -e '[.runs[].results[]? | select(([.suppressions[]?.kind] | index("inSource")) == null)] | length == 0' "${artifact_dir}/codeql.sarif" >/dev/null || { echo "CodeQL findings; see ${artifact_dir}/codeql.sarif" >&2; exit 1; }
+		## Findings in shcl itself are reported, not fatal, until they're triaged (backlog 2026102113393169).
+		openQuery='[.runs[].results[]? | select(([.suppressions[]?.kind] | index("inSource")) == null) | select((.locations[0].physicalLocation.artifactLocation.uri // "" | startswith("cicd/cache/")) == $shcl)] | length'
+		echo "CodeQL findings in shcl, not fatal yet: $(jq --argjson shcl true "${openQuery}" "${artifact_dir}/codeql.sarif")"
+		[[ "$(jq --argjson shcl false "${openQuery}" "${artifact_dir}/codeql.sarif")" == 0 ]] || { echo "CodeQL findings; see ${artifact_dir}/codeql.sarif" >&2; exit 1; }
 		ctu_dir="/work/ctu/v3"
 		mkdir -p "${ctu_dir}/ast"
 		: > "${ctu_dir}/externalDefMap.txt"

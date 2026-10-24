@@ -9,6 +9,7 @@
 #   make SHCL_DIR=... SHCL2_DIR=... drive    the sanitized shclw-drive, for the shared cases
 #   make SHCL_DIR=... SHCL2_DIR=... strict   compile only, with gcc-15 at C17
 #   make SHCL_DIR=... SHCL2_DIR=... lint     clang-tidy
+#   make SHCL_DIR=... SHCL2_DIR=... analyze-shcl   the analyzers over shcl itself
 #   make format-check | format
 
 SHCL_DIR ?=
@@ -45,7 +46,7 @@ V2_DEPS := shclw3_v2.h shclw3_v2_names.h $(SHCL2_DIR)/shcl.h
 
 FORMATTED := $(wildcard *.c *.h tests/*.c)
 
-.PHONY: all test drive drive-plain strict lint analyze analyze-ctu names format format-check clean
+.PHONY: all test drive drive-plain strict lint analyze analyze-shcl analyze-ctu names format format-check clean FORCE
 all: test drive strict
 
 $(OUT)/asan $(OUT)/plain $(OUT)/cxx:
@@ -126,12 +127,28 @@ analyze:
 		$(CC15) -std=c17 -O1 -g $(WARN) -Werror -I. -I$(SHCL_DIR) -fanalyzer -c -o /dev/null "$$file"; \
 		$(CLANG) --analyze -std=c11 -O1 -g $(WARN) -Werror -I. -I$(SHCL_DIR) -Xanalyzer -analyzer-output=text -o /dev/null "$$file"; \
 	done
-	$(CC15) -std=c17 -O1 -g $(WARN) -Werror -isystem $(SHCL_DIR) -I. -fanalyzer -c -o /dev/null tests/shcl_impl.c
-	$(CLANG) --analyze -std=c11 -O1 -g $(WARN) -Werror -isystem $(SHCL_DIR) -I. -Xanalyzer -analyzer-output=text -o /dev/null tests/shcl_impl.c
 	$(CC15) -std=c17 -O1 -g $(WARN) -Werror -I. -isystem $(SHCL2_DIR) -fanalyzer -c -o /dev/null shclw3_v2.c
 	$(CLANG) --analyze -std=c11 -O1 -g $(WARN) -Werror -I. -isystem $(SHCL2_DIR) -Xanalyzer -analyzer-output=text -o /dev/null shclw3_v2.c
-	$(CC15) -std=c17 -O1 -g $(WARN) -Werror -I. -isystem $(SHCL2_DIR) -fanalyzer -c -o /dev/null shclw3_v2_impl.c
-	$(CLANG) --analyze -std=c11 -O1 -g $(WARN) -Werror -I. -isystem $(SHCL2_DIR) -Xanalyzer -analyzer-output=text -o /dev/null shclw3_v2_impl.c
+
+# shcl's own code, which every program built on this runs. Not -isystem, and
+# clang told to look in headers, or neither reports a thing in shcl.h. No style
+# warnings, since it isn't ours. Findings are reported, not fatal, until
+# they're triaged (backlog 2026102113393169).
+SHCL_REPORT ?= $(OUT)/analyze-shcl
+SHCL_ANALYZED := $(foreach v,shcl3 shcl2,$(SHCL_REPORT)/$(v).gcc.txt $(SHCL_REPORT)/$(v).clang.txt)
+$(SHCL_REPORT)/shcl3.%: TU := tests/shcl_impl.c
+$(SHCL_REPORT)/shcl3.%: TU_DIR := $(SHCL_DIR)
+$(SHCL_REPORT)/shcl2.%: TU := shclw3_v2_impl.c
+$(SHCL_REPORT)/shcl2.%: TU_DIR := $(SHCL2_DIR)
+$(SHCL_REPORT):
+	mkdir -p $@
+$(SHCL_REPORT)/%.gcc.txt: FORCE | $(SHCL_REPORT)
+	$(CC15) -std=c17 -O1 -g -I. -I$(TU_DIR) -fanalyzer -c -o /dev/null $(TU) >$@ 2>&1 || { cat $@ >&2; exit 1; }
+$(SHCL_REPORT)/%.clang.txt: FORCE | $(SHCL_REPORT)
+	$(CLANG) --analyze -std=c11 -O1 -g -I. -I$(TU_DIR) -Xanalyzer -analyzer-opt-analyze-headers -Xanalyzer -analyzer-output=text -o /dev/null $(TU) >$@ 2>&1 || { cat $@ >&2; exit 1; }
+analyze-shcl: $(SHCL_ANALYZED)
+	@for log in $^; do echo "shcl analyzer findings, not fatal yet: $$(grep -c ' warning: ' "$$log") in $$log"; done
+FORCE:
 
 format:
 	$(CLANG_FORMAT) -i $(FORMATTED)

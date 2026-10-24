@@ -126,30 +126,15 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Acceptance signoff: Self-closed: the flags were in, and now have a regression test.
 	- Closed: 2026-10-21
 
-- shcl analyzer probe fails under the container's clang
-	- ID: 2026102113502809
-	- Type: Bug
-	- Status: Queued
-	- Severity: High
-	- Opened: 2026-10-21
-	- Related IDs: 2026101916500102
-	- Steps to reproduce [Bug]:
-		- Push branch `wip/round-1021-2026101916500102`, or run `cicd.bash --ci` on it.
-	- Incorrect behavior [Bug]:
-		- The lint stage stops with "analyze-shcl missed the planted double free (shcl3.clang)".
-	- Expected behavior [Bug]:
-		- clang flags the planted double free in the stand-in `shcl.h`, as it did with clang 19 on the host.
-	- Reproduced [Bug]: 2026-10-21, in the pre-push gate. The container has clang-22.
-	- Possible cause [Bug]: clang-22 handles the header flag or the probe differently. Not looked at yet.
-	- Branch: wip/round-1021-2026101916500102 (`eda48d5`). It also has the backlog edits for 2026101916500102 and the new item 2026102113393169, which aren't on the round branch yet.
-
 - Leak tests and all tests cover third-party and vendored code
 	- ID: 2026101916500102
 	- Type: Enhancement
-	- Status: Queued
+	- Status: Waiting on automated testing
+	- Needs local test suite run?: Yes, the leak checks, `bash cicd/c-checks.bash leakcheck 3 WORK` or a full run. It should print a CodeQL count for shcl, and fail only on findings of ours, such as those of 2026101513330009 and 2026101513330017 while they're open. If the SARIF names no file under `cicd/cache/shcl-c/`, check whether CodeQL read `shcl.h` at all.
 	- Priority: High
 	- Opened: 2026-10-19
 	- Opened by: JC
+	- Related IDs: 2026101619042485, 2026101707542552, 2026101711245585, 2026102113393169
 	- Requirements:
 		- Make sure CICD leak tests, and all tests, include third-party and vendored code. But only code that gets run by end users.
 		- Anything wrong goes on the backlog for a fix.
@@ -157,8 +142,40 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- Pre-next-cut.
 		- This may only affect what's already written in the backlog, and/or done.
 	- Progress log:
-		- 2026-10-21: the sanitizers already build shcl's code, but gcc's and clang's analyzers skipped it as a system header, and CodeQL's root left it out. A fix adds `make analyze-shcl` with a planted-fault probe, and moves CodeQL's root up. It passed on the host but failed the gate in the container. See 2026102113502809.
-	- Branch: wip/round-1021-2026101916500102
+		- 2026-10-21: The outside code users run is shcl: C's pinned `shcl.h` 3.0 plus 2.0 for the upgrade check, Go's shcl modules, and Rust's shcl crates. Test-only and cicd-only code isn't.
+		- C's sanitized builds already built both shcl versions instrumented, the fuzz and soak drivers link them, and `lsan.supp` is empty. So the leak and sanitizer runs covered shcl.
+		- The analyzers didn't. They read shcl's code with `shcl.h` as a system header, where neither reports anything, and clang skips headers anyway. gcc spent about 80s a run on it for nothing.
+		- Added `make analyze-shcl`, gcc's and clang's analyzers over both shcl versions with no style warnings. On this host it finds 1 (gcc) and 15 (clang) in 3.0, and 0 and 8 in 2.0. They're reported, not fatal, until 2026102113393169 triages them.
+		- CodeQL's root was `source/c`, so `shcl.h` sat outside it. It's now the repo root, and shcl's findings are counted apart from ours, which stay fatal.
+		- Rust, Go and Python are in the queued 2026101711245585, which already covered third-party code. Added there that it means runtime dependencies only, that the Rust runs need `shcl3` on to build shcl at all, and that the cicd scripts are left out. Added to the C++ item 2026101707542552 that the C pass analyzes shcl.
+		- 2026-10-21: It passed on the host but failed the gate in the container. See 2026102113502809.
+		- 2026-10-23: The probe's match was the fault, fixed in 2026102113502809. The container lint passes, with the same counts as on the host.
+	- Decisions:
+		- This reverses "Vendored code is left out" in the C item, 2026101619042485, for the analyzers and CodeQL. Style lints (clang-tidy, gcc-15 at C17) still stay off shcl.
+		- shcl's findings report rather than fail for now. Fatal, every full run would stay red on code fixed in another repo, and 2.0 is a frozen tag.
+	- Verified: `make analyze-shcl` ran on this host's gcc-15 and clang 19 and wrote the 4 reports. Probe vFKcU passed, and failed with `-isystem` put back for gcc, or the header flag dropped for clang. A missing `shcl.h` failed the target. The CodeQL split counted planted results under `cicd/cache/` as shcl's, and others, or one with no location, as ours. `cicd/flags-test.bash` and shellcheck passed.
+		- 2026-10-23: `bash cicd/c-checks.bash lint 3 WORK` passed in the container with gcc-15 and clang-22, probe included.
+	- Swept: the sanitized, plain and C++ test builds, the fuzz drivers, and the heaptrack soak all link both shcl versions. The cross-file (CTU) pass reads our files only, noted on 2026102113393169. clang-tidy and `strict` read ours only, as style lints.
+	- Branch: round-1023, from `wip/round-1021-2026101916500102`.
+	- Test case: vFKcU, the analyze-shcl probe in `cicd/c-in-container.bash` lint mode.
+
+- Triage shcl's analyzer and CodeQL findings, then make them fatal
+	- ID: 2026102113393169
+	- Type: Task
+	- Status: Queued
+	- Priority: High
+	- Opened: 2026-10-21
+	- Parent ID: 2026101916500102
+	- Related IDs: 2026101619042485
+	- Requirements:
+		- Sort each finding in `cicd/artifacts/leakcheck/c-analyze-shcl/`, and each shcl one in the leak run's `codeql.sarif`, into a real bug or a false report.
+			- On this host gcc reports a leak in 3.0's `shcl_generate`, likely from the `volatile` pointer that holds the allocation. clang reports null dereferences and stream misuse in 3.0, and null dereferences in 2.0. The container's clang-22 gives the same counts (2026-10-23).
+		- Real bugs in 3.0 get reported to shcl. 2.0 is a frozen tag, so its findings are listed as accepted, each with why.
+		- Then make the passes fatal, with a list of known findings per pin, matched exactly. A pin bump that adds a finding fails, and one that loses one asks for the list to be pruned.
+		- Also:
+			- Add shcl's two implementation files to the CTU map, so the CTU pass follows our calls into shcl.
+			- gcc's analyzer at `-O1` missed a planted leak it found at `-O0`. Check whether `-O0` finds more in our code, and what it costs.
+	- Estimated effort: Avg
 
 - Layered loading
 	- ID: 2026101512024156
@@ -612,6 +629,7 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 			- For a full leak stack, rerun the test with `ASAN_OPTIONS=fast_unwind_on_malloc=0`.
 		- Every full run also runs clang-tidy over the C files as C++, with the C++ build's flags and the same `.clang-tidy`. That covers the clang analyzer and the `bugprone-*` checks.
 			- gcc's `-fanalyzer` isn't used on C++. gcc's own docs still say it's meant for C. The C item runs it on the same files.
+			- shcl's own code is analyzed by the C item's `analyze-shcl` pass, so clang-tidy stays on our files.
 			- Before the gate goes live, every existing finding is fixed, or suppressed at the line with `NOLINT(check-name)` and a one-line reason. There's no baseline file.
 			- It moves behind a flag only if a full run measures too slow.
 		- Tools follow the C item's rules: pinned, and no Coverity or Infer.
@@ -636,6 +654,7 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Requirements:
 		- For all 3:
 			- The checks cover first-party and third-party code. Vendored code is included.
+				- Third-party means what end users run: the wrapper's runtime dependencies, today shcl's Go modules and Rust crates. Test and dev dependencies, such as goleak, dhat and pytest-memray, and the cicd scripts are left out.
 				- On third-party code, run the leak, memory, and correctness checks named here, not style lints. Style findings in someone else's crate or module aren't ours to fix.
 				- CodeQL reports only on source inside the database's root. For its run, vendor the dependencies into the tree first (`cargo vendor`, `go mod vendor`, unpacked sdists for Python).
 			- Any report fails the test that made it.
@@ -646,6 +665,7 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 			- Every tool is pinned and runs in the build container or lint image, never installed on the host.
 			- Each new gate is watched to fail before it's trusted, by planting the leak it's meant to catch and seeing it go red.
 			- Known-advisory scans run on every full run: `cargo deny check advisories` or `cargo audit`, `govulncheck`, and `pip-audit`. They cover third-party code only, which is the point.
+				- Runtime dependencies only. `cargo deny` sets `exclude-dev = true`, and govulncheck stays in its default mode, which reports only what the code calls.
 		- For Rust:
 			- Safe Rust leaks only through `Rc` or `Arc` cycles, `mem::forget`, `Box::leak`, and collections that grow forever. Real leaks and memory errors come from `unsafe` and FFI, in our crates or in dependencies.
 			- Every full run builds the whole test suite with AddressSanitizer and LeakSanitizer, in a build dir of its own.
@@ -661,6 +681,7 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 			- Traps:
 				- Without `-Zbuild-std`, std isn't instrumented. ASan mostly copes, but TSan gives false reports.
 				- Without an explicit `--target`, the sanitizer flags reach build scripts and proc macros, and the build fails in odd places.
+				- Without feature `shcl3` on, neither shcl crate is built, so the sanitizer, Miri and CodeQL runs use `--all-features`.
 				- LSan reports at process exit, so a leak fails the whole test binary, not one test. Rerun with `--test-threads=1` and a test-name filter to find which.
 				- Miri can't call FFI and has limited file and network access. A test that needs them gets `#[cfg_attr(miri, ignore)]` with a one-line reason. It's not silently left out.
 				- Miri doesn't count memory reachable from a `static` as a leak, so a cache in a static that grows forever passes. The soak test catches that.
@@ -681,6 +702,7 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 				- `-race` needs cgo on some platforms. A job with `CGO_ENABLED=0` fails to build it or skips it, so check the job's env.
 				- `-race` is 2 to 20 times slower and uses 5 to 10 times the memory. Size the job's timeout for it.
 		- For Python:
+			- These cover the Python wrapper and its runtime dependencies. The cicd scripts are build tooling no user runs, so ruff is all they get.
 			- Python leaks are references held too long: module-level caches, `functools.lru_cache` on a method, closures kept in a global list, and C extensions that drop a reference count.
 			- Every full run runs the tests with `-X dev` and `-W error::ResourceWarning`, so an unclosed file or socket fails the test.
 			- Every full run runs the tests under `pytest-memray`. Each test that loops gets `@pytest.mark.limit_leaks(...)` with a margin. memray sees native allocations, so leaks in C extensions show up, third-party ones included.
@@ -919,6 +941,31 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- The copy beside the wrapper wins over the installed one, since bundling it is a choice. Waits on JC with the parent's question.
 	- Commit: a4909af
 	- Test case: `source/python/tests/test_shclw.py`, `test_copied` and `test_none`.
+
+- shcl analyzer probe fails under the container's clang
+	- ID: 2026102113502809
+	- Type: Bug
+	- Status: Done
+	- Severity: High
+	- Opened: 2026-10-21
+	- Related IDs: 2026101916500102
+	- Steps to reproduce [Bug]:
+		- Push branch `wip/round-1021-2026101916500102`, or run `cicd.bash --ci` on it.
+	- Incorrect behavior [Bug]:
+		- The lint stage stops with "analyze-shcl missed the planted double free (shcl3.clang)".
+	- Expected behavior [Bug]:
+		- clang flags the planted double free in the stand-in `shcl.h`, as it did with clang 19 on the host.
+	- Reproduced [Bug]: 2026-10-21, in the pre-push gate. The container has clang-22. Again on 2026-10-23, in the C image.
+	- Possible cause [Bug]: clang-22 handles the header flag or the probe differently. Not looked at yet.
+	- Actual cause [Bug]:
+		- clang-22 does flag it, at the same line, but reworded the message. clang 19 says "Attempt to free released memory", and clang-22 "Attempt to release already released memory". The probe looked for `warning: .*free`.
+	- Actual fix [Bug]: The probe matches the check name at the planted line, `[unix.Malloc]` for clang and `[-Wanalyzer-double-free]` for gcc, not the message.
+	- Verified: `bash cicd/c-checks.bash lint 3 WORK` passed with the probe, and printed shcl's counts: 1 and 15 in 3.0, 0 and 8 in 2.0, the same as clang 19 on the host. On that run's probe output, the old match failed both clang reports and the new one passed all 4. clang-22 without `-analyzer-opt-analyze-headers` reports nothing, so the probe still fails without it. `cicd.bash --ci --quick -y` and shellcheck passed.
+	- Swept: the leak and null probes in leakcheck mode match on `LeakSanitizer` and the check name, not message text. The analyze-shcl counts match ` warning: `, which both clang versions print.
+	- Branch: round-1023
+	- Test case: vFKcU, the analyze-shcl probe in `cicd/c-in-container.bash` lint mode.
+	- Acceptance signoff: Self-closed: the probe failed before the fix and passes after, under the container's tools.
+	- Closed: 2026-10-23
 
 - Rename the project shclwrap
 	- ID: 2026101513524769

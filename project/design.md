@@ -431,6 +431,8 @@ An ops script is one op per line, with fields split by tabs. `\t`, `\n`, `\r`, a
 
 - `cicd/cicd.bash` runs format, lint, tests, the C leak checks, and both fuzzers. `--ci` runs format check, lint, and tests, and is the pre-push hook. `--quick` leaves out the C sanitizers, analyzers, and leak checks, and anything that needs the network, and fuzzes for 10s. `--leakcheck` adds the leak checks to either, and `--no-leakcheck` drops them from any run. `--dry-run` shows the stages a mix of flags picks.
 
+- The checks cover shcl's own code too, since every program built on the wrapper runs it. The sanitized builds and the fuzz drivers build it instrumented, and the analyzers and CodeQL read it. Its findings are reported but not fatal yet. Style lints, such as clang-tidy, stay on our code. Test-only and cicd-only code from elsewhere is left out, since no user runs it.
+
 - A run removes its own scratch folder. It keeps what the next run reuses: the C container's home with CodeQL's compiled queries, the pinned headers, and the C image. It drops a cached header no pin names, an older C image no container uses, docker's dangling build cache after a rebuild, and leak reports from before the latest leak run. The newest 10 sets of fuzz failures are kept.
 
 ## Sharing the code

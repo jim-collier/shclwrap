@@ -277,7 +277,7 @@ fShclPy || doPy=0
 pyPath="${root}/cicd/cache/shcl-py/${SHCL3_PY_REV}"
 if ((doC && ! doQuick)); then
 	bash "${here}/c-checks.bash" lint 3 "${work}"
-	fEcho "OK: clang-tidy, gcc-15 at C17, and static analyzers (C over shcl 3)"
+	fEcho "OK: clang-tidy, gcc-15 at C17, and static analyzers (C over shcl 3; shcl's own findings in cicd/artifacts/leakcheck/c-analyze-shcl)"
 fi
 mapfile -t shellFiles < <(find "${root}/cicd" -type f \( -name '*.bash' -o -path '*/hooks/*' \) | sort)
 ((${#shellFiles[@]})) || fDie "shellcheck found no files"
