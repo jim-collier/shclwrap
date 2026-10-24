@@ -283,6 +283,14 @@ mapfile -t shellFiles < <(find "${root}/cicd" -type f \( -name '*.bash' -o -path
 ((${#shellFiles[@]})) || fDie "shellcheck found no files"
 shellcheck "${shellFiles[@]}"
 fEcho "OK: shellcheck (${#shellFiles[@]} files)"
+## Test vGBt9: a .PHONY name with no rule makes make say "nothing to be done" and pass.
+read -ra phonyTargets < <(sed -n 's/^\.PHONY:[[:space:]]*//p' "${root}/source/c/Makefile") || true
+((${#phonyTargets[@]})) || fDie "no .PHONY line in source/c/Makefile"
+makeRules="$(grep -oE '^[A-Za-z0-9_-]+:' "${root}/source/c/Makefile")"
+for target in "${phonyTargets[@]}"; do
+	grep -qxF -- "${target}:" <<<"${makeRules}" || fDie "source/c/Makefile: .PHONY names ${target}, which has no rule"
+done
+fEcho "OK: C Makefile targets (${#phonyTargets[@]})"
 ruff check --quiet "${root}/cicd" "${root}/source/python"
 ruff format --check --quiet "${root}/cicd" "${root}/source/python"
 fEcho "OK: ruff"

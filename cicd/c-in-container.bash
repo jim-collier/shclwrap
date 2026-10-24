@@ -66,6 +66,15 @@ EOF
 		if make_c analyze-shcl SHCL_DIR="${probe_dir}/inc" SHCL2_DIR="${probe_dir}/inc" SHCL_REPORT="${probe_dir}/out" SHCL_KNOWN="${probe_dir}/none.txt" SHCL2_KNOWN="${probe_dir}/known.txt" >/dev/null 2>&1; then echo "analyze-shcl passed a finding not in its list" >&2; exit 1; fi
 		printf 'clang\tshcl.h:99:1\tcore.NullDereference\n' >> "${probe_dir}/known.txt"
 		if make_c analyze-shcl SHCL_DIR="${probe_dir}/inc" SHCL2_DIR="${probe_dir}/inc" SHCL_REPORT="${probe_dir}/out" SHCL_KNOWN="${probe_dir}/known.txt" SHCL2_KNOWN="${probe_dir}/known.txt" >/dev/null 2>&1; then echo "analyze-shcl passed a listed finding that's gone" >&2; exit 1; fi
+		## Test vGBqv: make analyze's gcc pass must see a leak that -O1 optimizes away.
+		cat > "${probe_dir}/leak.c" <<'EOF'
+#include <stdlib.h>
+#include <string.h>
+int shclw_probe_leak(int flag);
+int shclw_probe_leak(int flag) { char *p = malloc(64); if (!p) return -1; if (flag) return 1; memset(p, 0, 64); free(p); return 0; }
+EOF
+		if make_c analyze ANALYZE_C="${probe_dir}/leak.c" >"${probe_dir}/leak.out" 2>&1; then echo "make analyze passed a planted leak" >&2; exit 1; fi
+		grep -q 'analyzer-malloc-leak' "${probe_dir}/leak.out" || { cat "${probe_dir}/leak.out" >&2; echo "gcc's analyzer missed the planted leak" >&2; exit 1; }
 		make_c -j "${jobs}" analyze-shcl SHCL_REPORT=/artifacts/c-analyze-shcl
 		make_c lint strict analyze format-check
 		;;

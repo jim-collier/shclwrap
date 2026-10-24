@@ -229,16 +229,6 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Test case: vGBSI, in `cicd/c-in-container.bash` leak mode: a planted null dereference in a stand-in `shcl.h`, reached only through our call, must show, fail unlisted, pass listed, and fail on a finding of ours.
 	- Acceptance signoff: waits on JC, after the leak run, for the use after free in `migrate_text` judged false. It's a memory safety call.
 
-- gcc's analyzer at `-O0`
-	- ID: 2026102321270159
-	- Type: Task
-	- Status: Queued
-	- Priority: Avg
-	- Opened: 2026-10-23 21:27
-	- Parent ID: 2026102113393169
-	- Requirements:
-		- gcc's analyzer at `-O1` missed a planted leak it found at `-O0`. Check whether `-O0` finds more in our code, and what it costs.
-
 - Layered loading
 	- ID: 2026101512024156
 	- Type: Feature
@@ -491,6 +481,23 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Branch: round-1021
 	- Commit: 56aedbc
 	- Test case: tests/cases/054-merged-unused, and the fuzz op.
+
+- `make analyze` passes on a clang analyzer finding
+	- ID: 2026102322354803
+	- Type: Bug
+	- Status: Queued
+	- Severity: Avg
+	- Opened: 2026-10-23 22:35
+	- Related IDs: 2026102321270159
+	- Steps to reproduce:
+		- Run `make analyze ANALYZE_C=<file>` on a file with a leak that clang reports and gcc doesn't, such as vGBqv's probe with `GCC_ANALYZE` set to `-O1`.
+	- Incorrect behavior: clang prints `warning: Potential leak of memory pointed to by 'p' [unix.Malloc]`, and make exits 0.
+	- Expected behavior: a clang analyzer finding fails the target, as the Makefile's comment says it does.
+	- Reproduced: 2026-10-23, on the host's clang 19.
+	- Possible cause: `-Werror` doesn't reach the analyzer's own warnings. `-Xanalyzer -analyzer-werror` made clang 19 exit 1 on the same file.
+	- Notes:
+		- Nothing hides behind it today. Neither the host's clang 19 nor the container's clang-22 reports anything in our files.
+		- `analyze-shcl` and the CTU pass read clang's output through `cicd/shcl_known.py`, so they aren't affected.
 
 - Back up a file before a save that would lose lines
 	- ID: 2026101513330019
@@ -800,18 +807,6 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- Without `--ci`, the format stage rewrites tracked files with `gofmt -w`, `cargo fmt`, and `clang-format -i`.
 		- Until then a full test run goes in 2 steps, `--ci --leakcheck --no-sync -y` and then the fuzz by hand.
 
-- C Makefile lists an `analyze-ctu` target it has no rule for
-	- ID: 2026102322213500
-	- Type: Bug
-	- Status: Queued
-	- Priority: Low
-	- Opened: 2026-10-23
-	- Opened by: JC
-	- Requirements:
-		- Add the rule, or take the name out of `.PHONY` in `source/c/Makefile`.
-	- Notes:
-		- `make analyze-ctu` today says there's nothing to do and exits 0, so it looks like a pass.
-
 - Say which layer a read came from
 	- ID: 2026102114101028
 	- Type: Enhancement
@@ -1000,6 +995,54 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- The copy beside the wrapper wins over the installed one, since bundling it is a choice. Waits on JC with the parent's question.
 	- Commit: a4909af
 	- Test case: `source/python/tests/test_shclw.py`, `test_copied` and `test_none`.
+
+- gcc's analyzer at `-O0`
+	- ID: 2026102321270159
+	- Type: Task
+	- Status: Done
+	- Priority: Avg
+	- Opened: 2026-10-23 21:27
+	- Parent ID: 2026102113393169
+	- Related IDs: 2026102322354803
+	- Requirements:
+		- gcc's analyzer at `-O1` missed a planted leak it found at `-O0`. Check whether `-O0` finds more in our code, and what it costs.
+	- Progress log:
+		- 2026-10-23: `-O0` finds nothing more in our code. Every file `make analyze` covers is clean at both levels, and shcl's findings are the same at both, on both pins.
+		- It costs about 16% more CPU on our files, 10.6s to 12.4s over 2 runs each, at load 8 to 14. On shcl it's 79s to 87s for 3.0 and 20s to 24s for 2.0, one run each.
+		- What `-O1` misses: it deletes an allocation that's only written and then freed, so a leak on an early return before the free is gone before the analyzer runs. An unused `malloc` goes the same way. `-O2` misses the same 2.
+		- The gcc lines in `make analyze` and `analyze-shcl` now run at `-O0`, from one `GCC_ANALYZE` in `source/c/Makefile`. This goes past the wording, which asked only for the check. shcl's lists needed no change.
+	- Decisions:
+		- `-O0` replaces `-O1` for gcc's analyzer rather than running beside it. `-O0` found everything `-O1` did in every probe, and the `-O1` warnings still come from the test builds, which gcc-15 builds at `-O1` with `-Werror`.
+		- clang's lines stay at `-O1`, since clang's analyzer works on the source, not the optimized code.
+	- Verified: `bash cicd/c-checks.bash lint 3 WORK` passed in 171s, with gcc-15 at `-O0` clean on our files, both pins matching their lists, and the new probe. On the host, the probe's leak failed `make analyze` with gcc's `analyzer-malloc-leak`, and with `GCC_ANALYZE` set back to `-O1` the target passed. `cicd/cicd.bash --ci --quick -y`, `lint-report.bash`, `flags-test.bash` and shellcheck passed.
+	- Swept: every gcc `-fanalyzer` line. `make analyze` and `analyze-shcl` use `GCC_ANALYZE`. The leak mode's null probe still calls gcc-15 at `-O1` itself, since it checks the tool, not the gate's flags. Go, Rust and Python have no gcc analyzer pass.
+	- Branch: round-1023
+	- Test case: vGBqv, in `cicd/c-in-container.bash` lint mode: a leak `-O1` optimizes away must fail `make analyze` with gcc's check name.
+	- Acceptance signoff: Self-closed: has a regression test, finds nothing new in our code, and costs little. It departs from the wording by changing the gate as well.
+	- Closed: 2026-10-23 22:38
+
+- C Makefile lists an `analyze-ctu` target it has no rule for
+	- ID: 2026102322213500
+	- Type: Bug
+	- Status: Done
+	- Priority: Low
+	- Opened: 2026-10-23
+	- Opened by: JC
+	- Requirements:
+		- Add the rule, or take the name out of `.PHONY` in `source/c/Makefile`.
+	- Notes:
+		- `make analyze-ctu` today says there's nothing to do and exits 0, so it looks like a pass.
+	- Actual cause:
+		- The name was in `.PHONY` from the first C memory gates commit (`90b409c`). The CTU pass was always in `cicd/c-in-container.bash` leak mode.
+	- Actual fix: took the name out of `.PHONY`. `make analyze-ctu` now stops with "No rule to make target" and exits 2. The Lint stage checks that every `.PHONY` name in the Makefile has a rule.
+	- Decisions:
+		- Took the name out rather than adding a rule. The CTU pass needs clang-22, the pin revs and a map built across both pins, all of which the container script already has.
+	- Verified: the new check passed on the fixed Makefile, and failed naming `analyze-ctu` on the one before the fix. It also failed on a Makefile with no `.PHONY` line. `cicd/cicd.bash --ci --quick -y` passed with it.
+	- Swept: `source/c/Makefile` is the only Makefile in the repo, and the check walks all 14 of its `.PHONY` names.
+	- Branch: round-1023
+	- Test case: vGBt9, in `cicd/cicd.bash` Lint.
+	- Acceptance signoff: Self-closed: a mechanical fix, and its check was watched to fail.
+	- Closed: 2026-10-23 22:38
 
 - Make shcl's analyzer and CodeQL findings fatal, per pin
 	- ID: 2026102321270148
