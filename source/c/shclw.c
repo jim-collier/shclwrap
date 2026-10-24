@@ -2172,6 +2172,13 @@ static bool key_ends(const char *path, const char *body, size_t n) {
 	return plen > end && path[plen - end - 1] == '.' && shclw_i_same_lower(path + plen - end, body, end);
 }
 
+// End of the line starting at at: its '\n', or len. memchr never gets an
+// empty range, since the analyzer has it find a '\n' there anyway.
+static size_t line_end(const char *text, size_t len, size_t at) {
+	const char *nl = at < len ? (const char *)memchr(text + at, '\n', len - at) : NULL;
+	return nl ? at + (size_t)(nl - (text + at)) : len;
+}
+
 shclw_commented_line *shclw_i_commented_of(const char *text, size_t len, const char *path, size_t *count) {
 	*count = 0;
 	if (!text) {
@@ -2185,8 +2192,7 @@ shclw_commented_line *shclw_i_commented_of(const char *text, size_t len, const c
 	bool ok = true;
 	size_t line = 0;
 	for (size_t at = 0; ok;) {
-		const char *nl = (const char *)memchr(text + at, '\n', len - at);
-		size_t end = nl ? at + (size_t)(nl - (text + at)) : len;
+		size_t end = line_end(text, len, at);
 		line++;
 		uncut_line u;
 		bool cand = uncomment(text + at, end - at, false, &u);
@@ -2201,7 +2207,7 @@ shclw_commented_line *shclw_i_commented_of(const char *text, size_t len, const c
 			}
 			ok = ok && try_commented(text, len, at, end - at, line, &base, errs, &a);
 		}
-		if (!nl) {
+		if (end >= len) {
 			break;
 		}
 		at = end + 1;
@@ -2217,14 +2223,13 @@ char *shclw_i_uncommented(const char *text, size_t len, size_t n, size_t *out_le
 	*out_len = 0;
 	size_t at = 0;
 	for (size_t line = 1; line < n; line++) {
-		const char *nl = (const char *)memchr(text + at, '\n', len - at);
-		if (!nl) {
+		size_t end = line_end(text, len, at);
+		if (end >= len) {
 			return shclw_i_dup(text, len, out_len);
 		}
-		at += (size_t)(nl - (text + at)) + 1;
+		at = end + 1;
 	}
-	const char *nl = (const char *)memchr(text + at, '\n', len - at);
-	size_t end = nl ? at + (size_t)(nl - (text + at)) : len;
+	size_t end = line_end(text, len, at);
 	uncut_line u;
 	if (!uncomment(text + at, end - at, true, &u)) {
 		return shclw_i_dup(text, len, out_len);
