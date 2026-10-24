@@ -211,6 +211,9 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Requirements:
 		- Add shcl's two implementation files, `tests/shcl_impl.c` and `shclw3_v2_impl.c`, to the CTU map, so the CTU pass follows our calls into shcl.
 		- Since 86d5c2f any non-empty CTU log fails the leak run. Findings inside shcl go to the pin's known list, the way CodeQL's do.
+	- Progress log:
+		- 2026-10-23: Mapping the 2 impl files adds nothing, since `clang-extdef-mapping` maps only the main file's definitions. Mapped with `shcl.h` itself as the main file, plus `-DSHCL_IMPLEMENTATION`, and `-include shclw3_v2_names.h` for 2.0, it adds 247 entries.
+		- On this host's clang 19 the pass then takes about 81s, up from about 75s, and reports 12: 11 inside 3.0's `shcl.h` (1173, 1186, 3734, 3749) and 1 in ours, `shclw3.c:1300`. None is triaged yet. 1186's is a use after free in `arena_guard`, and ours looks like a path where `i < n` isn't known.
 
 - gcc's analyzer at `-O0`
 	- ID: 2026102321270159
