@@ -800,6 +800,18 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- Without `--ci`, the format stage rewrites tracked files with `gofmt -w`, `cargo fmt`, and `clang-format -i`.
 		- Until then a full test run goes in 2 steps, `--ci --leakcheck --no-sync -y` and then the fuzz by hand.
 
+- C Makefile lists an `analyze-ctu` target it has no rule for
+	- ID: 2026102322213500
+	- Type: Bug
+	- Status: Queued
+	- Priority: Low
+	- Opened: 2026-10-23
+	- Opened by: JC
+	- Requirements:
+		- Add the rule, or take the name out of `.PHONY` in `source/c/Makefile`.
+	- Notes:
+		- `make analyze-ctu` today says there's nothing to do and exits 0, so it looks like a pass.
+
 - Say which layer a read came from
 	- ID: 2026102114101028
 	- Type: Enhancement
