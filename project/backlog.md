@@ -358,7 +358,7 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- ID: 2026101513330020
 	- Type: Feature
 	- Status: Waiting on automated testing
-	- Needs local test suite run?: Yes, one full run, plain, for CodeQL, CTU and the fuzz over the C change.
+	- Needs local test suite run?: Yes, one full run, plain, for a fresh CodeQL, the fuzz, and CTU again over the C change.
 	- Priority: Avg
 	- Opened: 20261015-133300
 	- Opened by: JC
@@ -372,6 +372,9 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- A set shcl refuses leaves the line commented. The `has` line after the refused `syntax` in 061 gave true in Rust before that fix and false after.
 		- Verified: Go tests, vet and staticcheck, Rust tests and clippy pedantic, Python tests, ruff and shared cases, the C container lint, the C API tests and shared cases plain, sanitized and as C++, 90s of fuzz through all 4 drivers with the new op, and `cicd.bash --ci --quick -y`.
 		- Swept: Put and PutSyntax in all 4 adapters, the layered path in each, Diags and Errors in all 4 (Unused reads Diags), and all 4 ops runners. Comment and Remove set no value, so they don't fill in.
+		- 2026-10-24: The full run at `be17af0` failed CTU on ours, `shclw.c:1834` in `uncomment`, reached from `fill`. The path was false: it had `memchr` find a newline in an empty range, then read past a 1-byte text. The 3 line scans in the new code now go through `line_end`, which never calls `memchr` on an empty range.
+		- Verified: the leak run's CTU step, which fails on any finding of ours, reported it on the host's clang 19 before the fix and nothing of ours after. In the container, `c-checks.bash leakcheck-resume` passed with clang-22, CTU matching both pins' lists and the heaptrack soak, from `be17af0`'s CodeQL report. The C container lint, the sanitized C tests and shared cases, and `cicd.bash --ci --quick -y` passed too.
+		- Swept: every `memchr` line scan in `shclw.c` and `info.c`. `shclw_i_commented_of` had the same shape and now uses `line_end`. `probe_text` already checked `pos < len`. The older scans in `info.c` and `text_lines` either loop only while `at < len` or slice nothing past the range, and CTU reports none of them.
 	- Decisions:
 		- Only a line with the `## Default` note is filled in, and the note comes off. A commented line without it may be the user's own.
 		- Names match without ASCII case, and the first matching line in the file wins.
@@ -398,6 +401,7 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- Prose that reads as `key: value` is listed too, such as the 1.2 banner's `# SHCL:` line in Wovenshell's file.
 		- Verified: as 2026101513330020, in the same run.
 		- Swept: all 4 adapters and ops runners, the layered path in each, and fuzz.py's generator and op list.
+		- 2026-10-24: The CTU fix on 2026101513330020 covers `shclw_commented`'s line scan too.
 	- Decisions:
 		- The path comes from shcl's own parse of the text with that line uncommented, not from an indent walker.
 		- A `##` line, a line in a raw body, and one that adds an error or moves another field once uncommented aren't listed. A key that's also set in its block is listed under its plain path.
