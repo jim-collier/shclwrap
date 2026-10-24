@@ -161,8 +161,7 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 - Builds clean up stale artifacts and side-effects
 	- ID: 2026101916500100
 	- Type: Enhancement
-	- Status: Waiting on a partial CICD run
-	- Needs local test suite run?: Yes. The leak mode passing under the container's init, such as `--quick --leakcheck`, once the CodeQL findings from 2026101513330009 and 2026101513330017 are fixed.
+	- Status: Waiting on UAT
 	- Priority: High
 	- Opened: 2026-10-19
 	- Opened by: JC
@@ -176,6 +175,8 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- Ctrl+C left the C container running, since bash as PID 1 ignores it. The container now runs under an init that passes it to the whole tree.
 		- Added: dropping cached headers no pin names, keeping the newest 10 fuzz failure sets, clearing the leak reports when a fresh leak run starts, and removing an older C image no container uses. `docker builder prune` runs only after a real rebuild. Every build gets a new image ID, even a fully cached one, so it compares layers.
 		- 2026-10-21: The full run at `15509b0` passed lint and the sanitized tests under the init, and the leak mode started under it and cleared the old leak reports. It stopped at CodeQL findings from 2 other items, so CTU and the heaptrack soak weren't reached. After it and a second run without the leak checks: no scratch folder, no container, one C image, only the 2 pinned headers, and only the fresh `codeql.sarif` in the leak reports.
+		- 2026-10-23: The full run at `7b2b21e` passed the leak mode under the init, CTU and the heaptrack soak included. After it: no container, one C image, only the 2 pinned headers, and no scratch folder. Older `test_shclw*` and `test_shclwrap_*` folders from 2026-10-15 to 2026-10-21 are still under the temp root, and the root-owned one in `/tmp`.
+	- Acceptance signoff: no regression test, so it waits on JC.
 	- Decisions:
 		- Kept, since the next run reuses them: `cicd/cache/c-home` with CodeQL's compiled queries, the pinned headers, the C image, Go's and cargo's caches, and the rotated run logs.
 	- Verified: `--quick` passed twice with the changes, and left no scratch folder, no container, and one C image. The unpinned header was dropped and the 2 pinned kept. On a stand-in tree, 12 marked fuzz sets went to 10, and an unmarked set, an unpinned folder holding another file, and a non-rev folder were left. Ctrl+C stopped the container with the init, and not without it.
