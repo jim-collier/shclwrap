@@ -444,15 +444,15 @@ def run_driver(cmd: list[str], version: int, doc: Path, work: Path, script: str)
 def save_failure(out: Path, case: Case, why: str, runs: dict[str, tuple[int, str, str]]) -> None:
 	d = out / f"seed-{case.seed}"
 	d.mkdir(parents=True, exist_ok=True)
-	(d / "doc.shcl").write_text(case.doc)
-	(d / "ops.txt").write_text(case.script)
-	(d / "why.txt").write_text(f"version {case.version}\n{why}\n")
+	(d / "doc.shcl").write_text(case.doc, encoding="utf-8", newline="")
+	(d / "ops.txt").write_text(case.script, encoding="utf-8", newline="")
+	(d / "why.txt").write_text(f"version {case.version}\n{why}\n", encoding="utf-8")
 	for name, (code, stdout, stderr) in runs.items():
-		(d / f"{name}.out").write_text(f"exit {code}\n{stderr}\n---\n{stdout}")
+		(d / f"{name}.out").write_text(f"exit {code}\n{stderr}\n---\n{stdout}", encoding="utf-8")
 
 
 def load_corpus(cases_dir: Path) -> list[str]:
-	return [p.read_text() for p in sorted(cases_dir.glob("*/doc*.shcl"))]
+	return [p.read_text(encoding="utf-8") for p in sorted(cases_dir.glob("*/doc*.shcl"))]
 
 
 def main() -> int:
@@ -489,7 +489,7 @@ def main() -> int:
 	try:
 		while time.monotonic() < deadline and (args.count == 0 or ran < args.count):
 			case = gen_case(seed, corpus)
-			doc_path.write_text(case.doc)
+			doc_path.write_text(case.doc, encoding="utf-8", newline="")
 			runs = {
 				name: run_driver(
 					[c.replace("{v}", str(case.version)) for c in cmd],

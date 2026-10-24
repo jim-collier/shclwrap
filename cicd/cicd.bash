@@ -307,9 +307,12 @@ fEcho "OK: Go tests"
 (cd "${root}/source/rust" && TMPDIR="${work}" cargo test --quiet -j "${cpuCap}" --all-features)
 fEcho "OK: Rust tests"
 if ((doPy)); then
+	## Test vGTH7: a text read or write left to the locale's encoding fails here, not first on Windows.
+	export PYTHONWARNDEFAULTENCODING=1 PYTHONWARNINGS=error::EncodingWarning
 	(cd "${root}/source/python" && TMPDIR="${work}" PYTHONPATH="${pyPath}" PYTHONPYCACHEPREFIX="${work}/pycache" python3 -m unittest discover -q -s tests)
 	PYTHONPATH="${pyPath}" PYTHONPYCACHEPREFIX="${work}/pycache" python3 "${here}/c_cases.py" --lang Python --version 3 --cases "${root}/tests/cases" \
 		--drive python3 "${root}/source/python/shclw_drive.py"
+	unset PYTHONWARNDEFAULTENCODING PYTHONWARNINGS
 	fEcho "OK: Python tests and shared cases"
 fi
 bash "${here}/flags-test.bash" >/dev/null
