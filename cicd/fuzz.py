@@ -452,7 +452,8 @@ def save_failure(out: Path, case: Case, why: str, runs: dict[str, tuple[int, str
 
 
 def load_corpus(cases_dir: Path) -> list[str]:
-	return [p.read_text(encoding="utf-8") for p in sorted(cases_dir.glob("*/doc*.shcl"))]
+	# Bytes, since read_text turns a CRLF doc into LF.
+	return [p.read_bytes().decode("utf-8") for p in sorted(cases_dir.glob("*/doc*.shcl"))]
 
 
 def main() -> int:

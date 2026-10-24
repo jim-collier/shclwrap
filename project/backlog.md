@@ -824,37 +824,6 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Decisions:
 		- JC, 2026-10-24: a `--fuzz` flag turns fuzz back on under `--ci`, so `--ci --leakcheck --fuzz --no-sync -y` is the one full line.
 
-- Two cicd runs started in the same second share one run log
-	- ID: 2026102409544336
-	- Type: Bug
-	- Status: Queued
-	- Severity: Low
-	- Opened: 2026-10-24 09:54
-	- Opened by: JC
-	- Related IDs: 2026102323244600
-	- Steps to reproduce [Bug]:
-		- Start two `cicd/cicd.bash --ci --quick -y` runs in one tree within the same second.
-	- Incorrect behavior [Bug]:
-		- Both `tee` into `cicd/artifacts/lint/run_<stamp>.log`, since the stamp has whole seconds only, so the second truncates the first's log and their lines mix. The log starts before the run lock, so the lock doesn't help.
-	- Expected behavior [Bug]:
-		- Each run has its own log, and `lint-report.bash` reads the right one.
-	- Reproduced [Bug]: No. Read from the code.
-
-- Fuzz seeds lose their CRLF
-	- ID: 2026102410113346
-	- Type: Bug
-	- Status: Queued
-	- Severity: Low
-	- Opened: 2026-10-24 10:11
-	- Related IDs: 2026102323122726
-	- Steps to reproduce [Bug]:
-		- Read `load_corpus` in `cicd/fuzz.py`.
-	- Incorrect behavior [Bug]:
-		- It reads each case's `doc*.shcl` with `read_text`, which turns CRLF into LF on every platform, so the CRLF docs in 027 and 051 never reach the fuzzer as typed.
-	- Expected behavior [Bug]:
-		- Seeds keep their bytes, so CRLF input gets fuzzed from real files.
-	- Reproduced [Bug]: No. Read from the code.
-
 - Say which layer a read came from
 	- ID: 2026102114101028
 	- Type: Enhancement
@@ -1026,6 +995,59 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Opened by: JC
 	- Related IDs: 2026101513330009
 	- Note: `Merged` finds them with a second parse in each language. shcl's parser sees each fold, so a call there would be cheaper and could take that code's place.
+
+- Two cicd runs started in the same second share one run log
+	- ID: 2026102409544336
+	- Type: Bug
+	- Status: Done
+	- Severity: Low
+	- Opened: 2026-10-24 09:54
+	- Opened by: JC
+	- Related IDs: 2026102323244600
+	- Steps to reproduce [Bug]:
+		- Start two `cicd/cicd.bash --ci --quick -y` runs in one tree within the same second.
+	- Incorrect behavior [Bug]:
+		- Both `tee` into `cicd/artifacts/lint/run_<stamp>.log`, since the stamp has whole seconds only, so the second truncates the first's log and their lines mix. The log starts before the run lock, so the lock doesn't help.
+	- Expected behavior [Bug]:
+		- Each run has its own log, and `lint-report.bash` reads the right one.
+	- Reproduced [Bug]: 2026-10-24, with 4 stand-in runs started at once: they left one log between them.
+	- Actual cause [Bug]:
+		- The log name is the run's start to the second, and `tee` truncates a log that's there. The rotation can also rename a log while another run looks for its name.
+	- Actual fix [Bug]:
+		- `fRunLog` in `cicd/utility/include/run-lock.bash` takes a short lock in the log folder, skips a second that already has a log, under any rotated name, and creates the log exclusively. The rotation runs under that lock. A run started in a taken second waits for the next one, so the second run's stamp, scratch folder and fuzz folder all differ. The scratch folder is also made exclusively, since another tree's run can pick the same name under one TMPDIR. design.md says so.
+	- Progress log:
+		- 2026-10-24: Two `cicd.bash --ci --quick -y` runs started in the same second both passed, with logs `run_20261024-103445` and `run_20261024-103446`, each holding one run, and `lint-report.bash` read the second.
+		- Verified: test vGTf8 passes, and fails with the old naming put back (4 runs, 1 log). It passes with no `flock` on PATH too. shellcheck is clean, and `cicd.bash --ci --quick -y` passes.
+		- Swept: `stamp` in `cicd.bash` also names the scratch folder, the fuzz failure folder and the sync stash, which now follow the claimed stamp. `c-checks.bash` and the pre-push hook write no run log, and nothing else reads the log names but `lint-report.bash` and the rotation.
+	- Branch: round-1024
+	- Test case: vGTf8, `cicd/log-name-test.bash`, in the tests stage.
+	- Acceptance signoff: Self-closed: build tooling only, with a test watched to fail.
+	- Closed: 2026-10-24 10:40
+
+- Fuzz seeds lose their CRLF
+	- ID: 2026102410113346
+	- Type: Bug
+	- Status: Done
+	- Severity: Low
+	- Opened: 2026-10-24 10:11
+	- Related IDs: 2026102323122726
+	- Steps to reproduce [Bug]:
+		- Read `load_corpus` in `cicd/fuzz.py`.
+	- Incorrect behavior [Bug]:
+		- It reads each case's `doc*.shcl` with `read_text`, which turns CRLF into LF on every platform, so the CRLF docs in 027 and 051 never reach the fuzzer as typed.
+	- Expected behavior [Bug]:
+		- Seeds keep their bytes, so CRLF input gets fuzzed from real files.
+	- Reproduced [Bug]: 2026-10-24, by test vGTig on the old code: the 027 doc loaded without its CRs.
+	- Actual cause [Bug]: `Path.read_text` reads in universal newline mode, and its `newline` argument only came in Python 3.13.
+	- Actual fix [Bug]: `load_corpus` reads bytes and decodes them as UTF-8.
+	- Progress log:
+		- 2026-10-24: Verified: vGTig fails before the fix and passes after. A 60s fuzz of Go, Rust and Python with only cases 027 and 051 as the corpus ran 609 cases with no failures. ruff and `cicd.bash --ci --quick -y` pass.
+		- Swept: every `read_text` in `cicd/` and `source/python/`. `c_cases.py` copies the docs with `shutil.copyfile`, and its want files have no CR. Go's `FuzzRun` seeds come from `os.ReadFile`. Both fuzzers' `doc*.shcl` glob leaves out 051's `middle.shcl` and `crlf.shcl`, which are layer files.
+		- C wasn't in the fuzz run, since it needs the container. The end-of-round full run covers it.
+	- Branch: round-1024
+	- Test case: vGTig, `cicd/fuzz_test.py`, in the tests stage.
+	- Acceptance signoff: Self-closed: build tooling only, with a test watched to fail.
+	- Closed: 2026-10-24 10:40
 
 - Two cicd runs at once break each other's C lint
 	- ID: 2026102323244600
