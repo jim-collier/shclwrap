@@ -343,6 +343,63 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Test case: shared case `058-write-mode` in all 4 languages, which reads modes back with the new `mode` op.
 	- Acceptance signoff: waits on JC after the full run, since it's about who can read a file.
 
+- Python test reads a file in the locale's encoding
+	- ID: 2026102323122726
+	- Type: Bug
+	- Status: Waiting on automated testing
+	- Needs external testing: Windows, on vm925w: `python unittest` in `win-tests.ps1`, the run without UTF-8 mode.
+	- Severity: Low
+	- Opened: 2026-10-23 23:12
+	- Steps to reproduce [Bug]:
+		- Run the Python unit tests on Windows, without `PYTHONUTF8=1`.
+	- Incorrect behavior [Bug]:
+		- `test_upgrade_on_write` fails with a `UnicodeDecodeError` from cp1252, at `test_shclw.py:135`.
+	- Expected behavior [Bug]:
+		- It passes, as it does in UTF-8 mode.
+	- Reproduced [Bug]: 2026-10-23, on vm925w with Python 3.14. 2026-10-24 on Linux too, in the C locale with UTF-8 mode off.
+	- Possible cause [Bug]: `read_text()` with no encoding, at lines 135, 146 and 186. The written file is UTF-8.
+	- Actual cause [Bug]:
+		- The tests read and wrote with `read_text` and `write_text` and no encoding, so they got the locale's. Text mode also turns LF into CRLF on a Windows write and back on read, so a check could miss a CRLF the library wrote. The library itself reads and writes bytes.
+	- Actual fix [Bug]: The tests compare a file's bytes, and say UTF-8 where they write text. cicd's tests stage runs the Python tests and shared cases with `EncodingWarning` as an error, so a text read or write with no encoding fails on Linux too. `fuzz.py` says UTF-8, and writes its docs and scripts with no newline change.
+	- Progress log:
+		- 2026-10-24: In the C locale with UTF-8 mode off, `test_upgrade_on_write` failed with a `UnicodeDecodeError` before the fix and passes after.
+		- Verified: with `EncodingWarning` as an error, 8 of 14 tests failed before and all 14 pass after, and the 59 Python shared cases pass. Also ruff and `cicd.bash --ci --quick -y`.
+		- Swept: every `read_text`, `write_text`, `open` and `text=True` in the repo's Python. `shclw.py` and `shclw_drive.py` already use bytes, and `c_cases.py` and `shcl_known.py` already say UTF-8. `fuzz.py` had 6 such calls, now fixed. Go, Rust and C have no locale encoding.
+	- Decisions:
+		- Byte compares rather than `encoding="utf-8"` on the reads, so a CRLF the library wrote on Windows fails the test.
+		- `EncodingWarning` set through the environment, so the driver and the tests' child processes get it too. ruff's PLW1514 is preview only and found 4 of the 7 test calls, so it stays off.
+	- Commit: 94bf156
+	- Test case: vGTH7, the Python tests and shared cases in cicd's tests stage with `EncodingWarning` as an error. Fails on the old tests, passes now.
+
+- C test tools don't run on Windows
+	- ID: 2026102323122732
+	- Type: Bug
+	- Status: Waiting on automated testing
+	- Needs external testing: Windows, on vm925w: `win-tests.ps1 -Only c`. Its `c cases` step should compare every op with no LF stand-in, and its new `c api` step runs the API tests.
+	- Severity: Low
+	- Opened: 2026-10-23 23:12
+	- Related IDs: 2026101512024174, 2026101513330015
+	- Steps to reproduce [Bug]:
+		- Build the C driver and API tests with mingw-w64 on Windows, and run `cicd/c_cases.py` with the driver.
+	- Incorrect behavior [Bug]:
+		- `c_cases.py` compares no op, since the driver's stdout is in text mode and every line ends in CRLF.
+		- `tests/api_test.c` doesn't compile, since it includes `sys/wait.h` for the race test.
+	- Expected behavior [Bug]:
+		- The shared cases and the API tests run on Windows, so the C paths there have tests.
+	- Reproduced [Bug]: 2026-10-23, on vm925w. With CRLF turned back to LF in front of the driver, 58 of 59 cases passed, 058 differing as expected. 2026-10-24 with a mingw-w64 build under wine too.
+	- Actual cause [Bug]:
+		- The driver read its script and wrote its output in text mode, so Windows wrote CRLF and read a CRLF script as LF. The Go, Rust and Python drivers use bytes.
+		- `api_test.c` used `fork`, `waitpid`, `mkdtemp` and a 2-argument `mkdir`, and checked Unix modes. Its NUL test also saved to `nul.shcl`, a device name on Windows.
+	- Actual fix [Bug]: The driver puts stdin and stdout in binary mode on Windows. There the API tests run the other side of each race in a thread, skip the mode checks as the other languages do, and make the scratch folder with `_mktemp_s`. The NUL test saves to `nul0.shcl`. `make mingw` compiles `api_test.c` too.
+	- Progress log:
+		- 2026-10-24: The old driver compared no op on 3 cases under wine.
+		- Verified: under wine, the fixed driver passed 58 of 59 shared cases with 678 ops compared, 058 differing as on Windows, and the API tests passed. A create that replaces the file failed the create race, through threads under wine and through `fork` on Linux. `make mingw` fails on the old `api_test.c` and passes now. Also the API tests plain, sanitized and as C++ on Linux, the C container lint, and `cicd.bash --ci --quick -y`.
+		- Swept: the Go, Rust and Python drivers already write bytes, and no other C program reads stdin or writes stdout. No other test names a Windows device file.
+	- Decisions:
+		- Threads on Windows rather than starting the test program again, since there's no `fork`. Python's race test uses threads too, and C's temp names already differ between threads.
+	- Commit: 94bf156
+	- Test case: vGSU9, `make mingw`, now with `api_test.c`. The Windows runs are `win-tests.ps1` on vm925w.
+
 - Leak tests and all tests cover third-party and vendored code
 	- ID: 2026101916500102
 	- Type: Enhancement
@@ -783,36 +840,20 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- Each run has its own log, and `lint-report.bash` reads the right one.
 	- Reproduced [Bug]: No. Read from the code.
 
-- Python test reads a file in the locale's encoding
-	- ID: 2026102323122726
+- Fuzz seeds lose their CRLF
+	- ID: 2026102410113346
 	- Type: Bug
 	- Status: Queued
 	- Severity: Low
-	- Opened: 2026-10-23 23:12
+	- Opened: 2026-10-24 10:11
+	- Related IDs: 2026102323122726
 	- Steps to reproduce [Bug]:
-		- Run the Python unit tests on Windows, without `PYTHONUTF8=1`.
+		- Read `load_corpus` in `cicd/fuzz.py`.
 	- Incorrect behavior [Bug]:
-		- `test_upgrade_on_write` fails with a `UnicodeDecodeError` from cp1252, at `test_shclw.py:135`.
+		- It reads each case's `doc*.shcl` with `read_text`, which turns CRLF into LF on every platform, so the CRLF docs in 027 and 051 never reach the fuzzer as typed.
 	- Expected behavior [Bug]:
-		- It passes, as it does in UTF-8 mode.
-	- Reproduced [Bug]: 2026-10-23, on vm925w with Python 3.14.
-	- Possible cause [Bug]: `read_text()` with no encoding, at lines 135, 146 and 186. The written file is UTF-8.
-
-- C test tools don't run on Windows
-	- ID: 2026102323122732
-	- Type: Bug
-	- Status: Queued
-	- Severity: Low
-	- Opened: 2026-10-23 23:12
-	- Related IDs: 2026101512024174
-	- Steps to reproduce [Bug]:
-		- Build the C driver and API tests with mingw-w64 on Windows, and run `cicd/c_cases.py` with the driver.
-	- Incorrect behavior [Bug]:
-		- `c_cases.py` compares no op, since the driver's stdout is in text mode and every line ends in CRLF.
-		- `tests/api_test.c` doesn't compile, since it includes `sys/wait.h` for the race test.
-	- Expected behavior [Bug]:
-		- The shared cases and the API tests run on Windows, so the C paths there have tests.
-	- Reproduced [Bug]: 2026-10-23, on vm925w. With CRLF turned back to LF in front of the driver, 58 of 59 cases passed, 058 differing as expected.
+		- Seeds keep their bytes, so CRLF input gets fuzzed from real files.
+	- Reproduced [Bug]: No. Read from the code.
 
 - Say which layer a read came from
 	- ID: 2026102114101028
