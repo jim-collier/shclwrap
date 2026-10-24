@@ -1787,3 +1787,452 @@ shclw_kind shclw_i_create_new(const char *path, const char *data, size_t len, un
 }
 
 #endif
+
+// Where uncomment's line comes from: the indent, then the body, then a '\r'
+// when cr.
+typedef struct {
+	size_t indent;
+	size_t body, body_n;
+	bool cr;
+} uncut_line;
+
+static bool blank_at(const char *p, size_t i) { return p[i] == ' ' || p[i] == '\t'; }
+
+// Where a trailing "## Default" note starts in l, or SIZE_MAX with none.
+static size_t default_note(const char *l, size_t n) {
+	static const char note[] = "default";
+	size_t k = sizeof note - 1;
+	size_t e = n;
+	while (e > 0 && (blank_at(l, e - 1) || l[e - 1] == '\r')) {
+		e--;
+	}
+	if (e < k) {
+		return SIZE_MAX;
+	}
+	for (size_t i = 0; i < k; i++) {
+		if (ascii_lower((unsigned char)l[e - k + i]) != (unsigned char)note[i]) {
+			return SIZE_MAX;
+		}
+	}
+	e -= k;
+	while (e > 0 && blank_at(l, e - 1)) {
+		e--;
+	}
+	if (e < 3 || l[e - 2] != '#' || l[e - 1] != '#' || !blank_at(l, e - 3)) {
+		return SIZE_MAX;
+	}
+	return e - 2;
+}
+
+// The line at l, n bytes long, without its #, for a line with one # and then
+// text with a colon in it. A ## line is a note, not a setting.
+static bool uncomment(const char *l, size_t n, bool drop_note, uncut_line *u) {
+	size_t i = 0;
+	while (i < n && blank_at(l, i)) {
+		i++;
+	}
+	if (i >= n || l[i] != '#' || (i + 1 < n && l[i + 1] == '#')) {
+		return false;
+	}
+	size_t b = i + 1;
+	while (b < n && blank_at(l, b)) {
+		b++;
+	}
+	if (b >= n || l[b] == '#' || !memchr(l + b, ':', n - b)) {
+		return false;
+	}
+	u->indent = i;
+	u->body = b;
+	u->body_n = n - b;
+	u->cr = false;
+	size_t at = drop_note ? default_note(l + b, n - b) : SIZE_MAX;
+	if (at != SIZE_MAX) {
+		u->cr = l[n - 1] == '\r';
+		while (at > 0 && blank_at(l + b, at - 1)) {
+			at--;
+		}
+		u->body_n = at;
+	}
+	return true;
+}
+
+// text with the line at start, n bytes long, as u has it. Caller frees.
+static char *with_line(const char *text, size_t len, size_t start, size_t n, const uncut_line *u, size_t *out_len) {
+	size_t mid = u->indent + u->body_n + (u->cr ? 1 : 0);
+	size_t rest = len - start - n;
+	size_t total = start + mid + rest;
+	char *out = (char *)malloc(total + 1);
+	if (!out) {
+		return NULL;
+	}
+	memcpy(out, text, start);
+	memcpy(out + start, text + start, u->indent);
+	memcpy(out + start + u->indent, text + start + u->body, u->body_n);
+	if (u->cr) {
+		out[start + mid - 1] = '\r';
+	}
+	memcpy(out + start + mid, text + start + n, rest);
+	out[total] = '\0';
+	*out_len = total;
+	return out;
+}
+
+typedef struct {
+	char **paths;
+	size_t n, cap;
+} path_stack;
+
+static bool push_path(path_stack *s, const char *p, size_t n) {
+	if (s->n == s->cap) {
+		size_t cap = s->cap ? s->cap * 2 : 16;
+		char **grown =
+			cap < SIZE_MAX / sizeof(char *) ? (char **)realloc((void *)s->paths, cap * sizeof(char *)) : NULL;
+		if (!grown) {
+			return false;
+		}
+		s->paths = grown;
+		s->cap = cap;
+	}
+	char *dup = shclw_i_dup(p, n, NULL);
+	if (!dup) {
+		return false;
+	}
+	s->paths[s->n++] = dup;
+	return true;
+}
+
+typedef bool (*field_fn)(void *ctx, shclw_doc *x, const char *parent, shclw_string name, const shclw_node *n);
+
+// Every node in x, with the path it's under and its name, through see. False
+// when memory ran out or see said stop.
+static bool walk_fields(shclw_doc *x, field_fn see, void *ctx) {
+	path_stack s = {NULL, 0, 0};
+	bool ok = push_path(&s, "", 0);
+	while (ok && s.n > 0) {
+		char *path = s.paths[--s.n];
+		size_t k = 0;
+		shclw_string *names = shclw_names(x, path, &k);
+		ok = names != NULL;
+		for (size_t i = 0; ok && i < k; i++) {
+			char *child = shclw_child(x, path, names[i].p, names[i].n, NULL);
+			size_t m = 0;
+			shclw_node *nodes = child ? shclw_each(x, child, &m) : NULL;
+			ok = nodes != NULL;
+			for (size_t j = 0; ok && j < m; j++) {
+				ok = see(ctx, x, path, names[i], &nodes[j]) && push_path(&s, nodes[j].path.p, nodes[j].path.n);
+			}
+			free(nodes);
+			free(child);
+		}
+		free(names);
+		free(path);
+	}
+	while (s.n > 0) {
+		free(s.paths[--s.n]);
+	}
+	free((void *)s.paths);
+	return ok;
+}
+
+// Every field's name and line, less the ones on line skip.
+typedef struct {
+	shclw_string *names;
+	size_t *lines;
+	size_t n, cap;
+	size_t skip;
+} field_list;
+
+static bool see_field(void *ctx, shclw_doc *x, const char *parent, shclw_string name, const shclw_node *n) {
+	(void)x;
+	(void)parent;
+	field_list *l = (field_list *)ctx;
+	if (n->line == l->skip) {
+		return true;
+	}
+	if (l->n == l->cap) {
+		size_t cap = l->cap ? l->cap * 2 : 32;
+		if (cap >= SIZE_MAX / sizeof(shclw_string)) {
+			return false;
+		}
+		shclw_string *names = (shclw_string *)realloc(l->names, cap * sizeof(shclw_string));
+		if (!names) {
+			return false;
+		}
+		l->names = names;
+		size_t *lines = (size_t *)realloc(l->lines, cap * sizeof(size_t));
+		if (!lines) {
+			return false;
+		}
+		l->lines = lines;
+		l->cap = cap;
+	}
+	char *dup = shclw_i_dup(name.p, name.n, NULL);
+	if (!dup) {
+		return false;
+	}
+	for (size_t i = 0; i < name.n; i++) {
+		dup[i] = (char)ascii_lower((unsigned char)dup[i]);
+	}
+	l->names[l->n].p = dup;
+	l->names[l->n].n = name.n;
+	l->lines[l->n++] = n->line;
+	return true;
+}
+
+static void free_fields(field_list *l) {
+	for (size_t i = 0; i < l->n; i++) {
+		free((void *)l->names[i].p);
+	}
+	free(l->names);
+	free(l->lines);
+}
+
+static bool same_fields(const field_list *a, const field_list *b) {
+	if (a->n != b->n) {
+		return false;
+	}
+	for (size_t i = 0; i < a->n; i++) {
+		if (a->lines[i] != b->lines[i] || a->names[i].n != b->names[i].n ||
+		    memcmp(a->names[i].p, b->names[i].p, a->names[i].n) != 0) {
+			return false;
+		}
+	}
+	return true;
+}
+
+// The one field on line with nothing under it, with its path as a program
+// would write it: no index on the last step, which a key already set
+// elsewhere in the block gets once the line comes back.
+typedef struct {
+	size_t line;
+	size_t found;
+	char *path;
+	size_t path_n;
+	char *value;
+	size_t value_n;
+} leaf_find;
+
+static bool see_leaf(void *ctx, shclw_doc *x, const char *parent, shclw_string name, const shclw_node *n) {
+	leaf_find *f = (leaf_find *)ctx;
+	if (n->line != f->line) {
+		return true;
+	}
+	size_t k = 0;
+	shclw_string *kids = shclw_names(x, n->path.p, &k);
+	if (!kids) {
+		return false;
+	}
+	free(kids);
+	if (k > 0 || ++f->found > 1) {
+		return true;
+	}
+	f->path = shclw_child(x, parent, name.p, name.n, &f->path_n);
+	f->value = shclw_i_dup(n->value.p, n->value.n, &f->value_n);
+	return f->path && f->value;
+}
+
+typedef struct {
+	shclw_commented_line *items;
+	size_t n, cap;
+} commented_acc;
+
+static void free_commented_acc(commented_acc *a) {
+	for (size_t i = 0; i < a->n; i++) {
+		free((void *)a->items[i].path.p);
+		free((void *)a->items[i].value.p);
+	}
+	free(a->items);
+}
+
+// f's leaf as a found line, which takes its strings.
+static bool add_commented(commented_acc *a, leaf_find *f, bool is_default) {
+	if (a->n == a->cap) {
+		size_t cap = a->cap ? a->cap * 2 : 8;
+		shclw_commented_line *grown =
+			cap < SIZE_MAX / sizeof(shclw_commented_line)
+				? (shclw_commented_line *)realloc(a->items, cap * sizeof(shclw_commented_line))
+				: NULL;
+		if (!grown) {
+			return false;
+		}
+		a->items = grown;
+		a->cap = cap;
+	}
+	shclw_commented_line *c = &a->items[a->n++];
+	c->path.p = f->path;
+	c->path.n = f->path_n;
+	c->value.p = f->value;
+	c->value.n = f->value_n;
+	c->line = f->line;
+	c->is_default = is_default;
+	f->path = NULL;
+	f->value = NULL;
+	return true;
+}
+
+// The found lines in one block, each string with a NUL after it.
+static shclw_commented_line *pack_commented(const commented_acc *a, size_t *count) {
+	*count = 0;
+	size_t n = a->n;
+	if (n > (SIZE_MAX / 2) / sizeof(shclw_commented_line)) {
+		return NULL;
+	}
+	size_t bytes = n * sizeof(shclw_commented_line);
+	for (size_t i = 0; i < n; i++) {
+		size_t more = a->items[i].path.n + a->items[i].value.n + 2;
+		if (a->items[i].path.n >= SIZE_MAX / 8 || a->items[i].value.n >= SIZE_MAX / 8 || more >= SIZE_MAX / 2 - bytes) {
+			return NULL;
+		}
+		bytes += more;
+	}
+	shclw_commented_line *out = (shclw_commented_line *)shclw_i_alloc(bytes);
+	if (!out) {
+		return NULL;
+	}
+	char *text = (char *)(out + n);
+	for (size_t i = 0; i < n; i++) {
+		out[i] = a->items[i];
+		const shclw_string *from[2] = {&a->items[i].path, &a->items[i].value};
+		shclw_string *to[2] = {&out[i].path, &out[i].value};
+		for (size_t k = 0; k < 2; k++) {
+			if (from[k]->n) {
+				memcpy(text, from[k]->p, from[k]->n);
+			}
+			// As in shclw_i_copy_nodes, the analyzer loses the sum above.
+			text[from[k]->n] = '\0'; // NOLINT(clang-analyzer-security.ArrayBound)
+			to[k]->p = text;
+			to[k]->n = from[k]->n;
+			text += from[k]->n + 1;
+		}
+	}
+	*count = n;
+	return out;
+}
+
+// Line at, n bytes long and numbered line, as a commented setting, added to a
+// when uncommenting it alone adds no error and moves no other field.
+static bool try_commented(const char *text, size_t len, size_t at, size_t n, size_t line, const field_list *base,
+                          size_t errs, commented_acc *a) {
+	uncut_line u;
+	if (!uncomment(text + at, n, false, &u)) {
+		return true;
+	}
+	size_t probe_len = 0;
+	char *probe = with_line(text, len, at, n, &u, &probe_len);
+	shclw_doc *p = probe ? shclw_parse(probe, probe_len) : NULL;
+	free(probe);
+	if (!p) {
+		return false;
+	}
+	bool ok = true;
+	if (shclw_errors(p) == errs) {
+		field_list got = {NULL, NULL, 0, 0, line};
+		ok = walk_fields(p, see_field, &got);
+		if (ok && same_fields(base, &got)) {
+			leaf_find f = {line, 0, NULL, 0, NULL, 0};
+			ok = walk_fields(p, see_leaf, &f);
+			if (ok && f.found == 1) {
+				ok = add_commented(a, &f, default_note(text + at, n) != SIZE_MAX);
+			}
+			free(f.path);
+			free(f.value);
+		}
+		free_fields(&got);
+	}
+	shclw_free(p);
+	return ok;
+}
+
+bool shclw_i_same_lower(const char *a, const char *b, size_t n) {
+	for (size_t i = 0; i < n; i++) {
+		if (ascii_lower((unsigned char)a[i]) != ascii_lower((unsigned char)b[i])) {
+			return false;
+		}
+	}
+	return true;
+}
+
+// A quick test, before the parse that says for sure, of whether path ends
+// with the key the n bytes of body start with.
+static bool key_ends(const char *path, const char *body, size_t n) {
+	const char *colon = (const char *)memchr(body, ':', n);
+	size_t end = colon ? (size_t)(colon - body) : n;
+	if (body[0] == '"' || body[0] == '\'') {
+		const char *q = (const char *)memchr(body + 1, body[0], n - 1);
+		const char *k = q ? (const char *)memchr(q + 1, ':', n - (size_t)(q + 1 - body)) : NULL;
+		end = k ? (size_t)(k - body) : end;
+	}
+	while (end > 0 && blank_at(body, end - 1)) {
+		end--;
+	}
+	size_t plen = strlen(path);
+	if (plen == end) {
+		return shclw_i_same_lower(path, body, end);
+	}
+	return plen > end && path[plen - end - 1] == '.' && shclw_i_same_lower(path + plen - end, body, end);
+}
+
+// End of the line starting at at: its '\n', or len. memchr never gets an
+// empty range, since the analyzer has it find a '\n' there anyway.
+static size_t line_end(const char *text, size_t len, size_t at) {
+	const char *nl = at < len ? (const char *)memchr(text + at, '\n', len - at) : NULL;
+	return nl ? at + (size_t)(nl - (text + at)) : len;
+}
+
+shclw_commented_line *shclw_i_commented_of(const char *text, size_t len, const char *path, size_t *count) {
+	*count = 0;
+	if (!text) {
+		text = "";
+		len = 0;
+	}
+	commented_acc a = {NULL, 0, 0};
+	field_list base = {NULL, NULL, 0, 0, 0};
+	shclw_doc *d = NULL;
+	size_t errs = 0;
+	bool ok = true;
+	size_t line = 0;
+	for (size_t at = 0; ok;) {
+		size_t end = line_end(text, len, at);
+		line++;
+		uncut_line u;
+		bool cand = uncomment(text + at, end - at, false, &u);
+		if (cand && path) {
+			cand = default_note(text + at, end - at) != SIZE_MAX && key_ends(path, text + at + u.body, u.body_n);
+		}
+		if (cand) {
+			if (!d) {
+				d = shclw_parse(text, len);
+				ok = d && walk_fields(d, see_field, &base);
+				errs = ok ? shclw_errors(d) : 0;
+			}
+			ok = ok && try_commented(text, len, at, end - at, line, &base, errs, &a);
+		}
+		if (end >= len) {
+			break;
+		}
+		at = end + 1;
+	}
+	shclw_commented_line *out = ok ? pack_commented(&a, count) : NULL;
+	free_commented_acc(&a);
+	free_fields(&base);
+	shclw_free(d);
+	return out;
+}
+
+char *shclw_i_uncommented(const char *text, size_t len, size_t n, size_t *out_len) {
+	*out_len = 0;
+	size_t at = 0;
+	for (size_t line = 1; line < n; line++) {
+		size_t end = line_end(text, len, at);
+		if (end >= len) {
+			return shclw_i_dup(text, len, out_len);
+		}
+		at = end + 1;
+	}
+	size_t end = line_end(text, len, at);
+	uncut_line u;
+	if (!uncomment(text + at, end - at, true, &u)) {
+		return shclw_i_dup(text, len, out_len);
+	}
+	return with_line(text, len, at, end - at, &u, out_len);
+}

@@ -33,6 +33,8 @@
 ##	  for Go's fuzzer. Failing fuzz cases go to cicd/artifacts/fuzz/, and the
 ##	  newest 10 sets are kept.
 ##	- Test scratch goes under $TMPDIR, in a folder the run makes and removes.
+##	- One run per tree at a time. A second one, such as a push hook, waits for
+##	  the first. --dry-run and --help don't.
 ##	- C builds against the shcl.h pinned in source/c/shcl-pins.env, fetched by
 ##	  commit into cicd/cache/ and checked by sha256. It takes 2.0's too, for
 ##	  the upgrade check. A cached header no pin names is dropped.
@@ -56,6 +58,7 @@ source "${here}/tool-pins.env"
 source "${root}/source/c/shcl-pins.env"
 source "${root}/source/python/shcl-pins.env"
 source "${here}/utility/include/gfs-rotate.bash"
+source "${here}/utility/include/run-lock.bash"
 stamp="$(date +%Y%m%d-%H%M%S)"
 
 ## rustup has to win over any system rust, or rust-toolchain.toml means nothing.
@@ -64,6 +67,7 @@ export PATH="${HOME}/.cargo/bin:${PATH}"
 ## Half the cores, since a workstation is usually running something else.
 cpuCap=$(( $(nproc 2>/dev/null || echo 2) / 2 )); if ((cpuCap < 1)); then cpuCap=1; fi
 
+cmdLine="$*"
 doCi=0; doQuick=0; doLeakcheck=""; doQuiet=0; assumeYes=0; doSync=1; doFuzz=1; dryRun=0
 while (($#)); do case "$1" in
 	--ci)       doCi=1; doFuzz=0; shift ;;
@@ -188,7 +192,8 @@ fPreflight(){
 }
 
 ## The run's scratch folder, with a marker so cleanup only ever removes its own.
-work="${TMPDIR:-/tmp}/test_shclw_${stamp}$(printf '%02d' $((RANDOM % 100)))"
+fScratchName(){ work="${TMPDIR:-/tmp}/test_shclw_${stamp}$(printf '%02d' $((RANDOM % 100)))"; }
+fScratchName
 fCleanup(){
 	if [[ -f "${work}/.shclw-cicd-owned" ]]; then rm -rf -- "${work}"; fi
 	return 0
@@ -198,16 +203,24 @@ trap fCleanup EXIT
 if ((dryRun)); then fPreflight; fEcho_Clean; exit 0; fi
 
 ## Tee the whole run to a rotated log, for cicd/utility/lint-report.bash.
-logDir="${root}/cicd/artifacts/lint"
-mkdir -p "${logDir}"
-exec > >(tee "${logDir}/run_${stamp}.log") 2>&1
-gfs_rotate "${logDir}" run log >/dev/null 2>&1 || true
+fRunLog "${root}/cicd/artifacts/lint" stamp logFd
+fScratchName
+exec > >(tee -a "/dev/fd/${logFd}") 2>&1
+exec {logFd}>&-
 
 if ((! doQuiet)); then
 	fPreflight
 	if ((! assumeYes)); then read -r -p "Proceed? (Ctrl+C aborts, Enter continues) " _; fi
 fi
-mkdir -p "${work}" && touch "${work}/.shclw-cicd-owned"
+fRunLock "${root}" "cicd.bash ${cmdLine}"
+## Another tree's run can pick the same name under the same TMPDIR.
+mkdir -p "${work%/*}"
+for ((scratchTry = 0; ; scratchTry++)); do
+	if mkdir -- "${work}" 2>/dev/null; then break; fi
+	((scratchTry < 20)) || fDie "no free scratch folder name under ${TMPDIR:-/tmp}"
+	fScratchName
+done
+touch "${work}/.shclw-cicd-owned"
 
 #•••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••
 if ((doSync)); then
@@ -302,13 +315,24 @@ fEcho "OK: Go tests"
 (cd "${root}/source/rust" && TMPDIR="${work}" cargo test --quiet -j "${cpuCap}" --all-features)
 fEcho "OK: Rust tests"
 if ((doPy)); then
+	## Test vGTH7: a text read or write left to the locale's encoding fails here, not first on Windows.
+	export PYTHONWARNDEFAULTENCODING=1 PYTHONWARNINGS=error::EncodingWarning
 	(cd "${root}/source/python" && TMPDIR="${work}" PYTHONPATH="${pyPath}" PYTHONPYCACHEPREFIX="${work}/pycache" python3 -m unittest discover -q -s tests)
 	PYTHONPATH="${pyPath}" PYTHONPYCACHEPREFIX="${work}/pycache" python3 "${here}/c_cases.py" --lang Python --version 3 --cases "${root}/tests/cases" \
 		--drive python3 "${root}/source/python/shclw_drive.py"
+	unset PYTHONWARNDEFAULTENCODING PYTHONWARNINGS
 	fEcho "OK: Python tests and shared cases"
 fi
 bash "${here}/flags-test.bash" >/dev/null
 fEcho "OK: cicd flag mixes"
+PYTHONPYCACHEPREFIX="${work}/pycache" PYTHONWARNDEFAULTENCODING=1 PYTHONWARNINGS=error::EncodingWarning python3 "${here}/fuzz_test.py" -q
+fEcho "OK: fuzz corpus keeps its bytes"
+TMPDIR="${work}" bash "${here}/lock-test.bash" >/dev/null
+fEcho "OK: one run per tree at a time"
+TMPDIR="${work}" bash "${here}/log-name-test.bash" >/dev/null
+fEcho "OK: one log per run"
+TMPDIR="${work}" bash "${here}/eol-test.bash" >/dev/null
+fEcho "OK: line ends under core.autocrlf=true"
 if ((doC && doQuick)); then
 	bash "${here}/c-checks.bash" quick 3 "${work}"
 	fEcho "OK: gcc-15 at C17, C API tests, and shared cases over shcl 3, plain build"
@@ -369,3 +393,5 @@ fEcho_Clean
 ##		- 2026-10-19 JC: shcl 3.0 is the floor. C builds and tests over 3.0 only, and the SHCLW_SHCL pick check is gone.
 ##		- 2026-10-21 JC: --dry-run. Drops cached headers no pin names, and keeps the newest 10 fuzz failure sets. --quick --leakcheck fetches headers.
 ##		- 2026-10-21 JC: Python: lint, tests, shared cases, and fuzz.
+##		- 2026-10-24 JC: A second run in the same tree waits for the first.
+##		- 2026-10-24 JC: Two runs started in the same second get their own logs and scratch folders.

@@ -24,6 +24,7 @@ shift 2
 [[ "$(clang-tidy-22 --version)" == *"${PIN_CLANG_TIDY}"* ]] || { echo "clang-tidy-22 is not ${PIN_CLANG_TIDY}" >&2; exit 1; }
 [[ "$(clang-format-22 --version)" == *"${PIN_CLANG_TIDY}"* ]] || { echo "clang-format-22 is not ${PIN_CLANG_TIDY}" >&2; exit 1; }
 [[ "$(heaptrack --version)" == *"${PIN_HEAPTRACK}"* ]] || { echo "heaptrack is not ${PIN_HEAPTRACK}" >&2; exit 1; }
+[[ "$(x86_64-w64-mingw32-gcc-win32 -dumpfullversion)" == "${PIN_MINGW_CONTAINER}" ]] || { echo "mingw-w64 gcc is not ${PIN_MINGW_CONTAINER}" >&2; exit 1; }
 
 shcl2Dir="${root}/cicd/cache/shcl-c/${SHCL2_REV}"
 shcl3Dir="${root}/cicd/cache/shcl-c/${SHCL3_REV}"
@@ -38,7 +39,7 @@ jobs=$(( $(nproc) / 2 )); if ((jobs < 1)); then jobs=1; fi
 make_c(){
 	make -s -C "${root}/source/c" \
 		SHCL_DIR="${shcl3Dir}" SHCL2_DIR="${shcl2Dir}" OUT="/work/c${version}" \
-		CC=gcc-15 CXX=g++-15 CC15=gcc-15 CLANG=clang-22 CLANG_TIDY=clang-tidy-22 CLANG_FORMAT=clang-format-22 "$@"
+		CC=gcc-15 CXX=g++-15 CC15=gcc-15 CLANG=clang-22 CLANG_TIDY=clang-tidy-22 CLANG_FORMAT=clang-format-22 MINGW_CC=x86_64-w64-mingw32-gcc-win32 "$@"
 }
 
 case "${mode}" in
@@ -75,8 +76,11 @@ int shclw_probe_leak(int flag) { char *p = malloc(64); if (!p) return -1; if (fl
 EOF
 		if make_c analyze ANALYZE_C="${probe_dir}/leak.c" >"${probe_dir}/leak.out" 2>&1; then echo "make analyze passed a planted leak" >&2; exit 1; fi
 		grep -q 'analyzer-malloc-leak' "${probe_dir}/leak.out" || { cat "${probe_dir}/leak.out" >&2; echo "gcc's analyzer missed the planted leak" >&2; exit 1; }
+		## Test vGS64: a clang analyzer finding alone must fail make analyze. gcc is switched off.
+		if make_c analyze ANALYZE_C="${probe_dir}/leak.c" CC15=true >"${probe_dir}/leak-clang.out" 2>&1; then echo "make analyze passed a clang analyzer finding" >&2; exit 1; fi
+		grep -q 'unix\.Malloc' "${probe_dir}/leak-clang.out" || { cat "${probe_dir}/leak-clang.out" >&2; echo "clang's analyzer missed the planted leak" >&2; exit 1; }
 		make_c -j "${jobs}" analyze-shcl SHCL_REPORT=/artifacts/c-analyze-shcl
-		make_c lint strict analyze format-check
+		make_c lint strict mingw analyze format-check
 		;;
 	test)
 		make_c -j "${jobs}" test drive
@@ -87,7 +91,7 @@ EOF
 		;;
 	quick)
 		## No sanitizers and no analyzers, which are most of the time.
-		make_c -j "${jobs}" strict drive-plain "/work/c${version}/api-test-plain"
+		make_c -j "${jobs}" strict mingw drive-plain "/work/c${version}/api-test-plain"
 		"/work/c${version}/api-test-plain"
 		python3 "${here}/c_cases.py" --drive "/work/c${version}/shclw-drive-plain" \
 			--version "${version}" --cases "${root}/tests/cases"

@@ -141,6 +141,19 @@ class Merge:
 
 
 @dataclass(frozen=True)
+class Commented:
+	"""A comment line that reads as one key: value once its # comes off, such
+	as a setting left in the file at its default. path is what the line would
+	set. default says the line ends in a ## Default note, which is the line a
+	put of path fills in."""
+
+	path: str
+	value: str
+	line: int
+	default: bool = False
+
+
+@dataclass(frozen=True)
 class Layer:
 	"""One layer for open_layers: a file, or with file empty, text the program
 	has, such as its defaults or this run's command line."""
@@ -946,6 +959,9 @@ class Doc:
 		self._newer = 0  # the newer format the text names, which makes it read-only
 		self._lay: _LayerSet | None = None
 		self._src = ""  # the text as loaded, for merged()
+		self._level = Strictness.Standard
+		self._loaded: list[Any] | None = None  # the load's diagnostics, once a fill-in parsed the text again
+		self._backup = ""  # where a write copied the file open() read, with the lines the load lost
 
 	@property
 	def inner(self) -> Any:
@@ -992,7 +1008,9 @@ class Doc:
 		t = self._top()
 		return t._finish(t._d.to_canonical())
 
-	def write(self, path: str, force: bool = False, *, create: bool = False, mode: int | None = None) -> None:
+	def write(
+		self, path: str, force: bool = False, *, create: bool = False, backup: bool = False, mode: int | None = None
+	) -> None:
 		"""Saves text() atomically. Refuses with Refused when the load dropped
 		lines the save would lose. The first write over a file open() upgraded
 		backs up the original first, and backup_name() names the copy. A write
@@ -1002,16 +1020,24 @@ class Doc:
 		create writes only where nothing is there yet, and is Exists otherwise,
 		even with 2 programs creating the file at once. mode is the permission
 		bits a file this write creates gets, exactly, with no umask. A file
-		that's already there keeps its own mode. Windows ignores it."""
+		that's already there keeps its own mode. Windows ignores it.
+
+		backup writes over the file open() read where it would be Refused,
+		after copying the file aside as the upgrade does. Later writes then
+		don't refuse, since the lines are in the copy. Anywhere else there's no
+		copy to make, and it's still Refused."""
 		if self._lay is not None:
-			self._top().write(path, force, create=create, mode=mode)
+			self._top().write(path, force, create=create, backup=backup, mode=mode)
 			return
 		if self._newer:
 			raise _too_new(path, self._newer)
 		_check_mode(path, mode)
+		f = self._file
+		over = not create and f is not None and not f.gone and f.over(path)
 		text, kept = self._d.to_text_keep_lines()
 		lost = self._d.lost_count()
-		if not kept and lost > 0:
+		keep_lost = not kept and lost > 0 and not self._backup
+		if keep_lost and not (backup and over):
 			raise Error(ErrKind.Refused, path, f"{lost} lines would be lost")
 		if not kept:
 			text = self._d.to_canonical()
@@ -1020,7 +1046,6 @@ class Doc:
 		except Error as e:
 			e.path = path
 			raise
-		f = self._file
 		if create:
 			create_new(path, text, mode)
 			if f is not None and f.over(path):
@@ -1033,6 +1058,9 @@ class Doc:
 		up = self._up
 		if up is not None and not up.backup:
 			up.backup = f.replace(path, text, _keep_original(path, f.text, up.from_), force, write)
+			self._backup = up.backup
+		elif keep_lost:
+			self._backup = f.replace(path, text, _keep_original(path, f.text, FORMAT_MAJOR), force, write)
 		else:
 			f.replace(path, text, None, force, write)
 		f.text, f.gone, f.ident = text, False, _ident(path)
@@ -1056,9 +1084,10 @@ class Doc:
 		return up.from_ if up is not None else 0
 
 	def backup_name(self) -> str:
-		"""Where the first write over an upgraded file put the original, or ""."""
-		up = self._top()._up
-		return up.backup if up is not None else ""
+		"""Where a write copied the file open() read, or "". That's the first
+		write over an upgraded file, or one with backup that would have lost
+		lines."""
+		return self._top()._backup
 
 	def info_block(self, on: bool) -> None:
 		"""Puts the info block at the end of what the save writes, or with on
@@ -1076,7 +1105,7 @@ class Doc:
 
 	def diags(self) -> list[Diag]:
 		if self._lay is None:
-			return _diags(self._d.diagnostics())
+			return _diags(self._loaded if self._loaded is not None else self._d.diagnostics())
 		out = []
 		for i, x in enumerate(self._lay.docs):
 			if x is not None:
@@ -1104,8 +1133,45 @@ class Doc:
 
 	def errors(self) -> int:
 		if self._lay is None:
+			if self._loaded is not None:
+				return sum(1 for g in self._loaded if g.severity == shcl.Severity.Error)
 			return int(self._d.error_count())
 		return sum(x.errors() for x in self._lay.docs if x is not None)
+
+	def commented(self) -> list[Commented]:
+		"""Each comment line that reads as one key: value once its # comes off,
+		with the path it would set. A layered document's are the edit layer's."""
+		return _commented_of(self._top()._lines())
+
+	def _fill_in(self, path: str) -> tuple[Any, list[Any] | None] | None:
+		"""Swaps path's commented ## Default line for the setting, so the set
+		that follows takes that line and the ones under it don't move
+		(2026101513330020). Only where the save keeps the file's lines and path
+		isn't set yet. It gives back what _unfill takes to put the document
+		back, for a set that fails."""
+		if self._d.exists(path):
+			return None
+		text, kept = self._d.to_text_keep_lines()
+		if not kept:
+			return None
+		line = _default_line(text, path)
+		if not line:
+			return None
+		try:
+			nd = shcl.Document.parse_keep_lines(_uncommented(text, line), _strictness(self._level))
+		except shcl.LoadError as e:
+			nd = e.document
+		if nd is None or nd.error_count() != self._d.error_count() or not nd.exists(path):
+			return None
+		was = (self._d, self._loaded)
+		if self._loaded is None:
+			self._loaded = list(self._d.diagnostics())
+		self._d = nd
+		return was
+
+	def _unfill(self, was: tuple[Any, list[Any] | None] | None) -> None:
+		if was is not None:
+			self._d, self._loaded = was
 
 	def check(self, schema: Doc) -> list[Diag]:
 		"""Validates the document against a schema document."""
@@ -1229,6 +1295,7 @@ class Doc:
 				self._edited()
 			return
 		kind, v = _normalize(path, value)
+		was = self._fill_in(path)
 		setter = {
 			_Kind.Int: self._d.set_int,
 			_Kind.Float: self._d.set_float,
@@ -1238,7 +1305,11 @@ class Doc:
 			_Kind.Ints: self._d.set_int_array,
 			_Kind.Floats: self._d.set_float_array,
 		}[kind]
-		_set_err(path, setter(path, v))
+		try:
+			_set_err(path, setter(path, v))
+		except Error:
+			self._unfill(was)
+			raise
 		self._verify_put(path, kind, v)
 
 	def _verify_put(self, path: str, kind: _Kind, v: Any) -> None:
@@ -1268,7 +1339,12 @@ class Doc:
 			finally:
 				self._edited()
 			return
-		_set_err(path, self._d.set_literal(path, text))
+		was = self._fill_in(path)
+		try:
+			_set_err(path, self._d.set_literal(path, text))
+		except Error:
+			self._unfill(was)
+			raise
 		alone = new()
 		# A failed set leaves alone empty, which the check reports.
 		alone._d.set_literal("k", text)
@@ -1345,6 +1421,7 @@ def _parse_keep(text: str, s: Strictness) -> tuple[Doc, Error | None]:
 		err.__cause__ = e
 		d = Doc(inner)
 	d._src = text
+	d._level = s
 	f = format_of(text)
 	d._newer = f if f > FORMAT_MAJOR else 0
 	return d, err
@@ -1361,6 +1438,133 @@ def _walk(x: Doc, path: str, see: Callable[[str, str, Node], bool]) -> None:
 		for n in x.each(x.child(path, name)):
 			if see(path, name, n):
 				_walk(x, n.path, see)
+
+
+def _commented_of(text: str) -> list[Commented]:
+	"""The commented settings in text. Each candidate line is uncommented alone
+	and the text parsed again, so the path is shcl's own reading of where the
+	line sits. A line is left out when that adds an error or changes any other
+	field, such as one that would open a raw block or take the lines under it
+	as children."""
+	return _commented_where(text, lambda _line, _body: True)
+
+
+def _default_line(text: str, path: str) -> int:
+	"""The line of path's commented ## Default setting in text, or 0. Only the
+	lines whose key path ends with are parsed."""
+	want = _ascii_lower(path)
+
+	def keep(line: str, body: str) -> bool:
+		return _default_note(line) is not None and _key_ends(path, body)
+
+	return next((c.line for c in _commented_where(text, keep) if _ascii_lower(c.path) == want), 0)
+
+
+def _key_ends(path: str, body: str) -> bool:
+	"""A quick test, before the parse that says for sure, of whether path ends
+	with the key body starts with."""
+	end = body.find(":")
+	if body[0] in "\"'":
+		c = body.find(body[0], 1)
+		if c >= 0:
+			k = body.find(":", c + 1)
+			if k >= 0:
+				end = k
+	key = _ascii_lower(body[:end].rstrip(" \t"))
+	p = _ascii_lower(path)
+	return p == key or p.endswith("." + key)
+
+
+def _commented_where(text: str, keep: Callable[[str, str], bool]) -> list[Commented]:
+	lines = text.split("\n")
+	cands = []
+	for i, line in enumerate(lines):
+		u = _uncomment(line, False)
+		if u is not None and keep(line, u.lstrip(" \t")):
+			cands.append(i)
+	out: list[Commented] = []
+	if not cands:
+		return out
+	d = parse(text)
+	base = _fields_of(d, 0)
+	errs = d.errors()
+	for i in cands:
+		probe = list(lines)
+		probe[i] = _uncomment(lines[i], False) or lines[i]
+		p = parse("\n".join(probe))
+		n = i + 1
+		if p.errors() != errs or _fields_of(p, n) != base:
+			continue
+		c = _leaf_at(p, n)
+		if c is not None:
+			out.append(Commented(c.path, c.value, n, _default_note(lines[i]) is not None))
+	return out
+
+
+def _uncommented(text: str, n: int) -> str:
+	"""text with line n's # taken off, and its ## Default note too, as a
+	fill-in writes it."""
+	lines = text.split("\n")
+	lines[n - 1] = _uncomment(lines[n - 1], True) or lines[n - 1]
+	return "\n".join(lines)
+
+
+def _uncomment(line: str, drop_note: bool) -> str | None:
+	"""line without its #, for a line with one # and then text with a colon in
+	it. A ## line is a note, not a setting."""
+	body = line.lstrip(" \t")
+	indent = line[: len(line) - len(body)]
+	if not body.startswith("#") or body.startswith("##"):
+		return None
+	body = body[1:].lstrip(" \t")
+	if not body or body.startswith("#") or ":" not in body:
+		return None
+	if drop_note:
+		at = _default_note(body)
+		if at is not None:
+			eol = "\r" if body.endswith("\r") else ""
+			body = body[:at].rstrip(" \t") + eol
+	return indent + body
+
+
+def _default_note(line: str) -> int | None:
+	"""Where a trailing ## Default note starts in line."""
+	t = line.rstrip(" \t\r")
+	if len(t) < 7 or _ascii_lower(t[-7:]) != "default":
+		return None
+	t = t[:-7].rstrip(" \t")
+	if not t.endswith("##"):
+		return None
+	at = len(t) - 2
+	return at if at > 0 and t[at - 1] in " \t" else None
+
+
+def _fields_of(d: Doc, skip: int) -> list[tuple[str, int]]:
+	"""Every field's name and line in shcl's order, less the ones on line skip."""
+	out: list[tuple[str, int]] = []
+
+	def see(_: str, name: str, n: Node) -> bool:
+		if n.line != skip:
+			out.append((_ascii_lower(name), n.line))
+		return True
+
+	_walk(d, "", see)
+	return out
+
+
+def _leaf_at(d: Doc, n: int) -> Commented | None:
+	"""The one field on line n with nothing under it, with its path as a
+	program would write it: no index on the last step, which a key already set
+	elsewhere in the block gets once the line comes back."""
+	found: list[Commented] = []
+
+	def see(parent: str, name: str, x: Node) -> bool:
+		if x.line == n and not d.names(x.path):
+			found.append(Commented(d.child(parent, name), x.value, n))
+		return True
+
+	_walk(d, "", see)
+	return found[0] if len(found) == 1 else None
 
 
 def _probe_name(line: int) -> str:
@@ -1881,6 +2085,9 @@ class _Runner:
 		elif name == "merged":
 			for m in d.merged():
 				self.out("\t".join([_esc(m.path)] + [_spot_text(n, m.layer) for n in m.lines]))
+		elif name == "commented":
+			for c in d.commented():
+				self.out(f"{c.line}\t{_esc(c.path)}\t{_esc(c.value)}" + ("\tdefault" if c.default else ""))
 		elif name == "get":
 			self.out(self.get(arg(1), arg(2)))
 		elif name == "or":
@@ -2133,19 +2340,21 @@ class _Runner:
 		path = self.file(name)
 		if path is None:
 			return
-		force, create, mode = False, False, None
+		force, create, backup, mode = False, False, False, None
 		for flag in flags:
 			if flag == "force":
 				force = True
 			elif flag == "create":
 				create = True
+			elif flag == "backup":
+				backup = True
 			elif flag.startswith("mode=") and re.fullmatch(r"[0-7]+", flag[5:]):
 				mode = int(flag[5:], 8)
 			else:
 				self.out("error badvalue")
 				return
 		try:
-			self.doc.write(path, force, create=create, mode=mode)
+			self.doc.write(path, force, create=create, backup=backup, mode=mode)
 			text = read_text(path)
 		except Error as e:
 			self.result(e)

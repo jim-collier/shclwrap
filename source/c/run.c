@@ -621,6 +621,8 @@ static void write_(runner *r, const fields *f) {
 			o.force = true;
 		} else if (!strcmp(flag, "create")) {
 			o.create = true;
+		} else if (!strcmp(flag, "backup")) {
+			o.backup = true;
 		} else if (!strncmp(flag, "mode=", 5) && flag[5] >= '0' && flag[5] <= '7') {
 			char *end = NULL;
 			unsigned long m = strtoul(flag + 5, &end, 8);
@@ -1239,6 +1241,27 @@ static void op_merged(runner *r, const fields *f) {
 	}
 	free(ms);
 }
+static void op_commented(runner *r, const fields *f) {
+	(void)f;
+	size_t n = 0;
+	shclw_commented_line *cs = shclw_commented(r->doc, &n);
+	if (!cs) {
+		nomem(&r->out);
+		return;
+	}
+	for (size_t i = 0; i < n; i++) {
+		put_size(&r->out, cs[i].line);
+		putc_(&r->out, '\t');
+		esc(&r->out, cs[i].path.p, cs[i].path.n);
+		putc_(&r->out, '\t');
+		esc(&r->out, cs[i].value.p, cs[i].value.n);
+		if (cs[i].is_default) {
+			puts_(&r->out, "\tdefault");
+		}
+		nl(&r->out);
+	}
+	free(cs);
+}
 static void op_get(runner *r, const fields *f) { get(r, arg(f, 1), arg(f, 2)); }
 static void op_or(runner *r, const fields *f) { or_(r, f); }
 static void op_write(runner *r, const fields *f) { write_(r, f); }
@@ -1296,6 +1319,7 @@ static const struct {
 	{"errors",    op_errors},
 	{"unused",    op_unused},
 	{"merged",    op_merged},
+	{"commented", op_commented},
 	{"get",       op_get},
 	{"or",        op_or},
 	{"has",       op_has},

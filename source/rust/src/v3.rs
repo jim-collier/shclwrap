@@ -12,7 +12,8 @@
 pub use shcl3 as shcl;
 
 use crate::{
-	Diag, ErrKind, Error, Got, Layer, Merge, Node, Severity, ShclDoc, Status, Strictness, Upgraded, Value, WriteOpts,
+	Commented, Diag, ErrKind, Error, Got, Layer, Merge, Node, Severity, ShclDoc, Status, Strictness, Upgraded, Value,
+	WriteOpts,
 };
 
 /// The shcl release this module wraps.
@@ -34,7 +35,17 @@ pub struct Doc {
 	src: String,
 	// The newer format the text names, which makes it read-only.
 	newer: u32,
+	level: Strictness,
+	// The load's diagnostics, once a fill-in has parsed the text again.
+	loaded: Option<Vec<shcl::Diagnostic>>,
+	// Where a write copied the file `open` read, so the lines the load lost
+	// are kept there.
+	backup: String,
 }
+
+/// The document a fill-in replaced, and whether it was the first fill-in,
+/// which kept the load's diagnostics.
+type Filled = (shcl::Document, bool);
 
 /// What `open_layers` read. `d` is then their merge, built again after each
 /// edit, and edits and saves go to `docs[edit]`.
@@ -167,14 +178,16 @@ pub fn parse_with(text: &str, level: Strictness) -> Result<Doc, Error> {
 }
 
 fn parse_keep(text: &str, level: Strictness) -> (Doc, Option<Error>) {
-	match shcl::Document::parse_keep_lines(text, strictness(level)) {
+	let (mut d, e) = match shcl::Document::parse_keep_lines(text, strictness(level)) {
 		Ok(d) => (doc(d, text), None),
 		Err(le) => {
 			let mut e = Error::new(ErrKind::Strict).msg(le.to_string());
 			e.diags = diags(&le.diagnostics);
 			(doc(le.document, text), Some(e))
 		}
-	}
+	};
+	d.level = level;
+	(d, e)
 }
 
 fn doc(d: shcl::Document, text: &str) -> Doc {
@@ -187,6 +200,9 @@ fn doc(d: shcl::Document, text: &str) -> Doc {
 		lay: None,
 		src: text.to_owned(),
 		newer: Some(format_of(text)).filter(|&f| f > FORMAT_MAJOR).unwrap_or(0),
+		level: Strictness::Standard,
+		loaded: None,
+		backup: String::new(),
 	}
 }
 
@@ -672,6 +688,46 @@ impl Doc {
 		out
 	}
 
+	/// Swaps `path`'s commented `## Default` line for the setting, so the
+	/// set that follows takes that line and the ones under it don't move
+	/// (2026101513330020). It's only where the save keeps the file's lines
+	/// and `path` isn't set yet. It gives back what `unfill` takes to put
+	/// the document back, for a set that fails.
+	fn fill(&mut self, path: &str) -> Option<Filled> {
+		if self.d.exists(path) {
+			return None;
+		}
+		let (text, kept) = self.d.to_text_keep_lines();
+		if !kept {
+			return None;
+		}
+		let line = crate::default_line(&text, path, parse);
+		if line == 0 {
+			return None;
+		}
+		let nd = match shcl::Document::parse_keep_lines(&crate::uncommented(&text, line), strictness(self.level)) {
+			Ok(d) => d,
+			Err(le) => le.document,
+		};
+		if nd.error_count() != self.d.error_count() || !nd.exists(path) {
+			return None;
+		}
+		let first = self.loaded.is_none();
+		if first {
+			self.loaded = Some(self.d.diagnostics().to_vec());
+		}
+		Some((std::mem::replace(&mut self.d, nd), first))
+	}
+
+	fn unfill(&mut self, filled: Option<Filled>) {
+		if let Some((d, first)) = filled {
+			self.d = d;
+			if first {
+				self.loaded = None;
+			}
+		}
+	}
+
 	/// The save's text before the info block and the Format line.
 	fn lines(&self) -> String {
 		match self.d.to_text_keep_lines() {
@@ -756,9 +812,11 @@ impl ShclDoc for Doc {
 			return Err(too_new(self.newer).path(path));
 		}
 		crate::check_mode(path, opts.mode)?;
+		let over = !opts.create && self.file.as_ref().is_some_and(|f| !f.gone && f.over(path));
 		let (text, kept) = self.d.to_text_keep_lines();
 		let lost = self.d.lost_count();
-		if !kept && lost > 0 {
+		let keep_lost = !kept && lost > 0 && self.backup.is_empty();
+		if keep_lost && !(opts.backup && over) {
 			return Err(Error::new(ErrKind::Refused)
 				.path(path)
 				.msg(format!("{lost} lines would be lost")));
@@ -779,6 +837,10 @@ impl ShclDoc for Doc {
 			match self.up.as_mut().filter(|u| u.backup.is_empty()) {
 				Some(up) => {
 					up.backup = f.replace(path, &text, || keep_original(path, &f.text, up.from), opts)?;
+					self.backup.clone_from(&up.backup);
+				}
+				None if keep_lost => {
+					self.backup = f.replace(path, &text, || keep_original(path, &f.text, FORMAT_MAJOR), opts)?;
 				}
 				None => {
 					f.replace(path, &text, || Ok(String::new()), opts)?;
@@ -814,14 +876,14 @@ impl ShclDoc for Doc {
 	}
 
 	fn backup_name(&self) -> &str {
-		self.top().up.as_ref().map_or("", |u| u.backup.as_str())
+		&self.top().backup
 	}
 
 	/// A layered document has every layer's, in layer order, each with its
 	/// `layer`.
 	fn diags(&self) -> Vec<Diag> {
 		let Some(lay) = &self.lay else {
-			return diags(self.d.diagnostics());
+			return diags(self.loaded.as_deref().unwrap_or(self.d.diagnostics()));
 		};
 		let mut out = Vec::new();
 		for (i, x) in lay.docs.iter().enumerate() {
@@ -846,10 +908,22 @@ impl ShclDoc for Doc {
 		out
 	}
 
+	/// A layered document's are the edit layer's.
+	fn commented(&self) -> Vec<Commented> {
+		let t = self
+			.lay
+			.as_ref()
+			.map_or(self, |l| l.docs[l.edit].as_ref().unwrap_or(self));
+		crate::commented_of(&t.lines(), parse)
+	}
+
 	fn errors(&self) -> usize {
 		match &self.lay {
 			Some(lay) => lay.docs.iter().flatten().map(ShclDoc::errors).sum(),
-			None => self.d.error_count(),
+			None => match &self.loaded {
+				Some(ds) => ds.iter().filter(|g| g.severity == shcl::Severity::Error).count(),
+				None => self.d.error_count(),
+			},
 		}
 	}
 
@@ -986,6 +1060,7 @@ impl ShclDoc for Doc {
 			return self.on_top(|t| t.put(path, v));
 		}
 		crate::check_value(path, &v)?;
+		let filled = self.fill(path);
 		let st = match &v {
 			Value::Int(x) => self.d.set_int(path, *x),
 			Value::Float(x) => self.d.set_float(path, *x),
@@ -998,7 +1073,10 @@ impl ShclDoc for Doc {
 			Value::Ints(x) => self.d.set_int_array(path, x),
 			Value::Floats(x) => self.d.set_float_array(path, x),
 		};
-		Doc::set_err(path, st)?;
+		if let Err(e) = Doc::set_err(path, st) {
+			self.unfill(filled);
+			return Err(e);
+		}
 		crate::verify_put(self, path, &v)
 	}
 
@@ -1006,7 +1084,11 @@ impl ShclDoc for Doc {
 		if self.lay.is_some() {
 			return self.on_top(|t| t.put_syntax(path, text));
 		}
-		Doc::set_err(path, self.d.set_literal(path, text))?;
+		let filled = self.fill(path);
+		if let Err(e) = Doc::set_err(path, self.d.set_literal(path, text)) {
+			self.unfill(filled);
+			return Err(e);
+		}
 		let mut alone = new();
 		// A failed set leaves alone empty, which the check reports.
 		let _ = alone.d.set_literal("k", text);

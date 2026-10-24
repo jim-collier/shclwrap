@@ -21,10 +21,17 @@
 #include <string.h>
 
 #include <dirent.h>
-#include <signal.h>
 #include <sys/stat.h>
-#include <sys/wait.h>
 #include <unistd.h>
+#ifdef _WIN32
+#include <direct.h>
+#include <io.h>
+#include <process.h>
+#include <windows.h>
+#else
+#include <signal.h>
+#include <sys/wait.h>
+#endif
 
 #if defined(__GLIBC__)
 #include <malloc.h>
@@ -55,6 +62,18 @@ static int failures;
 	} while (0)
 
 static char scratch[4096];
+
+// Windows keeps no mode past read-only, and has no fork, so the races there
+// run their other side in a thread, as Python's tests do.
+#ifdef _WIN32
+#define HAS_MODES 0
+static int new_folder(const char *path) { return _mkdir(path); }
+static mode_t swap_umask(mode_t mask) { return mask; }
+#else
+#define HAS_MODES 1
+static int new_folder(const char *path) { return mkdir(path, 0755); }
+static mode_t swap_umask(mode_t mask) { return umask(mask); }
+#endif
 
 static const char *in_scratch(const char *name) {
 	static char path[4200];
@@ -175,9 +194,9 @@ static void test_nul(void) {
 	char *out = shclw_text(d, &len);
 	CHECK(out && len == sizeof text - 1 && !memcmp(out, text, len));
 	free(out);
-	CHECK(shclw_write(d, in_scratch("nul.shcl"), NULL) == SHCLW_OK);
+	CHECK(shclw_write(d, in_scratch("nul0.shcl"), NULL) == SHCLW_OK);
 	char *saved = NULL;
-	CHECK(shclw_read_text(in_scratch("nul.shcl"), &saved, &len, NULL) == SHCLW_OK);
+	CHECK(shclw_read_text(in_scratch("nul0.shcl"), &saved, &len, NULL) == SHCLW_OK);
 	CHECK(saved && len == sizeof text - 1 && !memcmp(saved, text, len));
 	free(saved);
 	shclw_free(d);
@@ -773,7 +792,7 @@ static void path_in(char *out, size_t cap, const char *dir, const char *name) {
 // A folder of its own under scratch, which drop_dir takes away again.
 static void make_dir(char *out, size_t cap, const char *name) {
 	path_in(out, cap, scratch, name);
-	CHECK(mkdir(out, 0755) == 0);
+	CHECK(new_folder(out) == 0);
 }
 
 static size_t count_dir(const char *dir) {
@@ -826,6 +845,8 @@ static mode_t mode_of(const char *path) {
 	return stat(path, &st) == 0 ? st.st_mode & 0777 : 0;
 }
 
+static bool mode_is(const char *path, mode_t want) { return !HAS_MODES || mode_of(path) == want; }
+
 // What the replacer's steps do, per step of test_replace_read.
 typedef struct {
 	char bak[8192];
@@ -877,17 +898,17 @@ static void test_save(void) {
 	make_dir(dir, sizeof dir, "write");
 	path_in(path, sizeof path, dir, "c.shcl");
 	shclw_doc *d = parse_z("a: 1\n");
-	mode_t was = umask(022);
-	CHECK(shclw_write(d, path, NULL) == SHCLW_OK && file_is(path, "a: 1\n") && mode_of(path) == 0644);
+	mode_t was = swap_umask(022);
+	CHECK(shclw_write(d, path, NULL) == SHCLW_OK && file_is(path, "a: 1\n") && mode_is(path, 0644));
 	CHECK(chmod(path, 0600) == 0 && shclw_put_int(d, "a", 2, NULL) == SHCLW_OK);
-	CHECK(shclw_write(d, path, NULL) == SHCLW_OK && file_is(path, "a: 2\n") && mode_of(path) == 0600);
-	(void)umask(was);
+	CHECK(shclw_write(d, path, NULL) == SHCLW_OK && file_is(path, "a: 2\n") && mode_is(path, 0600));
+	(void)swap_umask(was);
 	CHECK(count_dir(dir) == 1);
 
 	// A folder in the way stays, and so does the file beside it.
 	char sub[8300];
 	path_in(sub, sizeof sub, dir, "sub");
-	CHECK(mkdir(sub, 0755) == 0);
+	CHECK(new_folder(sub) == 0);
 	shclw_error err;
 	CHECK(shclw_write(d, sub, &err) == SHCLW_ERR_IO && count_dir(dir) == 2 && count_dir(sub) == 0);
 	shclw_free(d);
@@ -940,7 +961,7 @@ static void test_replace_read(void) {
 		case 3: ok = k == SHCLW_ERR_BACKUP_TAKEN && file_is(path, was) && count_dir(dir) == 1; break;
 		case 4: ok = k == SHCLW_ERR_IO && strstr(err.msg, "boom") && file_is(path, was) && count_dir(dir) == 1; break;
 		case 5:
-			ok = k == SHCLW_ERR_IO && file_is(path, was) && mode_of(path) == 0640 && count_dir(dir) == 1 &&
+			ok = k == SHCLW_ERR_IO && file_is(path, was) && mode_is(path, 0640) && count_dir(dir) == 1 &&
 			     strstr(err.msg, "put back");
 			break;
 		case 6: ok = k == SHCLW_ERR_IO && !name && strstr(err.msg, t.bak) && file_is(t.bak, was); break;
@@ -1020,7 +1041,7 @@ static void test_upgrade_file(void) {
 	CHECK(u && u->changed && u->from == 2 && !strncmp(u->text.p, clean2to, strlen(clean2to)));
 	CHECK(u && shclw_format_of(u->text.p, u->text.n) == 3 && file_is(path, u->text.p));
 	CHECK(u && !strncmp(u->backup.p, dir, strlen(dir)) && u->backup.p[strlen(dir)] == '/');
-	CHECK(u && file_is(u->backup.p, clean2x) && mode_of(u->backup.p) == 0600 && mode_of(path) == 0600);
+	CHECK(u && file_is(u->backup.p, clean2x) && mode_is(u->backup.p, 0600) && mode_is(path, 0600));
 	CHECK(count_dir(dir) == 2);
 	// the line lists come through the copy that adds the backup's name
 	shclw_upgraded *mem = NULL;
@@ -1098,7 +1119,7 @@ static void test_open_upgrade(void) {
 	CHECK(shclw_write(d, other, &err) == SHCLW_OK);
 	name = shclw_backup_name(d, &n);
 	CHECK(name && n > strlen(dir) && !strncmp(name, dir, strlen(dir)) && name[strlen(dir)] == '/');
-	CHECK(name && file_is(name, clean2x) && mode_of(name) == 0600);
+	CHECK(name && file_is(name, clean2x) && mode_is(name, 0600));
 	char *saved = NULL;
 	size_t len = 0;
 	CHECK(shclw_read_text(path, &saved, &len, NULL) == SHCLW_OK);
@@ -1279,6 +1300,31 @@ static void test_open_fails_both(void) {
 	drop_dir(dir);
 }
 
+#ifdef _WIN32
+typedef struct {
+	const char *path, *flip, *bad;
+	volatile LONG stop;
+} flipper;
+
+// A rename there doesn't replace, and fails while the file is open, so a
+// failed flip is skipped rather than the end of the loop.
+static unsigned __stdcall flip_loop(void *arg) {
+	flipper *f = (flipper *)arg;
+	for (unsigned n = 0; !InterlockedCompareExchange(&f->stop, 0, 0); n++) {
+		const char *t = n % 2 ? clean2x : f->bad;
+		FILE *out = fopen(f->flip, "wb");
+		if (out) {
+			bool ok = fwrite(t, 1, strlen(t), out) == strlen(t);
+			ok = fclose(out) == 0 && ok;
+			if (ok) {
+				(void)MoveFileExA(f->flip, f->path, MOVEFILE_REPLACE_EXISTING);
+			}
+		}
+	}
+	return 0;
+}
+#endif
+
 // An edit made while the upgrade runs must not get past the 2.0 check. The
 // file flips between a clean 2.x text and one 2.0 has errors on, so a backup
 // holding the bad text means that text was converted unchecked.
@@ -1292,10 +1338,22 @@ static void test_upgrade_raced(void) {
 		char sub[16];
 		(void)snprintf(sub, sizeof sub, "%d", i);
 		path_in(dir, sizeof dir, root, sub);
-		CHECK(mkdir(dir, 0755) == 0);
+		CHECK(new_folder(dir) == 0);
 		path_in(path, sizeof path, dir, "c.shcl");
 		path_in(flip, sizeof flip, dir, "flip");
 		write_mode(path, clean2x, 0644);
+#ifdef _WIN32
+		flipper f = {path, flip, bad, 0};
+		HANDLE h = (HANDLE)_beginthreadex(NULL, 0, flip_loop, &f, 0, NULL);
+		CHECK(h != NULL);
+		shclw_upgraded *u = NULL;
+		shclw_kind k = shclw_upgrade_file(path, 2, &u, NULL);
+		if (h) {
+			(void)InterlockedExchange(&f.stop, 1);
+			(void)WaitForSingleObject(h, INFINITE);
+			(void)CloseHandle(h);
+		}
+#else
 		pid_t pid = fork();
 		if (pid == 0) {
 			for (unsigned n = 0;; n++) {
@@ -1313,6 +1371,7 @@ static void test_upgrade_raced(void) {
 			(void)kill(pid, SIGKILL);
 			(void)waitpid(pid, NULL, 0);
 		}
+#endif
 		if (k == SHCLW_OK && u && u->backup.n) {
 			upgraded++;
 			if (!file_is(u->backup.p, clean2x)) {
@@ -1341,6 +1400,90 @@ static char *racer_text(int i) {
 	return t;
 }
 
+#ifdef _WIN32
+typedef struct {
+	const char *path;
+	HANDLE gate;
+	int i;
+	shclw_kind k;
+} racer;
+
+static unsigned __stdcall race_create(void *arg) {
+	racer *r = (racer *)arg;
+	(void)WaitForSingleObject(r->gate, INFINITE);
+	char *t = racer_text(r->i);
+	r->k = t ? shclw_i_create_new(r->path, t, strlen(t), 0600, NULL) : SHCLW_ERR_NO_MEMORY;
+	free(t);
+	return 0;
+}
+
+// Each racer's exit code as the fork side gives it: 0 won, 1 exists.
+static bool run_racers(const char *path, int n, int *codes) {
+	for (int i = 0; i < n; i++) {
+		codes[i] = 2;
+	}
+	racer rs[8];
+	HANDLE hs[8];
+	HANDLE gate = n <= 8 ? CreateEventA(NULL, TRUE, FALSE, NULL) : NULL;
+	if (!gate) {
+		return false;
+	}
+	int started = 0;
+	for (; started < n; started++) {
+		rs[started].path = path;
+		rs[started].gate = gate;
+		rs[started].i = started;
+		rs[started].k = SHCLW_ERR_IO;
+		hs[started] = (HANDLE)_beginthreadex(NULL, 0, race_create, &rs[started], 0, NULL);
+		if (!hs[started]) {
+			break;
+		}
+	}
+	(void)SetEvent(gate);
+	if (started) {
+		(void)WaitForMultipleObjects((DWORD)started, hs, TRUE, INFINITE);
+	}
+	for (int i = 0; i < started; i++) {
+		(void)CloseHandle(hs[i]);
+		codes[i] = rs[i].k == SHCLW_OK ? 0 : rs[i].k == SHCLW_ERR_EXISTS ? 1 : 2;
+	}
+	(void)CloseHandle(gate);
+	return started == n;
+}
+#else
+static bool run_racers(const char *path, int n, int *codes) {
+	for (int i = 0; i < n; i++) {
+		codes[i] = 2;
+	}
+	int gate[2] = {-1, -1};
+	if (pipe(gate) != 0) {
+		return false;
+	}
+	pid_t pids[8];
+	for (int i = 0; i < n && i < 8; i++) {
+		pids[i] = fork();
+		if (pids[i] == 0) {
+			char go;
+			(void)close(gate[1]);
+			(void)read(gate[0], &go, 1); // EOF once the parent closes its end
+			char *t = racer_text(i);
+			shclw_kind k = t ? shclw_i_create_new(path, t, strlen(t), 0600, NULL) : SHCLW_ERR_NO_MEMORY;
+			_exit(k == SHCLW_OK ? 0 : k == SHCLW_ERR_EXISTS ? 1 : 2);
+		}
+	}
+	(void)close(gate[0]);
+	(void)close(gate[1]);
+	bool ok = n <= 8;
+	for (int i = 0; i < n && i < 8; i++) {
+		int st = 0;
+		bool exited = pids[i] > 0 && waitpid(pids[i], &st, 0) == pids[i] && WIFEXITED(st);
+		ok = ok && exited;
+		codes[i] = exited ? WEXITSTATUS(st) : 2;
+	}
+	return ok;
+}
+#endif
+
 // Of several processes creating one name at once, exactly one wins, and the
 // file is all of the winner's text, at its mode.
 static void test_create_raced(void) {
@@ -1352,32 +1495,13 @@ static void test_create_raced(void) {
 		char sub[16];
 		(void)snprintf(sub, sizeof sub, "%d", round);
 		path_in(dir, sizeof dir, root, sub);
-		CHECK(mkdir(dir, 0755) == 0);
+		CHECK(new_folder(dir) == 0);
 		path_in(path, sizeof path, dir, "a.shcl");
-		int gate[2] = {-1, -1};
-		if (pipe(gate) != 0) {
-			CHECK(false);
-			break;
-		}
-		pid_t pids[racers];
-		for (int i = 0; i < racers; i++) {
-			pids[i] = fork();
-			if (pids[i] == 0) {
-				char go;
-				(void)close(gate[1]);
-				(void)read(gate[0], &go, 1); // EOF once the parent closes its end
-				char *t = racer_text(i);
-				shclw_kind k = t ? shclw_i_create_new(path, t, strlen(t), 0600, NULL) : SHCLW_ERR_NO_MEMORY;
-				_exit(k == SHCLW_OK ? 0 : k == SHCLW_ERR_EXISTS ? 1 : 2);
-			}
-		}
-		(void)close(gate[0]);
-		(void)close(gate[1]);
+		int codes[racers];
+		CHECK(run_racers(path, racers, codes));
 		int won = -1;
 		for (int i = 0; i < racers; i++) {
-			int st = 0;
-			CHECK(pids[i] > 0 && waitpid(pids[i], &st, 0) == pids[i] && WIFEXITED(st));
-			int code = WEXITSTATUS(st);
+			int code = codes[i];
 			CHECK(code == 0 || code == 1);
 			if (code == 0) {
 				CHECK(won < 0);
@@ -1388,8 +1512,7 @@ static void test_create_raced(void) {
 		char *want = racer_text(won < 0 ? 0 : won);
 		CHECK(want && file_is(path, want));
 		free(want);
-		struct stat st;
-		CHECK(stat(path, &st) == 0 && (st.st_mode & 0777) == 0600);
+		CHECK(mode_is(path, 0600));
 		int entries = 0;
 		DIR *d = opendir(dir);
 		for (struct dirent *e = d ? readdir(d) : NULL; e; e = readdir(d)) {
@@ -1471,7 +1594,7 @@ static void test_check(void) {
 }
 
 static void cleanup(void) {
-	static const char *const made[] = {"nul.shcl", "bad.shcl", "newer.shcl", "good.shcl", "strict.shcl", "loop.shcl"};
+	static const char *const made[] = {"nul0.shcl", "bad.shcl", "newer.shcl", "good.shcl", "strict.shcl", "loop.shcl"};
 	// Each test from test_replace_read on takes away its own folders.
 	for (size_t i = 0; i < sizeof made / sizeof made[0]; i++) {
 		if (unlink(in_scratch(made[i])) != 0 && errno != ENOENT) {
@@ -1485,11 +1608,22 @@ static void cleanup(void) {
 
 int main(void) {
 	const char *tmp = getenv("TMPDIR");
+#ifdef _WIN32
+	if (!tmp || !*tmp) {
+		tmp = getenv("TEMP");
+	}
+	(void)snprintf(scratch, sizeof scratch, "%s/shclw-c-api-XXXXXX", tmp && *tmp ? tmp : ".");
+	if (_mktemp_s(scratch, strlen(scratch) + 1) != 0 || _mkdir(scratch) != 0) {
+		perror("mkdtemp");
+		return 2;
+	}
+#else
 	(void)snprintf(scratch, sizeof scratch, "%s/shclw-c-api-XXXXXX", tmp && *tmp ? tmp : "/tmp");
 	if (!mkdtemp(scratch)) {
 		perror("mkdtemp");
 		return 2;
 	}
+#endif
 	test_reads();
 	test_fallbacks();
 	test_nul();

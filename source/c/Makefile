@@ -8,6 +8,7 @@
 #   make SHCL_DIR=... SHCL2_DIR=... test     API tests: sanitized, plain, and built as C++
 #   make SHCL_DIR=... SHCL2_DIR=... drive    the sanitized shclw-drive, for the shared cases
 #   make SHCL_DIR=... SHCL2_DIR=... strict   compile only, with gcc-15 at C17
+#   make SHCL_DIR=... SHCL2_DIR=... mingw    compile only, with mingw-w64 gcc
 #   make SHCL_DIR=... SHCL2_DIR=... lint     clang-tidy
 #   make SHCL_DIR=... SHCL2_DIR=... analyze-shcl   the analyzers over shcl itself, held to shcl-known/
 #   make format-check | format
@@ -26,6 +27,7 @@ OUT      ?= build
 CC       ?= gcc
 CXX      ?= g++
 CC15     ?= gcc-15
+MINGW_CC ?= x86_64-w64-mingw32-gcc
 CLANG    ?= clang
 CLANG_TIDY ?= clang-tidy
 CLANG_FORMAT ?= clang-format
@@ -46,7 +48,7 @@ V2_DEPS := shclw3_v2.h shclw3_v2_names.h $(SHCL2_DIR)/shcl.h
 
 FORMATTED := $(wildcard *.c *.h tests/*.c)
 
-.PHONY: all test drive drive-plain strict lint analyze analyze-shcl analyze-shcl-report names format format-check clean FORCE
+.PHONY: all test drive drive-plain strict mingw lint analyze analyze-shcl analyze-shcl-report names format format-check clean FORCE
 all: test drive strict
 
 $(OUT)/asan $(OUT)/plain $(OUT)/cxx:
@@ -116,22 +118,29 @@ strict:
 	$(CC15) -std=c17 $(WARN) -I. -I$(SHCL_DIR) -fsyntax-only $(LIB) shclw-drive.c tests/api_test.c
 	$(CC15) -std=c17 $(WARN) -I. -I$(SHCL2_DIR) -fsyntax-only shclw3_v2.c
 
+# Test vGSU9: the Windows build at the same warnings.
+mingw:
+	$(MINGW_CC) -std=c11 $(WARN) -I. -I$(SHCL_DIR) -fsyntax-only $(LIB) shclw-drive.c tests/api_test.c
+	$(MINGW_CC) -std=c11 $(WARN) -I. -I$(SHCL2_DIR) -fsyntax-only shclw3_v2.c
+
 lint:
 	$(CLANG_TIDY) --quiet $(LIB) shclw-drive.c tests/api_test.c -- -std=c11 -I. -I$(SHCL_DIR)
 	$(CLANG_TIDY) --quiet shclw3_v2.c -- -std=c11 -I. -I$(SHCL2_DIR)
 
-# Analyzer diagnostics must be clean; -Werror makes both compiler frontends fail.
+# Analyzer diagnostics must be clean. -Werror fails gcc's, but doesn't reach
+# clang's own checks, which need -analyzer-werror.
 # gcc's at -O0, since -O1 deletes a write-only malloc/free pair before the
 # analyzer sees it, leak and all. The -O1 warnings come from the test builds.
 GCC_ANALYZE := -std=c17 -O0 -g -fanalyzer
+CLANG_ANALYZE := --analyze -std=c11 -O1 -g -Xanalyzer -analyzer-werror -Xanalyzer -analyzer-output=text
 ANALYZE_C := $(LIB) shclw-drive.c tests/api_test.c
 analyze:
 	@set -e; for file in $(ANALYZE_C); do \
 		$(CC15) $(GCC_ANALYZE) $(WARN) -Werror -I. -I$(SHCL_DIR) -c -o /dev/null "$$file"; \
-		$(CLANG) --analyze -std=c11 -O1 -g $(WARN) -Werror -I. -I$(SHCL_DIR) -Xanalyzer -analyzer-output=text -o /dev/null "$$file"; \
+		$(CLANG) $(CLANG_ANALYZE) $(WARN) -Werror -I. -I$(SHCL_DIR) -o /dev/null "$$file"; \
 	done
 	$(CC15) $(GCC_ANALYZE) $(WARN) -Werror -I. -isystem $(SHCL2_DIR) -c -o /dev/null shclw3_v2.c
-	$(CLANG) --analyze -std=c11 -O1 -g $(WARN) -Werror -I. -isystem $(SHCL2_DIR) -Xanalyzer -analyzer-output=text -o /dev/null shclw3_v2.c
+	$(CLANG) $(CLANG_ANALYZE) $(WARN) -Werror -I. -isystem $(SHCL2_DIR) -o /dev/null shclw3_v2.c
 
 # shcl's own code, which every program built on this runs. Not -isystem, and
 # clang told to look in headers, or neither reports a thing in shcl.h. No style

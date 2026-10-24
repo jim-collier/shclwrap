@@ -15,6 +15,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifdef _WIN32
+#include <fcntl.h>
+#include <io.h>
+#endif
 
 static int fail(const char *why, const char *what) {
 	(void)fprintf(stderr, "shclw-drive: %s%s\n", why, what ? what : "");
@@ -68,6 +72,11 @@ static bool soak_rounds(size_t *rounds) {
 }
 
 int main(int argc, char **argv) {
+#ifdef _WIN32
+	// Bytes in and out, as the other drivers have, or the output ends in CRLF.
+	(void)_setmode(_fileno(stdin), _O_BINARY);
+	(void)_setmode(_fileno(stdout), _O_BINARY);
+#endif
 	if (argc < 3 || argc > 4) {
 		return fail("usage: shclw-drive VERSION DOCFILE [DIR] < SCRIPT", NULL);
 	}

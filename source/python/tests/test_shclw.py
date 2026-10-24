@@ -24,10 +24,16 @@ HERE = Path(__file__).resolve().parent.parent
 class FindsShcl(unittest.TestCase):
 	def refused(self, body: str) -> str:
 		with tempfile.TemporaryDirectory() as tmp:
-			Path(tmp, "shcl.py").write_text(body)
+			Path(tmp, "shcl.py").write_text(body, encoding="utf-8")
 			env = dict(os.environ, PYTHONPATH=f"{tmp}{os.pathsep}{HERE}")
 			p = subprocess.run(
-				[sys.executable, "-c", "import shclw"], env=env, capture_output=True, text=True, cwd=tmp, check=False
+				[sys.executable, "-c", "import shclw"],
+				env=env,
+				capture_output=True,
+				encoding="utf-8",
+				errors="replace",
+				cwd=tmp,
+				check=False,
 			)
 		self.assertNotEqual(p.returncode, 0)
 		return p.stderr
@@ -44,7 +50,8 @@ class FindsShcl(unittest.TestCase):
 			p = subprocess.run(
 				[sys.executable, "-I", "-c", f"import sys; sys.path.insert(0, {str(HERE)!r}); import shclw"],
 				capture_output=True,
-				text=True,
+				encoding="utf-8",
+				errors="replace",
 				cwd=tmp,
 				check=False,
 			)
@@ -56,18 +63,19 @@ class FindsShcl(unittest.TestCase):
 		with tempfile.TemporaryDirectory() as tmp:
 			pkg = Path(tmp, "pkg")
 			pkg.mkdir()
-			Path(pkg, "__init__.py").write_text("")
+			Path(pkg, "__init__.py").write_text("", encoding="utf-8")
 			for f in ("shclw.py", "_shclw_shcl2.py"):
 				Path(pkg, f).write_bytes(Path(HERE, f).read_bytes())
 			Path(pkg, "shcl.py").write_bytes(installed.read_bytes())
-			Path(tmp, "shcl.py").write_text("VERSION = '1.2.0'\n")
+			Path(tmp, "shcl.py").write_text("VERSION = '1.2.0'\n", encoding="utf-8")
 			code = "import pkg.shclw as w, shcl; "
 			code += "print(w.shcl.__name__, hasattr(shcl, 'FORMAT_MAJOR'), w.parse('a: 1').int_or('a', 0))"
 			p = subprocess.run(
 				[sys.executable, "-c", code],
 				env=dict(os.environ, PYTHONPATH=tmp),
 				capture_output=True,
-				text=True,
+				encoding="utf-8",
+				errors="replace",
 				cwd=tmp,
 				check=False,
 			)
@@ -132,18 +140,18 @@ class Api(unittest.TestCase):
 		d.write(str(p))
 		self.assertTrue(Path(d.backup_name()).is_file())
 		self.assertFalse(d.rewrites())
-		self.assertEqual(shclw.format_of(p.read_text()), 3)
+		self.assertEqual(shclw.format_of(p.read_bytes().decode("utf-8")), 3)
 		self.assertEqual(shclw.open(str(p)).upgraded_from(), 0)
 
 	def test_layers(self) -> None:
-		(self.dir / "user.shcl").write_text("a: 2\n")
+		(self.dir / "user.shcl").write_bytes(b"a: 2\n")
 		d = shclw.open_layers(
 			shclw.Layer(text="a: 1\nb: 1\n"), shclw.Layer(file=str(self.dir / "user.shcl")), shclw.Layer(text="c: 3\n")
 		)
 		self.assertEqual([d.int_or(k, 0) for k in "abc"], [2, 1, 3])
 		d.put("b", 5)
 		d.write(str(self.dir / "user.shcl"))
-		self.assertEqual((self.dir / "user.shcl").read_text(), "a: 2\n\nb: 5\n")
+		self.assertEqual((self.dir / "user.shcl").read_bytes(), b"a: 2\n\nb: 5\n")
 
 	def test_format_float(self) -> None:
 		cases = [(0.0, "0.0"), (-0.0, "-0.0"), (1e17, "1e17"), (1e16, "10000000000000000.0"), (1e-5, "0.00001")]
@@ -183,7 +191,7 @@ class CreateRace(unittest.TestCase):
 				won = [i for i, o in outcome.items() if o == "won"]
 				self.assertEqual(len(won), 1, outcome)
 				self.assertEqual(sorted(set(outcome.values())), ["exists", "won"])
-				self.assertEqual(Path(path).read_text(), f"v: {won[0]}\n" * 5000)
+				self.assertEqual(Path(path).read_bytes(), f"v: {won[0]}\n".encode() * 5000)
 				self.assertEqual(os.listdir(tmp), ["a.shcl"])
 				if os.name != "nt":
 					self.assertEqual(os.stat(path).st_mode & 0o777, 0o600)

@@ -8,6 +8,20 @@
 
 #include "shclw.h"
 
+// mingw-w64's math.h passes a double to the float branch of these too, which
+// -Wconversion rejects. The builtins are what glibc uses (2026102323122737).
+#if defined(__MINGW32__) && !defined(__cplusplus)
+#include <math.h>
+#undef signbit
+#undef isnan
+#undef isinf
+#undef isfinite
+#define signbit(x) __builtin_signbit(x)
+#define isnan(x) __builtin_isnan(x)
+#define isinf(x) __builtin_isinf(x)
+#define isfinite(x) __builtin_isfinite(x)
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -90,6 +104,15 @@ typedef struct {
 // Go's MergesOf over each source in turn, in one block the caller frees. NULL
 // only when memory ran out.
 shclw_merge *shclw_i_merges_of(const shclw_i_source *srcs, size_t n_srcs, size_t *count);
+// Whether the n bytes at a and b are the same without ASCII case.
+bool shclw_i_same_lower(const char *a, const char *b, size_t n);
+// Go's CommentedOf over text, in one block the caller frees. With path not
+// NULL, only the "## Default" lines whose key path ends with, as Go's
+// DefaultLine parses. NULL only when memory ran out.
+shclw_commented_line *shclw_i_commented_of(const char *text, size_t len, const char *path, size_t *count);
+// text with line n's # taken off, and its "## Default" note too, as a fill-in
+// writes it. Caller frees. NULL only when memory ran out.
+char *shclw_i_uncommented(const char *text, size_t len, size_t n, size_t *out_len);
 // Copies of the diagnostics in one block, each string with a NUL after it.
 shclw_diag *shclw_i_copy_diags(const shclw_diag *diags, size_t n, size_t *count);
 

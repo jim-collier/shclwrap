@@ -94,6 +94,14 @@ func (r *runner) op(f []string) {
 			}
 			r.out(strings.Join(out, "\t"))
 		}
+	case "commented":
+		for _, c := range d.Commented() {
+			def := ""
+			if c.Default {
+				def = "\tdefault"
+			}
+			r.out(strconv.Itoa(c.Line) + "\t" + esc(c.Path) + "\t" + esc(c.Value) + def)
+		}
 	case "get":
 		r.out(r.get(arg(1), arg(2)))
 	case "or":
@@ -448,6 +456,8 @@ func (r *runner) write(name string, flags []string) {
 			o.Force = true
 		case flag == "create":
 			o.Create = true
+		case flag == "backup":
+			o.Backup = true
 		case strings.HasPrefix(flag, "mode="):
 			m, err := strconv.ParseUint(strings.TrimPrefix(flag, "mode="), 8, 32)
 			if err != nil {

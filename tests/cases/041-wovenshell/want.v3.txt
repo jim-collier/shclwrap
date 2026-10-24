@@ -12,3 +12,79 @@ Good	47	Monaspace Argon, Fira Code, JetBrains Mono, Cascadia Mono, Consolas, Ubu
 Good	71	160
 > get	float	transparency.opacity
 Good	110	0.95
+> commented
+6	shcl	Simple Hierarchical Config Language.
+40	font.use_system_size	true	default
+52	font.size	17.0	default
+78	window.remember_size	true	default
+79	window.remembered_columns	160	default
+80	window.remembered_rows	48	default
+84	window.hide_single_tab	false	default
+92	window.tab_min_width_pct	8.0	default
+93	window.tab_max_width_pct	26.0	default
+105	transparency.enabled	true	default
+117	transparency.blur_behind	true	default
+123	wallpaper.enabled	true	default
+129	wallpaper.image	wallpaper.png	default
+134	wallpaper.fallback_builtin	true	default
+145	wallpaper.rotate.enabled	true	default
+146	wallpaper.rotate.folder	wallpaper/	default
+147	wallpaper.rotate.interval_s	0.0	default
+148	wallpaper.rotate.random	true	default
+154	wallpaper.opacity	0.10	default
+159	wallpaper.default_fit	stretch	default
+168	wallpaper.honor_xmp	true	default
+173	wallpaper.blur	10.0	default
+183	wallpaper.contrast_mask.enabled	true	default
+184	wallpaper.contrast_mask.size	0.5	default
+185	wallpaper.contrast_mask.strength	0.5	default
+186	wallpaper.contrast_mask.auto	0.5	default
+199	text.scrim.enabled	true	default
+204	text.scrim.strength	15	default
+206	text.scrim.radius	5.0	default
+208	text.scrim.softness	0.5	default
+211	text.scrim.function	sdf	default
+213	text.scrim.ramp	exp	default
+215	text.scrim.regular_weight	true	default
+220	text.outline	1.0	default
+224	text.color_emoji	true	default
+229	text.embolden_inverse	true	default
+244	cursor.size.height	100	default
+245	cursor.size.width	100	default
+251	cursor.animation	pulse_vertical	default
+261	cursor.animation_resume_s	1	default
+268	cursor.animation_idle_stop_s	60	default
+273	cursor.blink_rate_ms	500	default
+277	cursor.scrim	false	default
+281	cursor.outline	true	default
+319	shell.command_line	--new-pane --right --size 35%	default
+331	shell.startup_directory	$HOME	default
+342	shell.integration	true	default
+347	shell.copy_on_select	false	default
+360	hyperlinks.enabled	true	default
+366	hyperlinks.open_command	firefox --new-tab	default
+382	scroll.smooth	true	default
+456	scroll.smooth_apps	true	default
+467	scroll.scrollbar.enabled	true	default
+472	scroll.scrollbar.thickness	16.0	default
+477	scroll.scrollbar.auto_hide	true	default
+498	colors.background	#000000	default
+499	colors.foreground	#88eecc	default
+500	colors.cursor	#9649af	default
+501	colors.highlight	#c8a05a	default
+502	colors.focus	#4086ff	default
+503	colors.menu_background	#36363b	default
+504	colors.menu_foreground	#f0f0f2	default
+505	colors.dialog_background	#20202a	default
+506	colors.dialog_foreground	#e2e2ea	default
+507	colors.gutter	#16161e	default
+508	colors.scrollbar_thumb	#8a8a92	default
+509	colors.scrollbar_trough	#2e2e36	default
+> put	float	font.size	20
+ok
+> line	font.size
+52
+> line	font.line_height_scale
+57
+> line	window.columns
+71

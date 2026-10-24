@@ -281,9 +281,16 @@ func textLines(s string) []string {
 // Mode is the permission bits a file this Write creates gets, exactly, with
 // no umask. 0 is a plain create's 0666 less the umask. A file that's already
 // there keeps its own mode. Windows has no such bits and ignores it.
+//
+// Backup writes over the file Open read when the save would lose lines the
+// load couldn't use, which is ErrRefused otherwise. It copies the file aside
+// first, as the upgrade's backup does, and BackupName names the copy. Later
+// Writes then don't refuse, since the lines are in the copy. Anywhere else
+// there's no copy to make, and it's still ErrRefused.
 type WriteOpts struct {
 	Force  bool
 	Create bool
+	Backup bool
 	Mode   fs.FileMode
 }
 
@@ -300,6 +307,7 @@ type Doc interface {
 	Errors() int
 	Unused() []Spot
 	Merged() []Merge
+	Commented() []Commented
 	Check(schema Doc) []Diag
 	DropDeclared(diags []Diag) []Diag
 

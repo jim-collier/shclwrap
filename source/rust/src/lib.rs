@@ -117,6 +117,18 @@ pub struct Merge {
 	pub layer: usize,
 }
 
+/// A comment line that reads as one `key: value` once its `#` comes off,
+/// such as a setting left in the file at its default. `path` is what the
+/// line would set. `default` says the line ends in a `## Default` note,
+/// which is the line a put of `path` fills in.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Commented {
+	pub path: String,
+	pub value: String,
+	pub line: usize,
+	pub default: bool,
+}
+
 /// One layer for `open_layers`: a file, or text the program has, such as
 /// its defaults or this run's command line.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -379,6 +391,12 @@ pub struct WriteOpts {
 	/// even with 2 programs creating the file at once. It never replaces, so
 	/// there's no changed check for `force` to skip.
 	pub create: bool,
+	/// Writes over the file `open` read when the save would lose lines the
+	/// load couldn't use, which is `Refused` otherwise. It copies the file
+	/// aside first, as the upgrade's backup does, and `backup_name` names the
+	/// copy. Later writes then don't refuse, since the lines are in the copy.
+	/// Anywhere else there's no copy to make, and it's still `Refused`.
+	pub backup: bool,
 	/// The permission bits a file this write creates gets, exactly, with no
 	/// umask. `None` is a plain create's 0666 less the umask. A file that's
 	/// already there keeps its own mode. Windows ignores it.
@@ -411,8 +429,9 @@ pub trait ShclDoc {
 	/// The format `open` upgraded the file from, or 0 when it didn't
 	/// upgrade it.
 	fn upgraded_from(&self) -> u32;
-	/// Where the first write over an upgraded file put the original, or ""
-	/// before then.
+	/// Where a write copied the file `open` read, or "" when none did.
+	/// That's the first write over an upgraded file, or one with
+	/// `WriteOpts::backup` that would have lost lines.
 	fn backup_name(&self) -> &str;
 	/// What the load found.
 	fn diags(&self) -> Vec<Diag>;
@@ -426,6 +445,9 @@ pub trait ShclDoc {
 	/// Each name the load kept one copy of, since a later copy had the same
 	/// name and value, with every copy's line.
 	fn merged(&self) -> Vec<Merge>;
+	/// Each comment line that reads as one `key: value` once its `#` comes
+	/// off, with the path it would set.
+	fn commented(&self) -> Vec<Commented>;
 	/// Validates this document against a schema document.
 	fn check(&self, schema: &Self) -> Vec<Diag>;
 	/// Takes out the hints for keys this schema says repeat.
@@ -646,6 +668,160 @@ fn walk<D: ShclDoc>(x: &D, path: &str, see: &mut dyn FnMut(&str, &str, &Node) ->
 				walk(x, &n.path, see);
 			}
 		}
+	}
+}
+
+/// The commented settings in `text`. Each candidate line is uncommented
+/// alone and the text parsed again, so the path is shcl's own reading of
+/// where the line sits. A line is left out when that adds an error or
+/// changes any other field, such as one that would open a raw block or take
+/// the lines under it as children.
+pub fn commented_of<D: ShclDoc>(text: &str, parse: impl Fn(&str) -> D) -> Vec<Commented> {
+	commented_where(text, parse, |_, _| true)
+}
+
+/// The line of `path`'s commented `## Default` setting in `text`, or 0.
+/// Only the lines whose key `path` ends with are parsed.
+pub fn default_line<D: ShclDoc>(text: &str, path: &str, parse: impl Fn(&str) -> D) -> usize {
+	let keep = |l: &str, body: &str| default_note(l).is_some() && key_ends(path, body);
+	let want = path.to_ascii_lowercase();
+	commented_where(text, parse, keep)
+		.into_iter()
+		.find(|c| c.path.to_ascii_lowercase() == want)
+		.map_or(0, |c| c.line)
+}
+
+/// A quick test, before the parse that says for sure, of whether `path`
+/// ends with the key `body` starts with.
+fn key_ends(path: &str, body: &str) -> bool {
+	let mut end = body.find(':').unwrap_or(body.len());
+	if let Some(q) = body.chars().next().filter(|&c| c == '"' || c == '\'') {
+		if let Some(c) = body[1..].find(q) {
+			if let Some(k) = body[c + 2..].find(':') {
+				end = c + 2 + k;
+			}
+		}
+	}
+	let key = body[..end].trim_end_matches([' ', '\t']).to_ascii_lowercase();
+	let p = path.to_ascii_lowercase();
+	p == key || p.ends_with(&format!(".{key}"))
+}
+
+fn commented_where<D: ShclDoc>(
+	text: &str,
+	parse: impl Fn(&str) -> D,
+	keep: impl Fn(&str, &str) -> bool,
+) -> Vec<Commented> {
+	let lines: Vec<&str> = text.split('\n').collect();
+	let cands: Vec<usize> = (0..lines.len())
+		.filter(|&i| uncomment(lines[i], false).is_some_and(|u| keep(lines[i], u.trim_start_matches([' ', '\t']))))
+		.collect();
+	let mut out = Vec::new();
+	if cands.is_empty() {
+		return out;
+	}
+	let d = parse(text);
+	let base = fields_of(&d, 0);
+	let errs = d.errors();
+	for i in cands {
+		let mut probe: Vec<String> = lines.iter().map(|&l| l.to_owned()).collect();
+		probe[i] = uncomment(lines[i], false).unwrap_or_default();
+		let p = parse(&probe.join("\n"));
+		let n = i + 1;
+		if p.errors() != errs || fields_of(&p, n) != base {
+			continue;
+		}
+		if let Some(mut c) = leaf_at(&p, n) {
+			c.default = default_note(lines[i]).is_some();
+			out.push(c);
+		}
+	}
+	out
+}
+
+/// `text` with line `n`'s `#` taken off, and its `## Default` note too, as
+/// a fill-in writes it.
+#[must_use]
+pub fn uncommented(text: &str, n: usize) -> String {
+	let mut lines: Vec<String> = text.split('\n').map(str::to_owned).collect();
+	if let Some(l) = uncomment(&lines[n - 1], true) {
+		lines[n - 1] = l;
+	}
+	lines.join("\n")
+}
+
+/// `l` without its `#`, for a line with one `#` and then text with a colon
+/// in it. A `##` line is a note, not a setting.
+fn uncomment(l: &str, drop_note: bool) -> Option<String> {
+	let body = l.trim_start_matches([' ', '\t']);
+	let indent = &l[..l.len() - body.len()];
+	if !body.starts_with('#') || body.starts_with("##") {
+		return None;
+	}
+	let body = body[1..].trim_start_matches([' ', '\t']);
+	if body.is_empty() || body.starts_with('#') || !body.contains(':') {
+		return None;
+	}
+	if drop_note {
+		if let Some(at) = default_note(body) {
+			let eol = if body.ends_with('\r') { "\r" } else { "" };
+			return Some(format!("{indent}{}{eol}", body[..at].trim_end_matches([' ', '\t'])));
+		}
+	}
+	Some(format!("{indent}{body}"))
+}
+
+/// Where a trailing `## Default` note starts in `l`.
+fn default_note(l: &str) -> Option<usize> {
+	const NOTE: &str = "default";
+	let t = l.trim_end_matches([' ', '\t', '\r']).as_bytes();
+	if t.len() < NOTE.len() || !t[t.len() - NOTE.len()..].eq_ignore_ascii_case(NOTE.as_bytes()) {
+		return None;
+	}
+	let mut end = t.len() - NOTE.len();
+	while end > 0 && (t[end - 1] == b' ' || t[end - 1] == b'\t') {
+		end -= 1;
+	}
+	if end < 2 || &t[end - 2..end] != b"##" {
+		return None;
+	}
+	let at = end - 2;
+	(at > 0 && (t[at - 1] == b' ' || t[at - 1] == b'\t')).then_some(at)
+}
+
+/// Every field's name and line in shcl's order, less the ones on line
+/// `skip`.
+fn fields_of<D: ShclDoc>(d: &D, skip: usize) -> Vec<(String, usize)> {
+	let mut out = Vec::new();
+	walk(d, "", &mut |_, name, n| {
+		if n.line != skip {
+			out.push((name.to_ascii_lowercase(), n.line));
+		}
+		true
+	});
+	out
+}
+
+/// The one field on line `n` with nothing under it, with its path as a
+/// program would write it: no index on the last step, which a key already
+/// set elsewhere in the block gets once the line comes back.
+fn leaf_at<D: ShclDoc>(d: &D, n: usize) -> Option<Commented> {
+	let mut found = Vec::new();
+	walk(d, "", &mut |parent, name, x| {
+		if x.line == n && d.names(&x.path).is_empty() {
+			found.push(Commented {
+				path: d.child(parent, name),
+				value: x.value.clone(),
+				line: n,
+				default: false,
+			});
+		}
+		true
+	});
+	if found.len() == 1 {
+		found.pop()
+	} else {
+		None
 	}
 }
 
@@ -1162,6 +1338,12 @@ impl<L: Lib> Runner<'_, L> {
 					self.say(&items.join("\t"));
 				}
 			}
+			"commented" => {
+				for c in self.doc.commented() {
+					let def = if c.default { "\tdefault" } else { "" };
+					self.say(&format!("{}\t{}\t{}{def}", c.line, esc(&c.path), esc(&c.value)));
+				}
+			}
 			"get" => {
 				let s = self.get(arg(1), arg(2));
 				self.say(&s);
@@ -1493,6 +1675,7 @@ impl<L: Lib> Runner<'_, L> {
 			match flag.as_str() {
 				"force" => opts.force = true,
 				"create" => opts.create = true,
+				"backup" => opts.backup = true,
 				_ => match flag.strip_prefix("mode=").map(|m| u32::from_str_radix(m, 8)) {
 					Some(Ok(m)) => opts.mode = Some(m),
 					_ => return self.say("error badvalue"),

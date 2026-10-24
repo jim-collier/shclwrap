@@ -59,9 +59,13 @@ If your program uses one shcl version and doesn't plan to move, you don't need t
 
 - A save over a file another program changed since it was read is refused too, so that program's edit isn't lost. A program that means to replace it can force the save.
 
+- A save that would drop lines the file had but the load couldn't read is refused. A program can ask for the file to be copied aside first, and then the save goes ahead.
+
 - A save can be create-only, which fails when the file is already there, even with 2 programs saving it at once. A new file can get an exact mode, such as 0600 for one holding tokens.
 
 - Old files are upgraded as they're opened, in memory. The first save keeps the original beside it, and a program that only reads never writes.
+
+- A setting left in the file as a commented default, like `# size: 17.0  ## Default`, is filled in where it sits when the program sets it, so the lines under it don't move. A program can list those lines too, each with the path it would set.
 
 - Layered config: defaults, then a site file, then the user's file, read as one document. Edits and saves go to the user's file only, and a missing site or user file is fine.
 
@@ -182,7 +186,7 @@ The full list of calls, and what the wrapper does differently from each shcl ver
 
 ## Building from source
 
-Go 1.21 or newer, Rust 1.88 or newer, Python 3.11 or newer, and a C11 compiler. The C lint also wants gcc-15, clang-format, and clang-tidy. The pipeline pins Rust 1.96 in `source/rust/rust-toolchain.toml`.
+Go 1.21 or newer, Rust 1.88 or newer, Python 3.11 or newer, and a C11 compiler. The C lint also wants gcc-15, clang-format, clang-tidy, and mingw-w64's gcc. The pipeline pins Rust 1.96 in `source/rust/rust-toolchain.toml`.
 
 ~~~bash
 cicd/cicd.bash           # everything: format, lint, tests, leak checks, and fuzzing

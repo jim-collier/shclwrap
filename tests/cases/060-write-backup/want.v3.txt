@@ -1,0 +1,58 @@
+> open	doc.shcl
+ok
+> remove	a
+1
+> write	doc.shcl
+error refused
+> scribble	doc.shcl	a: 9\n
+ok
+> write	doc.shcl	backup
+error changed
+> files
+clean.shcl
+doc.shcl
+ops.txt
+> scribble	doc.shcl	a: 1\na(5): 2\nc: 3\n
+ok
+> write	other.shcl	backup
+error refused
+> write	doc.shcl	backup
+ok
+| c: 3
+> upgraded
+from 0 backup doc_backup_STAMP_format-v3.shcl
+| a: 1
+| a(5): 2
+| c: 3
+> files
+clean.shcl
+doc.shcl
+doc_backup_STAMP_format-v3.shcl
+ops.txt
+> put	int	b	2
+ok
+> write	doc.shcl
+ok
+| c: 3
+| 
+| b: 2
+> write	other.shcl
+ok
+| c: 3
+| 
+| b: 2
+> open	clean.shcl
+ok
+> put	int	b	2
+ok
+> write	clean.shcl	backup
+ok
+| b: 2
+> upgraded
+from 0 backup none
+> parse
+ok
+> remove	a
+1
+> write	doc.shcl	backup
+error refused

@@ -1,0 +1,30 @@
+# A comment line that reads as one key: value once its # comes off is
+# listed with the path it would set, and default when it ends in a
+# ## Default note. A note, prose, a line in a raw body, and one that would
+# open an array that never closes aren't settings. A commented key that's
+# also set is listed under its plain path.
+commented
+errors
+lines	window.columns
+# A set shcl refuses leaves the line commented.
+syntax	font.size	[1,
+has	font.size
+# A put of a key whose ## Default line is there fills in that line, so the
+# lines under it don't move.
+put	float	font.size	20
+# Names match without ASCII case, and a quoted key can hold a colon.
+put	bool	FONT.Use_System_Size	false
+put	int	window."a:b"	2
+syntax	window.db.host	"db.lan"
+put	int	top	7
+line	font.size
+line	font.line_height_scale
+line	last
+lines	window.columns
+# A commented line with no default note, and a key already set, take the
+# usual put.
+put	str	font.weight	light
+put	int	window.columns	90
+errors
+text
+commented

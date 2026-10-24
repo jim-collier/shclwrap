@@ -1,0 +1,28 @@
+# A save that would lose lines is refused. Backup copies the file Open read
+# aside first, and then writes.
+open	doc.shcl
+remove	a
+write	doc.shcl
+# Not when the file changed since.
+scribble	doc.shcl	a: 9\n
+write	doc.shcl	backup
+files
+scribble	doc.shcl	a: 1\na(5): 2\nc: 3\n
+# Anywhere else there's no copy to make.
+write	other.shcl	backup
+write	doc.shcl	backup
+upgraded
+files
+# The lines are in the copy, so later Writes go ahead.
+put	int	b	2
+write	doc.shcl
+write	other.shcl
+# A save that loses nothing makes no copy.
+open	clean.shcl
+put	int	b	2
+write	clean.shcl	backup
+upgraded
+# Text has no file to copy.
+parse
+remove	a
+write	doc.shcl	backup
