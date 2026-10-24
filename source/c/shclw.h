@@ -234,8 +234,9 @@ shclw_kind shclw_open_layers(const shclw_layer *layers, size_t n, shclw_doc **do
 // The format shclw_open upgraded the file from, or 0 when it didn't upgrade
 // it. Reads, lines, diagnostics, and the text are all of the upgraded text.
 int64_t shclw_upgraded_from(shclw_doc *d);
-// Where the first shclw_write over an upgraded file put the original, or ""
-// before then. Caller frees. NULL only when memory ran out.
+// Where a shclw_write copied the file shclw_open read, or "" when none did.
+// That's the first one over an upgraded file, or one with backup that would
+// have lost lines. Caller frees. NULL only when memory ran out.
 char *shclw_backup_name(shclw_doc *d, size_t *len);
 void shclw_free(shclw_doc *d);
 
@@ -265,10 +266,17 @@ shclw_kind shclw_write(shclw_doc *d, const char *path, shclw_error *err);
 // mode is the permission bits a file this save creates gets, exactly, with no
 // umask. 0 is a plain create's 0666 less the umask. A file that's already
 // there keeps its own mode. Windows ignores it.
+//
+// backup writes over the file shclw_open read when the save would lose lines
+// the load couldn't use, which is SHCLW_ERR_REFUSED otherwise. It copies the
+// file aside first, as the upgrade's backup does, and shclw_backup_name names
+// the copy. Later saves then don't refuse, since the lines are in the copy.
+// Anywhere else there's no copy to make, and it's still SHCLW_ERR_REFUSED.
 typedef struct {
 	bool force;
 	bool create;
 	unsigned mode;
+	bool backup;
 } shclw_write_opts;
 // shclw_write with options, which may be NULL.
 shclw_kind shclw_write_with(shclw_doc *d, const char *path, const shclw_write_opts *opts, shclw_error *err);

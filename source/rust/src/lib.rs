@@ -379,6 +379,12 @@ pub struct WriteOpts {
 	/// even with 2 programs creating the file at once. It never replaces, so
 	/// there's no changed check for `force` to skip.
 	pub create: bool,
+	/// Writes over the file `open` read when the save would lose lines the
+	/// load couldn't use, which is `Refused` otherwise. It copies the file
+	/// aside first, as the upgrade's backup does, and `backup_name` names the
+	/// copy. Later writes then don't refuse, since the lines are in the copy.
+	/// Anywhere else there's no copy to make, and it's still `Refused`.
+	pub backup: bool,
 	/// The permission bits a file this write creates gets, exactly, with no
 	/// umask. `None` is a plain create's 0666 less the umask. A file that's
 	/// already there keeps its own mode. Windows ignores it.
@@ -411,8 +417,9 @@ pub trait ShclDoc {
 	/// The format `open` upgraded the file from, or 0 when it didn't
 	/// upgrade it.
 	fn upgraded_from(&self) -> u32;
-	/// Where the first write over an upgraded file put the original, or ""
-	/// before then.
+	/// Where a write copied the file `open` read, or "" when none did.
+	/// That's the first write over an upgraded file, or one with
+	/// `WriteOpts::backup` that would have lost lines.
 	fn backup_name(&self) -> &str;
 	/// What the load found.
 	fn diags(&self) -> Vec<Diag>;
@@ -1493,6 +1500,7 @@ impl<L: Lib> Runner<'_, L> {
 			match flag.as_str() {
 				"force" => opts.force = true,
 				"create" => opts.create = true,
+				"backup" => opts.backup = true,
 				_ => match flag.strip_prefix("mode=").map(|m| u32::from_str_radix(m, 8)) {
 					Some(Ok(m)) => opts.mode = Some(m),
 					_ => return self.say("error badvalue"),

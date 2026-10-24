@@ -554,9 +554,11 @@ bool shclw_read_only(shclw_doc *d) { return shclw_i_top(d)->newer > 0; }
 // moment between the last check and the rename is left open (design.md,
 // Loading and saving).
 static shclw_kind replace(read_file *f, const char *path, const char *text, size_t len, const shclw_write_opts *o,
-                          shclw_error *err) {
-	// The first save over a file shclw_open upgraded keeps the original.
-	replacing r = {path, f->text, f->len, f->from, o->mode};
+                          bool keep_lost, shclw_error *err) {
+	// The first save over a file shclw_open upgraded keeps the original, and
+	// so does one that would lose lines, with backup.
+	bool up_first = f->from && !f->backup;
+	replacing r = {path, f->text, f->len, up_first ? f->from : SHCLW_FORMAT_MAJOR, o->mode};
 	char *now = NULL;
 	size_t now_len = 0;
 	const char *was = f->text;
@@ -573,7 +575,7 @@ static shclw_kind replace(read_file *f, const char *path, const char *text, size
 		}
 		return save(&r, path, text, len, err);
 	}
-	shclw_i_replacer how = {f->from && !f->backup ? keep_original : NULL, save, &r};
+	shclw_i_replacer how = {up_first || keep_lost ? keep_original : NULL, save, &r};
 	char *name = NULL;
 	shclw_kind k = shclw_i_replace_read(path, was, was_len, text, len, &how, &name, err);
 	free(now);
@@ -598,10 +600,13 @@ shclw_kind shclw_write_with(shclw_doc *d, const char *path, const shclw_write_op
 	if (k != SHCLW_OK) {
 		return k;
 	}
+	read_file *f = d->file;
+	bool over = f && shclw_i_same_file(path, f->path, f->id);
 	int kept = 0;
 	shcl_str s = shcl_to_text_keep_lines(d->d, &kept);
 	size_t lost = shcl_lost_count(d->d);
-	if (!kept && lost > 0) {
+	bool keep_lost = !kept && lost > 0 && !(f && f->backup);
+	if (keep_lost && !(o.backup && over && !o.create && !f->gone)) {
 		shcl_reads_release(d->d);
 		char why[64];
 		(void)snprintf(why, sizeof why, "%zu lines would be lost", lost);
@@ -614,13 +619,11 @@ shclw_kind shclw_write_with(shclw_doc *d, const char *path, const shclw_write_op
 	if (k != SHCLW_OK) {
 		return k;
 	}
-	read_file *f = d->file;
-	bool over = f && shclw_i_same_file(path, f->path, f->id);
 	replacing plain = {path, NULL, 0, 0, o.mode};
 	if (o.create) {
 		k = shclw_i_create_new(path, text, len, o.mode, err);
 	} else {
-		k = over ? replace(f, path, text, len, &o, err) : save(&plain, path, text, len, err);
+		k = over ? replace(f, path, text, len, &o, keep_lost, err) : save(&plain, path, text, len, err);
 	}
 	if (over && k == SHCLW_OK) {
 		free(f->text);

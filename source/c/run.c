@@ -621,6 +621,8 @@ static void write_(runner *r, const fields *f) {
 			o.force = true;
 		} else if (!strcmp(flag, "create")) {
 			o.create = true;
+		} else if (!strcmp(flag, "backup")) {
+			o.backup = true;
 		} else if (!strncmp(flag, "mode=", 5) && flag[5] >= '0' && flag[5] <= '7') {
 			char *end = NULL;
 			unsigned long m = strtoul(flag + 5, &end, 8);

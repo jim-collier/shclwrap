@@ -448,6 +448,8 @@ func (r *runner) write(name string, flags []string) {
 			o.Force = true
 		case flag == "create":
 			o.Create = true
+		case flag == "backup":
+			o.Backup = true
 		case strings.HasPrefix(flag, "mode="):
 			m, err := strconv.ParseUint(strings.TrimPrefix(flag, "mode="), 8, 32)
 			if err != nil {

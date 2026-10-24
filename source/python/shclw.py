@@ -946,6 +946,7 @@ class Doc:
 		self._newer = 0  # the newer format the text names, which makes it read-only
 		self._lay: _LayerSet | None = None
 		self._src = ""  # the text as loaded, for merged()
+		self._backup = ""  # where a write copied the file open() read, with the lines the load lost
 
 	@property
 	def inner(self) -> Any:
@@ -992,7 +993,9 @@ class Doc:
 		t = self._top()
 		return t._finish(t._d.to_canonical())
 
-	def write(self, path: str, force: bool = False, *, create: bool = False, mode: int | None = None) -> None:
+	def write(
+		self, path: str, force: bool = False, *, create: bool = False, backup: bool = False, mode: int | None = None
+	) -> None:
 		"""Saves text() atomically. Refuses with Refused when the load dropped
 		lines the save would lose. The first write over a file open() upgraded
 		backs up the original first, and backup_name() names the copy. A write
@@ -1002,16 +1005,24 @@ class Doc:
 		create writes only where nothing is there yet, and is Exists otherwise,
 		even with 2 programs creating the file at once. mode is the permission
 		bits a file this write creates gets, exactly, with no umask. A file
-		that's already there keeps its own mode. Windows ignores it."""
+		that's already there keeps its own mode. Windows ignores it.
+
+		backup writes over the file open() read where it would be Refused,
+		after copying the file aside as the upgrade does. Later writes then
+		don't refuse, since the lines are in the copy. Anywhere else there's no
+		copy to make, and it's still Refused."""
 		if self._lay is not None:
-			self._top().write(path, force, create=create, mode=mode)
+			self._top().write(path, force, create=create, backup=backup, mode=mode)
 			return
 		if self._newer:
 			raise _too_new(path, self._newer)
 		_check_mode(path, mode)
+		f = self._file
+		over = not create and f is not None and not f.gone and f.over(path)
 		text, kept = self._d.to_text_keep_lines()
 		lost = self._d.lost_count()
-		if not kept and lost > 0:
+		keep_lost = not kept and lost > 0 and not self._backup
+		if keep_lost and not (backup and over):
 			raise Error(ErrKind.Refused, path, f"{lost} lines would be lost")
 		if not kept:
 			text = self._d.to_canonical()
@@ -1020,7 +1031,6 @@ class Doc:
 		except Error as e:
 			e.path = path
 			raise
-		f = self._file
 		if create:
 			create_new(path, text, mode)
 			if f is not None and f.over(path):
@@ -1033,6 +1043,9 @@ class Doc:
 		up = self._up
 		if up is not None and not up.backup:
 			up.backup = f.replace(path, text, _keep_original(path, f.text, up.from_), force, write)
+			self._backup = up.backup
+		elif keep_lost:
+			self._backup = f.replace(path, text, _keep_original(path, f.text, FORMAT_MAJOR), force, write)
 		else:
 			f.replace(path, text, None, force, write)
 		f.text, f.gone, f.ident = text, False, _ident(path)
@@ -1056,9 +1069,10 @@ class Doc:
 		return up.from_ if up is not None else 0
 
 	def backup_name(self) -> str:
-		"""Where the first write over an upgraded file put the original, or ""."""
-		up = self._top()._up
-		return up.backup if up is not None else ""
+		"""Where a write copied the file open() read, or "". That's the first
+		write over an upgraded file, or one with backup that would have lost
+		lines."""
+		return self._top()._backup
 
 	def info_block(self, on: bool) -> None:
 		"""Puts the info block at the end of what the save writes, or with on
@@ -2133,19 +2147,21 @@ class _Runner:
 		path = self.file(name)
 		if path is None:
 			return
-		force, create, mode = False, False, None
+		force, create, backup, mode = False, False, False, None
 		for flag in flags:
 			if flag == "force":
 				force = True
 			elif flag == "create":
 				create = True
+			elif flag == "backup":
+				backup = True
 			elif flag.startswith("mode=") and re.fullmatch(r"[0-7]+", flag[5:]):
 				mode = int(flag[5:], 8)
 			else:
 				self.out("error badvalue")
 				return
 		try:
-			self.doc.write(path, force, create=create, mode=mode)
+			self.doc.write(path, force, create=create, backup=backup, mode=mode)
 			text = read_text(path)
 		except Error as e:
 			self.result(e)

@@ -69,6 +69,9 @@ type Doc struct {
 	lay   *layerSet
 	src   string // the text as loaded, for Merged
 	newer int    // the newer format the text names, which makes it read-only
+	// where a Write copied the file Open read, so the lines the load lost
+	// are kept there
+	backup string
 }
 
 // layerSet is what OpenLayers read. d is then their merge, rebuilt after
@@ -607,9 +610,10 @@ func saved(text string, info shclw.Info, stamp bool) (string, error) {
 // the current one where it sat.
 //
 // The first Write over a file Open upgraded backs up the original first, as
-// UpgradeFile does, and BackupName names the copy. A Write over the file
-// Open read leaves it alone with ErrChanged when it changed on disk since,
-// and a document read from a newer format is ErrTooNew.
+// UpgradeFile does, and BackupName names the copy. WriteOpts.Backup does the
+// same in place of the refusal. A Write over the file Open read leaves it
+// alone with ErrChanged when it changed on disk since, and a document read
+// from a newer format is ErrTooNew.
 func (d *Doc) Write(path string) error { return d.WriteWith(path, shclw.WriteOpts{}) }
 
 // WriteWith is Write with options. Force writes over a file that changed
@@ -624,10 +628,16 @@ func (d *Doc) WriteWith(path string, o shclw.WriteOpts) error {
 	if err := shclw.CheckMode(path, o.Mode); err != nil {
 		return err
 	}
+	f := d.file
+	over := f != nil && !f.gone && !o.Create && f.over(path)
 	text, kept := d.d.ToTextKeepLines()
-	if lost := d.d.LostCount(); !kept && lost > 0 {
-		return &shclw.Error{Kind: shclw.ErrRefused, Path: path,
-			Msg: fmt.Sprintf("%d lines would be lost", lost), Err: &shcl.SaveRefused{Path: path, Lost: lost}}
+	keepLost := false
+	if lost := d.d.LostCount(); !kept && lost > 0 && d.backup == "" {
+		if !o.Backup || !over {
+			return &shclw.Error{Kind: shclw.ErrRefused, Path: path,
+				Msg: fmt.Sprintf("%d lines would be lost", lost), Err: &shcl.SaveRefused{Path: path, Lost: lost}}
+		}
+		keepLost = true
 	}
 	if !kept {
 		text = d.d.ToCanonical()
@@ -637,7 +647,6 @@ func (d *Doc) WriteWith(path string, o shclw.WriteOpts) error {
 		err.(*shclw.Error).Path = path
 		return err
 	}
-	f := d.file
 	if o.Create {
 		if err := shclw.CreateNew(path, text, o.Mode); err != nil {
 			return err
@@ -656,15 +665,22 @@ func (d *Doc) WriteWith(path string, o shclw.WriteOpts) error {
 		return write(path, text)
 	}
 	var backup func() (string, error)
-	if d.up != nil && d.up.backup == "" {
+	upFirst := d.up != nil && d.up.backup == ""
+	switch {
+	case upFirst:
 		backup = keepOriginal(path, f.text, d.up.from)
+	case keepLost:
+		backup = keepOriginal(path, f.text, FormatMajor)
 	}
 	name, err := f.replace(path, text, backup, o.Force, write)
 	if err != nil {
 		return err
 	}
-	if backup != nil {
+	if upFirst {
 		d.up.backup = name
+	}
+	if backup != nil {
+		d.backup = name
 	}
 	f.text, f.gone = text, false
 	f.st, _ = os.Stat(path)
@@ -745,15 +761,10 @@ func (d *Doc) UpgradedFrom() int {
 	return d.up.from
 }
 
-// BackupName is where the first Write over an upgraded file put the
-// original, or "" before then.
-func (d *Doc) BackupName() string {
-	d = d.top()
-	if d.up == nil {
-		return ""
-	}
-	return d.up.backup
-}
+// BackupName is where a Write copied the file Open read, or "" when none
+// did. That's the first Write over an upgraded file, or one with
+// WriteOpts.Backup that would have lost lines.
+func (d *Doc) BackupName() string { return d.top().backup }
 
 // Rewrites says whether Write puts the canonical form in place of the lines
 // the document was loaded from. 3.0 does that when it can't keep them with

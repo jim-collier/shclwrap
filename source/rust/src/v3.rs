@@ -34,6 +34,9 @@ pub struct Doc {
 	src: String,
 	// The newer format the text names, which makes it read-only.
 	newer: u32,
+	// Where a write copied the file `open` read, so the lines the load lost
+	// are kept there.
+	backup: String,
 }
 
 /// What `open_layers` read. `d` is then their merge, built again after each
@@ -187,6 +190,7 @@ fn doc(d: shcl::Document, text: &str) -> Doc {
 		lay: None,
 		src: text.to_owned(),
 		newer: Some(format_of(text)).filter(|&f| f > FORMAT_MAJOR).unwrap_or(0),
+		backup: String::new(),
 	}
 }
 
@@ -756,9 +760,11 @@ impl ShclDoc for Doc {
 			return Err(too_new(self.newer).path(path));
 		}
 		crate::check_mode(path, opts.mode)?;
+		let over = !opts.create && self.file.as_ref().is_some_and(|f| !f.gone && f.over(path));
 		let (text, kept) = self.d.to_text_keep_lines();
 		let lost = self.d.lost_count();
-		if !kept && lost > 0 {
+		let keep_lost = !kept && lost > 0 && self.backup.is_empty();
+		if keep_lost && !(opts.backup && over) {
 			return Err(Error::new(ErrKind::Refused)
 				.path(path)
 				.msg(format!("{lost} lines would be lost")));
@@ -779,6 +785,10 @@ impl ShclDoc for Doc {
 			match self.up.as_mut().filter(|u| u.backup.is_empty()) {
 				Some(up) => {
 					up.backup = f.replace(path, &text, || keep_original(path, &f.text, up.from), opts)?;
+					self.backup.clone_from(&up.backup);
+				}
+				None if keep_lost => {
+					self.backup = f.replace(path, &text, || keep_original(path, &f.text, FORMAT_MAJOR), opts)?;
 				}
 				None => {
 					f.replace(path, &text, || Ok(String::new()), opts)?;
@@ -814,7 +824,7 @@ impl ShclDoc for Doc {
 	}
 
 	fn backup_name(&self) -> &str {
-		self.top().up.as_ref().map_or("", |u| u.backup.as_str())
+		&self.top().backup
 	}
 
 	/// A layered document has every layer's, in layer order, each with its

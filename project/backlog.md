@@ -516,13 +516,28 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 - Back up a file before a save that would lose lines
 	- ID: 2026101513330019
 	- Type: Feature
-	- Status: Queued
+	- Status: Waiting on automated testing
+	- Needs local test suite run?: Yes, one full run, plain, for CodeQL, CTU and the fuzz over the C change.
 	- Priority: Avg
 	- Opened: 20261015-133300
 	- Opened by: JC
+	- Related IDs: 2026101513330017, 2026101613005800
 	- Requirements:
 		- A save option that copies the file aside and then writes, in place of `Refused`.
 	- Note: Cobblevale does this on its first write over such a file. 1.2 has no refusal, so the wrapper's own 1.2 Write loses those lines with no warning.
+	- Progress log:
+		- 2026-10-24: `WriteOpts.Backup` in Go, Rust, C, and Python, plus `write FILE backup`. Over the file `Open` read, a save that would lose lines copies it aside as the upgrade's backup does, then writes. `BackupName` names the copy. design.md and a README line updated.
+		- The 1.2 part of the Note is moot, since 3.0 has been the floor since 2026101613005800.
+		- Verified: Go tests and vet, Rust tests and clippy pedantic, Python tests, ruff and shared cases, the C container lint, the C API tests and shared cases plain, sanitized and as C++, and `cicd.bash --ci --quick -y`. The new case failed in Go before the change and passes after.
+		- Swept: the refusal and the backup in all 4 adapters, the layered path in each, and all 4 ops runners. fuzz.py makes no write ops.
+	- Decisions:
+		- Opt in, not on by default, so copies don't pile up beside a file for programs that never read `BackupName`.
+		- Only over the file `Open` read. Anywhere else, `Create`, and `Parse` or `New` documents are still `Refused`, since there's no file to copy.
+		- Once a copy exists, later saves don't refuse, since the lines are in it. The first save over an upgraded file counts too.
+		- The copy is the upgrade's backup name with format 3. In C the field goes last in `shclw_write_opts`, so positional setups still build.
+	- Branch: round-1024
+	- Test case: shared case `060-write-backup` in all 4 languages.
+	- Acceptance signoff: waits on JC after the full run, for the README line and the opt-in call.
 
 - Put fills in a commented default line
 	- ID: 2026101513330020

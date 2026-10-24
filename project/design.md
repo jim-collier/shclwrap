@@ -123,11 +123,11 @@ Go names are listed. Rust uses the same words in snake case, and `ShclDoc` has t
 | `d.Text()`                | The document as it would be saved.
 | `d.Canonical()`           | The document in canonical form.
 | `d.Write(path)`           | Saves `Text()` atomically. The first one over a file `Open` upgraded backs it up first. Over a file that changed on disk since `Open` read it, it's `ErrChanged`.
-| `d.WriteWith(path, opts)` | `Write` with `WriteOpts`. `Force` writes over a file that changed, `Create` writes only a new file, and `Mode` is a new file's mode.
+| `d.WriteWith(path, opts)` | `Write` with `WriteOpts`. `Force` writes over a file that changed, `Create` writes only a new file, `Backup` copies the file aside where the save would lose lines, and `Mode` is a new file's mode.
 | `d.ReadOnly()`            | Whether the document came from a newer format, which `Write` refuses.
 | `d.Rewrites()`            | Whether `Write` puts the canonical form in place of the lines the document was loaded from.
 | `d.UpgradedFrom()`        | The format `Open` upgraded the file from, or 0.
-| `d.BackupName()`          | Where the first `Write` over an upgraded file put the original, or empty.
+| `d.BackupName()`          | Where a `Write` copied the file `Open` read, or empty.
 | `d.Diags()`, `d.Errors()` | The load's diagnostics, and how many are errors.
 | `d.Unused()`              | The lines the load couldn't use, once each.
 | `d.Merged()`              | Each name shcl kept one copy of, with the lines of every copy.
@@ -176,6 +176,15 @@ Go names are listed. Rust uses the same words in snake case, and `ShclDoc` has t
 	- More than permission bits, such as setuid or sticky, is `ErrBadValue`, and nothing is written.
 	- Windows has no Unix modes and ignores it.
 	- In Go and C a mode of 0 means none was given. Rust takes `mode: Some(0o600)`, and Python `mode=0o600`.
+
+- `WriteOpts{Backup: true}` writes a save that would lose lines the load couldn't use, after copying the file `Open` read aside, where a plain `Write` is `ErrRefused` (2026101513330019). That's what Cobblevale does on its first save over such a file.
+	- The copy is the upgrade's backup, with the same name, format 3 in it, and `ErrBackupTaken`. `BackupName` names it. It's the text `Open` read, so it has the lines the save drops.
+	- It's made only when the save would lose lines. A save that keeps them, or has none to lose, makes no copy.
+	- Only over the file `Open` read, by path or by another name. A `Write` anywhere else, a `Create` one, and a `Parse` or `New` document have no file to copy, and are still `ErrRefused`.
+	- The changed check still comes first, so a file that changed since `Open` read it is `ErrChanged`, with no copy. With `Force` the copy is still what `Open` read, as on an upgraded file.
+	- Once a copy is made, later `Write`s don't refuse, anywhere, since the lines are in it and the file no longer has them. The first `Write` over an upgraded file counts too, since its backup is the original.
+	- On an upgraded file the first `Write` makes the one backup, of the original, either way.
+	- Rust and Python have it as `backup`, and C as the `backup` field, last in `shclw_write_opts`.
 
 - A save whose text has no Format line has 2.x's `#` info block swapped for the current one, with its Format line, where the old one sat (2026101513330010). That's `Write`, `Text`, and `Canonical`.
 	- It's the upgrade's swap, with the same block finder, so a block's text inside a raw body doesn't count. The lines end as the file's did.
@@ -321,7 +330,7 @@ Go names are listed. Rust uses the same words in snake case, and `ShclDoc` has t
 
 - One error type, `*shclw.Error` in Go, `shclw::Error` in Rust, and `shclw.Error` in Python, with a kind a program can act on: `NotFound`, `IO`, `Strict`, `Refused`, `BadPath`, `BadValue`, `TooNew`, `Unsupported`, `Ambiguous`, `BackupTaken`, `NoReadBack`, `Changed`, and `Exists`.
 
-- `Refused` is a save that would drop lines the load couldn't use, which 3.0 refuses. It's also an upgrade of a 2.x file that shcl 2.0 reports errors on.
+- `Refused` is a save that would drop lines the load couldn't use, which 3.0 refuses, unless `WriteOpts.Backup` copies the file aside first. It's also an upgrade of a 2.x file that shcl 2.0 reports errors on.
 
 ### Everything else
 
@@ -363,35 +372,35 @@ Each row has a test, either a shared case or an API test.
 
 An ops script is one op per line, with fields split by tabs. `\t`, `\n`, `\r`, and `\\` in a field are a tab, newline, return, and backslash. Blank lines and lines starting with `#` are skipped.
 
-| Op                                      | Prints
-| :---                                    | :---
-| `parse [loose\|standard\|strict]`       | `ok` or `error strict`, and the document is reloaded
-| `text`, `canonical`                     | the document, one `\|`-prefixed line per line
-| `rewrites`                              | `true` or `false`, from `Rewrites`
-| `diags`, `errors`                       | each diagnostic as line, severity, code, and message, or the count. A layer's line is `LAYER:LINE`.
-| `unused`                                | how many lines, then each one
-| `merged`                                | each merge's path, then its lines, one merge per line
-| `get TYPE PATH`                         | status, line, and the value. Arrays print a count, then the items.
-| `or TYPE PATH FALLBACK...`              | the value or the fallback
-| `has`, `count`, `line`, `names`         | the answer for PATH
-| `lines PATH`                            | how many instances, then each one's line
-| `first TYPE PATH`, `last TYPE PATH`     | `get` of the first or last instance
-| `each PATH`                             | index, line, and value, one instance per line
-| `eachget TYPE PATH CHILD`               | `get` of CHILD under each instance
-| `put TYPE PATH VALUE...`                | `ok` or `error KIND`
-| `syntax PATH TEXT`, `comment PATH TEXT` | `ok` or `error KIND`
-| `remove PATH`                           | how many instances went
-| `info on\|off`, `stamp`                 | `ok` or `error KIND`, from `InfoBlock` and `StampFormat`
-| `check FILE [all\|drop]`                | the schema check, with the load's own diagnostics for `all`, and then dropped ones for `drop`
-| `format`, `upgrade [FROM]`              | the format number, or the upgrade's result, its lost and rewritten lines, and text
-| `write FILE [force] [create] [mode=M]`  | `ok` and the saved file, or `error KIND`. The flags are `WriteOpts`'s, with M in octal.
-| `mode FILE`                             | the file's permission bits, in octal
-| `readonly`                              | `true` or `false`, from `ReadOnly`
-| `scribble FILE TEXT`                    | `ok` once TEXT is in FILE, written as another program would
-| `open FILE [loose\|standard\|strict]`   | `ok`, or `error KIND` and the error's diagnostics, and the document is reloaded
-| `layers SPEC...`                        | `open` for `OpenLayers`. Each SPEC is a file name, or `=` and a text layer's text.
-| `upgraded`                              | `UpgradedFrom` and `BackupName`, then the backup's text
-| `files`                                 | the names in the folder
+| Op                                              | Prints
+| :---                                            | :---
+| `parse [loose\|standard\|strict]`               | `ok` or `error strict`, and the document is reloaded
+| `text`, `canonical`                             | the document, one `\|`-prefixed line per line
+| `rewrites`                                      | `true` or `false`, from `Rewrites`
+| `diags`, `errors`                               | each diagnostic as line, severity, code, and message, or the count. A layer's line is `LAYER:LINE`.
+| `unused`                                        | how many lines, then each one
+| `merged`                                        | each merge's path, then its lines, one merge per line
+| `get TYPE PATH`                                 | status, line, and the value. Arrays print a count, then the items.
+| `or TYPE PATH FALLBACK...`                      | the value or the fallback
+| `has`, `count`, `line`, `names`                 | the answer for PATH
+| `lines PATH`                                    | how many instances, then each one's line
+| `first TYPE PATH`, `last TYPE PATH`             | `get` of the first or last instance
+| `each PATH`                                     | index, line, and value, one instance per line
+| `eachget TYPE PATH CHILD`                       | `get` of CHILD under each instance
+| `put TYPE PATH VALUE...`                        | `ok` or `error KIND`
+| `syntax PATH TEXT`, `comment PATH TEXT`         | `ok` or `error KIND`
+| `remove PATH`                                   | how many instances went
+| `info on\|off`, `stamp`                         | `ok` or `error KIND`, from `InfoBlock` and `StampFormat`
+| `check FILE [all\|drop]`                        | the schema check, with the load's own diagnostics for `all`, and then dropped ones for `drop`
+| `format`, `upgrade [FROM]`                      | the format number, or the upgrade's result, its lost and rewritten lines, and text
+| `write FILE [force] [create] [backup] [mode=M]` | `ok` and the saved file, or `error KIND`. The flags are `WriteOpts`'s, with M in octal.
+| `mode FILE`                                     | the file's permission bits, in octal
+| `readonly`                                      | `true` or `false`, from `ReadOnly`
+| `scribble FILE TEXT`                            | `ok` once TEXT is in FILE, written as another program would
+| `open FILE [loose\|standard\|strict]`           | `ok`, or `error KIND` and the error's diagnostics, and the document is reloaded
+| `layers SPEC...`                                | `open` for `OpenLayers`. Each SPEC is a file name, or `=` and a text layer's text.
+| `upgraded`                                      | `UpgradedFrom` and `BackupName`, then the backup's text
+| `files`                                         | the names in the folder
 
 - TYPE is `int`, `float`, `bool`, `str`, `strs`, `ints`, `floats`, or `raw`.
 
@@ -582,6 +591,10 @@ An ops script is one op per line, with fields split by tabs. `\t`, `\n`, `\r`, a
 
 - `Mode` is exact, set by chmod past the umask, rather than masked by it (2026101513330016). A program taht asks for 0600 means 0600, and a umask can only take bits away anyway, so masking would change nothing for 0600 and surprise anyone who asked for 0644 under a umask of 077.
 	- It applies only to a file the `Write` creates, as the mode of `open(2)` does. An existing file keeps its mode, which shcl's atomic write already did, so a program never changes a file's mode by saving it.
+
+- A save that would lose lines copies the file aside only when asked, with `WriteOpts.Backup`, rather than always (2026101513330019). The refusal stays the default, since a program that never looks at `BackupName` would leave copies piling up beside the file with no word to the user. Cobblevale asks.
+	- It's a flag rather than a save of the lines somewhere of the wrapper's choosing, since the upgrade's backup already has a name, a format tag, and a taken-name error programs handle.
+	- The copy is of the file `Open` read, so a `Write` elsewhere stays refused. Over another path the file `Open` read still has the lines, but a `Parse` document has no file at all, and one rule is easier to explain.
 
 - There's no `OpenLayersWith` yet. A program that wants strict layers checks `Errors()`, which counts every layer.
 
