@@ -25,50 +25,6 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 
 ## Issues
 
-- Python wrapper
-	- ID: 2026101512024161
-	- Type: Feature
-	- Status: Waiting for answers
-		- Waits on the question in questions.md about how 2.0 comes along.
-	- Priority: Avg
-	- Opened: 2026-10-15
-	- Opened by: JC
-	- Related IDs: 2026101513330050, 2026101711245585
-	- Requirements:
-		- One module. It finds which shcl is installed at run time.
-		- Its own driver, run against the shared cases and in the fuzzer.
-	- Notes:
-		- Used by Lenscart, on 1.2.
-	- Progress log:
-		- 2026-10-21: `source/python/shclw.py`, the 3.0 wrapper with the same calls as Go and Rust, `OpenLayers` and the ops runner included. It takes the shcl it finds when it loads and refuses anything but 3.0, by `FORMAT_MAJOR`. `shclw_drive.py` runs the shared cases through `cicd/c_cases.py --lang Python` and joins the fuzz on the host and in the C container. cicd fetches the pinned 3.0 `shcl.py` into `cicd/cache/shcl-py/` and checks it and the 2.0 copy by sha256. README has a Python section, and design.md has the layout, names, and sharing rows.
-		- Verified: the 53 shared cases whole, 564 ops; 12 unit tests; ruff on `source/python` and `cicd`; 1,113 fuzz cases against Go and Rust with none failing; `cicd.bash --quick`, whose fuzz ran Python beside Go, Rust, and C in the container. An injected upgrade fault turned the shared cases red.
-		- Swept: `c_cases.py`, `fuzz.py`, `c-in-container.bash`, and `cicd.bash` are every place a driver is named. Every Go `Doc` and `Lib` call has a Python twin.
-	- Decisions:
-		- shcl 2.0 for the upgrade check is its own `shcl.py`, kept as `_shclw_shcl2.py` and loaded under that name. It's the Python twin of C's renamed 2.0 and Rust's `shcl2` dependency. Asked in questions.md.
-		- Reads with a fallback are `int_or` and the rest, not `int`, so no method takes a builtin's name.
-		- `put` takes a list or tuple. An empty one writes an empty array, which reads back the same for every type.
-		- No pip install anywhere. Tests point `PYTHONPATH` at the cached `shcl.py`.
-	- Commit: a4909af
-	- Test case: shared cases, all 53, through the Python driver; `source/python/tests/test_shclw.py`; the fuzz.
-
-- Move the other projects onto the wrapper
-	- ID: 2026101512024167
-	- Type: Task
-	- Status: Waiting for answers
-	- Priority: Avg
-	- Opened: 2026-10-15
-	- Opened by: JC
-	- Prereq IDs: 2026101512024150, and the C or Python wrapper where a project needs one.
-	- Requirements:
-		- One project at a time, deleting its own adapter code as it goes.
-	- Notes:
-		- Tallowbase, Tickerwren, Radixmill, and Mossrealm fit the API as it is.
-		- Quillroute and Wovenshell also need the info block, and Wovenshell datetime reads.
-		- Cobblevale and Folderkite wait on the C wrapper, and Lenscart on the Python one.
-		- The wrapper already covers some of their workarounds, which can go as each one moves: Tallowbase's path cursor and index walks, Quillroute's name dedupe, quoting names made of digits, refusing a set on a repeated key, reading every put back, and failing a load on any error.
-		- Each project's other workarounds have their own items, with the project named in the item.
-		- 2026-10-21: waits on a go-ahead to edit the other repos, and which one goes first. Asked in the round's questions file.
-
 - Updates to CICD script flags
 	- ID: 2026101816214270
 	- Type: Enhancement
@@ -108,6 +64,7 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- gcc's leak is the `volatile` pointer in `shcl_generate`. The null check reads it again.
 		- CodeQL's 3 stack-address results are the recovery point. Every caller read disarms it on each way out.
 		- Nothing goes to shcl as a bug. Two small changes would quiet the analyzers for every program that builds shcl: `_Noreturn` on `arena_panic`, and a plain pointer for `own` in `shcl_generate`. Drafted in the round report for JC, not filed.
+		- 2026-10-24: JC said to add the draft to shcl's backlog, but shcl's dev already has it. `arena_panic` is noreturn and the `shcl_read_file` compare uses a saved `want`, both since `5c462c07` (2026-10-17), which is newer than our `ea0998fa` pin. The `volatile` owners stay on purpose, with gcc's leak report turned off around all 16. Nothing filed. A pin past `5c462c07` should drop the `arena_panic` findings, and the known list then needs remaking.
 	- Decisions:
 		- 3.0's two stream findings at 13605 are harmless, not false. A failed read does loop for one more `fread`, but the file is refused after it.
 	- Test case: the lists are what 2026102321270148's gate matches against.
@@ -160,6 +117,7 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- clang-22 in the container gives 10, listed in 3.0's list as `ctu` lines, once per file of ours that reaches each one. clang 19 puts the use after free at 1186, inside `arena_guard`, instead of at 3737. 2.0 gives none.
 		- Ours at `shclw3.c:1300` was false too. `check_old` is a callback the 2.0 walk calls only with `i < n`, but the pass starts there knowing neither. It now checks `i >= n` as well.
 		- `cicd/shcl_known.py ctu` reads the logs. A finding in our files, a clang error, or output with no diagnostic fails it. Findings in a pin's `shcl.h` must match that pin's list.
+		- 2026-10-24: shcl's dev already marks `arena_panic` noreturn, so a 3.0 pin past `5c462c07` should clear all 10. See 2026102321270143.
 	- Decisions:
 		- A finding is counted once per file of ours it's reached from, since each of those is a separate path in.
 		- The list holds clang-22's set, the gate's, not the host's clang 19.
@@ -295,9 +253,11 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- 2026-10-21: A `shcl.py` copied beside `shclw.py` is used first, then the installed one. The copy loads under its own name, so a program that still imports an older `shcl` keeps it. README says so.
 		- Verified: `test_copied` runs the wrapper from a package with 3.0 copied beside it and 1.2 on the path, and fails with the copy lookup taken out. `test_none` checks the message with nothing found.
 	- Decisions:
-		- The copy beside the wrapper wins over the installed one, since bundling it is a choice. Waits on JC with the parent's question.
+		- The copy beside the wrapper wins over the installed one, since bundling it is a choice. JC OK'd it on 2026-10-24.
 	- Commit: a4909af
 	- Test case: `source/python/tests/test_shclw.py`, `test_copied` and `test_none`.
+	- Acceptance signoff: JC, 2026-10-24.
+	- Closed: 2026-10-24
 
 - Create-only Write
 	- ID: 2026101513330015
@@ -778,6 +738,7 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- The repo has no GitHub Actions workflow yet.
 		- There's no CLI of its own here. The nearest thing is the ops runners the shared cases drive.
 		- Both local Macs are Intel, so this is the only Apple Silicon run.
+		- 2026-10-24: JC wants a hosted workflow for this.
 
 - cicd flags for a full run that changes nothing in the tree
 	- ID: 2026102319573100
@@ -794,6 +755,8 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Notes:
 		- Without `--ci`, the format stage rewrites tracked files with `gofmt -w`, `cargo fmt`, and `clang-format -i`.
 		- Until then a full test run goes in 2 steps, `--ci --leakcheck --no-sync -y` and then the fuzz by hand.
+	- Decisions:
+		- JC, 2026-10-24: a `--fuzz` flag turns fuzz back on under `--ci`, so `--ci --leakcheck --fuzz --no-sync -y` is the one full line.
 
 - Two cicd runs at once break each other's C lint
 	- ID: 2026102323244600
@@ -1784,6 +1747,33 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Closed: 20261017-11325800
 	- Acceptance signoff: Self-closed: reproduced, and its test failed before the fix and passes after. The narrowed path is what `Each` already gave.
 
+- Python wrapper
+	- ID: 2026101512024161
+	- Type: Feature
+	- Status: Done
+	- Priority: Avg
+	- Opened: 2026-10-15
+	- Opened by: JC
+	- Related IDs: 2026101513330050, 2026101711245585
+	- Requirements:
+		- One module. It finds which shcl is installed at run time.
+		- Its own driver, run against the shared cases and in the fuzzer.
+	- Notes:
+		- Used by Lenscart, on 1.2.
+	- Progress log:
+		- 2026-10-21: `source/python/shclw.py`, the 3.0 wrapper with the same calls as Go and Rust, `OpenLayers` and the ops runner included. It takes the shcl it finds when it loads and refuses anything but 3.0, by `FORMAT_MAJOR`. `shclw_drive.py` runs the shared cases through `cicd/c_cases.py --lang Python` and joins the fuzz on the host and in the C container. cicd fetches the pinned 3.0 `shcl.py` into `cicd/cache/shcl-py/` and checks it and the 2.0 copy by sha256. README has a Python section, and design.md has the layout, names, and sharing rows.
+		- Verified: the 53 shared cases whole, 564 ops; 12 unit tests; ruff on `source/python` and `cicd`; 1,113 fuzz cases against Go and Rust with none failing; `cicd.bash --quick`, whose fuzz ran Python beside Go, Rust, and C in the container. An injected upgrade fault turned the shared cases red.
+		- Swept: `c_cases.py`, `fuzz.py`, `c-in-container.bash`, and `cicd.bash` are every place a driver is named. Every Go `Doc` and `Lib` call has a Python twin.
+	- Decisions:
+		- shcl 2.0 for the upgrade check is its own `shcl.py`, kept as `_shclw_shcl2.py` and loaded under that name. It's the Python twin of C's renamed 2.0 and Rust's `shcl2` dependency. JC OK'd it on 2026-10-24.
+		- Reads with a fallback are `int_or` and the rest, not `int`, so no method takes a builtin's name.
+		- `put` takes a list or tuple. An empty one writes an empty array, which reads back the same for every type.
+		- No pip install anywhere. Tests point `PYTHONPATH` at the cached `shcl.py`.
+	- Commit: a4909af
+	- Test case: shared cases, all 53, through the Python driver; `source/python/tests/test_shclw.py`; the fuzz.
+	- Acceptance signoff: JC, 2026-10-24.
+	- Closed: 2026-10-24
+
 - Upgrade lists the lines it changed
 	- ID: 2026101513330012
 	- Type: Feature
@@ -2247,6 +2237,26 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Swept: every place Rust turns a float into text, `format_float` and `From<f32>`. Go's and C's already follow Go's rule. No other float-to-text site in the 3 wrappers.
 	- Closed: 20261017-11325800
 	- Acceptance signoff: Self-closed: reproduced, and its test failed before the fix and passes after. Go's rule needed no change to any want file.
+
+- Move the other projects onto the wrapper
+	- ID: 2026101512024167
+	- Type: Task
+	- Status: Deferred
+	- Priority: Avg
+	- Opened: 2026-10-15
+	- Opened by: JC
+	- Assigned to: JC
+	- Prereq IDs: 2026101512024150, and the C or Python wrapper where a project needs one.
+	- Requirements:
+		- One project at a time, deleting its own adapter code as it goes.
+	- Notes:
+		- Tallowbase, Tickerwren, Radixmill, and Mossrealm fit the API as it is.
+		- Quillroute and Wovenshell also need the info block, and Wovenshell datetime reads.
+		- Cobblevale and Folderkite wait on the C wrapper, and Lenscart on the Python one.
+		- The wrapper already covers some of their workarounds, which can go as each one moves: Tallowbase's path cursor and index walks, Quillroute's name dedupe, quoting names made of digits, refusing a set on a repeated key, reading every put back, and failing a load on any error.
+		- Each project's other workarounds have their own items, with the project named in the item.
+		- 2026-10-21: waits on a go-ahead to edit the other repos, and which one goes first. Asked in the round's questions file.
+		- 2026-10-24: JC will move the projects, so rounds leave it alone.
 
 - C: build 3.0 without shcl 2.0
 	- ID: 2026101611292826
