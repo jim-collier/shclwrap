@@ -400,23 +400,6 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Progress log:
 		- 2026-10-23: Split into 2026102321270143 (the triage), 2026102321270148 (the lists made fatal), 2026102321270154 (CTU into shcl), and 2026102321270159 (gcc at `-O0`).
 
-- `make analyze` passes on a clang analyzer finding
-	- ID: 2026102322354803
-	- Type: Bug
-	- Status: Queued
-	- Severity: Avg
-	- Opened: 2026-10-23 22:35
-	- Related IDs: 2026102321270159
-	- Steps to reproduce:
-		- Run `make analyze ANALYZE_C=<file>` on a file with a leak that clang reports and gcc doesn't, such as vGBqv's probe with `GCC_ANALYZE` set to `-O1`.
-	- Incorrect behavior: clang prints `warning: Potential leak of memory pointed to by 'p' [unix.Malloc]`, and make exits 0.
-	- Expected behavior: a clang analyzer finding fails the target, as the Makefile's comment says it does.
-	- Reproduced: 2026-10-23, on the host's clang 19.
-	- Possible cause: `-Werror` doesn't reach the analyzer's own warnings. `-Xanalyzer -analyzer-werror` made clang 19 exit 1 on the same file.
-	- Notes:
-		- Nothing hides behind it today. Neither the host's clang 19 nor the container's clang-22 reports anything in our files.
-		- `analyze-shcl` and the CTU pass read clang's output through `cicd/shcl_known.py`, so they aren't affected.
-
 - Shared cases fail on a Windows clone with Git's default line ends
 	- ID: 2026102323122721
 	- Type: Bug
@@ -1582,6 +1565,33 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Swept: every row of design.md's "evens out" table has a case or an API test that runs on C 1.2 and 2.0, but the 2.x upgrade refusal, which is 3.0's alone. Every call `shclw3.c` defines is in `shclw1.c` and `shclw2.c`, which each link checks. The notes in `shclw.h` and design.md that hold only on 3.0 now say so.
 	- Closed: 20261017-11325800
 	- Acceptance signoff: Self-closed: every shared case passes on all 3 versions. The memory growth goes away with 1.2 and 2.0, in 2026101613005800.
+
+- `make analyze` passes on a clang analyzer finding
+	- ID: 2026102322354803
+	- Type: Bug
+	- Status: Done
+	- Severity: Avg
+	- Opened: 2026-10-23 22:35
+	- Related IDs: 2026102321270159
+	- Steps to reproduce:
+		- Run `make analyze ANALYZE_C=<file>` on a file with a leak that clang reports and gcc doesn't, such as vGBqv's probe with `GCC_ANALYZE` set to `-O1`.
+	- Incorrect behavior: clang prints `warning: Potential leak of memory pointed to by 'p' [unix.Malloc]`, and make exits 0.
+	- Expected behavior: a clang analyzer finding fails the target, as the Makefile's comment says it does.
+	- Reproduced: 2026-10-23, on the host's clang 19.
+	- Possible cause: `-Werror` doesn't reach the analyzer's own warnings. `-Xanalyzer -analyzer-werror` made clang 19 exit 1 on the same file.
+	- Actual cause: as above. `-Werror` covers compiler warnings only, and the analyzer's checks print as warnings outside it.
+	- Notes:
+		- Nothing hides behind it today. Neither the host's clang 19 nor the container's clang-22 reports anything in our files.
+		- `analyze-shcl` and the CTU pass read clang's output through `cicd/shcl_known.py`, so they aren't affected.
+	- Progress log:
+		- 2026-10-24: Both clang lines in `make analyze` now take their flags from one `CLANG_ANALYZE` in `source/c/Makefile`, with `-analyzer-werror` in it. A finding now prints as `error:` and fails the target. The Makefile comment says why.
+	- Actual fix: `-Xanalyzer -analyzer-werror` on `make analyze`'s clang lines.
+	- Verified: with gcc switched off, the planted leak passed `make analyze` before the fix and failed it after, on the host's clang 19 and in the container's clang-22. `bash cicd/c-checks.bash lint 3 WORK` passed with the new probe, and failed at it with the flag taken out. `make analyze` over our files on the host passed. `cicd/cicd.bash --ci --quick -y`, `lint-report.bash` and shellcheck passed.
+	- Swept: `analyze-shcl`'s clang line only writes a report, which `shcl_known.py` judges, so it stays without the flag. The CTU pass and its probe judge their logs the same way. clang-tidy's `clang-analyzer-*` checks fail through `WarningsAsErrors: '*'`. gcc's analyzer lines fail through `-Werror`, per vGBqv. Go, Rust and Python have no clang analyzer pass.
+	- Branch: round-1024
+	- Test case: vGS64, in `cicd/c-in-container.bash` lint mode: with gcc switched off, vGBqv's leak must fail `make analyze` with clang's `unix.Malloc`.
+	- Acceptance signoff: Self-closed: a mechanical fix with a regression test watched both ways, and nothing in our code is reported.
+	- Closed: 2026-10-24 09:00
 
 - clang-tidy refuses a cast in the upgrade line lists
 	- ID: 2026102114534365

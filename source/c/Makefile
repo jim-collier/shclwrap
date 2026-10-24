@@ -120,18 +120,20 @@ lint:
 	$(CLANG_TIDY) --quiet $(LIB) shclw-drive.c tests/api_test.c -- -std=c11 -I. -I$(SHCL_DIR)
 	$(CLANG_TIDY) --quiet shclw3_v2.c -- -std=c11 -I. -I$(SHCL2_DIR)
 
-# Analyzer diagnostics must be clean; -Werror makes both compiler frontends fail.
+# Analyzer diagnostics must be clean. -Werror fails gcc's, but doesn't reach
+# clang's own checks, which need -analyzer-werror.
 # gcc's at -O0, since -O1 deletes a write-only malloc/free pair before the
 # analyzer sees it, leak and all. The -O1 warnings come from the test builds.
 GCC_ANALYZE := -std=c17 -O0 -g -fanalyzer
+CLANG_ANALYZE := --analyze -std=c11 -O1 -g -Xanalyzer -analyzer-werror -Xanalyzer -analyzer-output=text
 ANALYZE_C := $(LIB) shclw-drive.c tests/api_test.c
 analyze:
 	@set -e; for file in $(ANALYZE_C); do \
 		$(CC15) $(GCC_ANALYZE) $(WARN) -Werror -I. -I$(SHCL_DIR) -c -o /dev/null "$$file"; \
-		$(CLANG) --analyze -std=c11 -O1 -g $(WARN) -Werror -I. -I$(SHCL_DIR) -Xanalyzer -analyzer-output=text -o /dev/null "$$file"; \
+		$(CLANG) $(CLANG_ANALYZE) $(WARN) -Werror -I. -I$(SHCL_DIR) -o /dev/null "$$file"; \
 	done
 	$(CC15) $(GCC_ANALYZE) $(WARN) -Werror -I. -isystem $(SHCL2_DIR) -c -o /dev/null shclw3_v2.c
-	$(CLANG) --analyze -std=c11 -O1 -g $(WARN) -Werror -I. -isystem $(SHCL2_DIR) -Xanalyzer -analyzer-output=text -o /dev/null shclw3_v2.c
+	$(CLANG) $(CLANG_ANALYZE) $(WARN) -Werror -I. -isystem $(SHCL2_DIR) -o /dev/null shclw3_v2.c
 
 # shcl's own code, which every program built on this runs. Not -isystem, and
 # clang told to look in headers, or neither reports a thing in shcl.h. No style

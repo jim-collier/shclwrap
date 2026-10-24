@@ -75,6 +75,9 @@ int shclw_probe_leak(int flag) { char *p = malloc(64); if (!p) return -1; if (fl
 EOF
 		if make_c analyze ANALYZE_C="${probe_dir}/leak.c" >"${probe_dir}/leak.out" 2>&1; then echo "make analyze passed a planted leak" >&2; exit 1; fi
 		grep -q 'analyzer-malloc-leak' "${probe_dir}/leak.out" || { cat "${probe_dir}/leak.out" >&2; echo "gcc's analyzer missed the planted leak" >&2; exit 1; }
+		## Test vGS64: a clang analyzer finding alone must fail make analyze. gcc is switched off.
+		if make_c analyze ANALYZE_C="${probe_dir}/leak.c" CC15=true >"${probe_dir}/leak-clang.out" 2>&1; then echo "make analyze passed a clang analyzer finding" >&2; exit 1; fi
+		grep -q 'unix\.Malloc' "${probe_dir}/leak-clang.out" || { cat "${probe_dir}/leak-clang.out" >&2; echo "clang's analyzer missed the planted leak" >&2; exit 1; }
 		make_c -j "${jobs}" analyze-shcl SHCL_REPORT=/artifacts/c-analyze-shcl
 		make_c lint strict analyze format-check
 		;;
