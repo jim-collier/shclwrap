@@ -170,6 +170,11 @@ EOF
 				-Xclang -analyzer-config -Xclang "ctu-dir=${ctu_dir}" -Xclang -analyzer-output=text \
 				-o /dev/null "${root}/source/c/${src}" >"${artifact_dir}/ctu-v3-${src}.log" 2>&1
 		done
+		ctu_found=0
+		for src in "${ctu_sources[@]}"; do
+			if [[ -s "${artifact_dir}/ctu-v3-${src}.log" ]]; then echo "CTU findings; see ${artifact_dir}/ctu-v3-${src}.log" >&2; ctu_found=1; fi
+		done
+		((ctu_found == 0)) || exit 1
 		probe_dir="/work/c-leak-probes"
 		mkdir -p "${probe_dir}"
 		cat > "${probe_dir}/leak.c" <<'EOF'

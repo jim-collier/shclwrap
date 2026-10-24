@@ -60,9 +60,9 @@ const char *shclw_kind_name(shclw_kind k) {
 
 const char *shclw_severity_name(shclw_severity s) { return s == SHCLW_SEV_ERROR ? "error" : "hint"; }
 
-shclw_kind shclw_i_fail(shclw_error *err, shclw_kind kind, const char *path, const char *why, int sys_errno) {
+static void set_error(shclw_error *err, shclw_kind kind, const char *path, const char *why, int sys_errno) {
 	if (!err) {
-		return kind;
+		return;
 	}
 	err->kind = kind;
 	err->sys_errno = sys_errno;
@@ -78,15 +78,26 @@ shclw_kind shclw_i_fail(shclw_error *err, shclw_kind kind, const char *path, con
 	if (at > 0 && sys_errno && (size_t)at < sizeof err->msg) {
 		(void)snprintf(err->msg + at, sizeof err->msg - (size_t)at, ": %s", strerror(sys_errno));
 	}
+}
+
+// No branches, so clang's analyzer inlines it at any call depth and sees that
+// a failure keeps its kind. Past its depth limit it guessed SHCLW_OK.
+shclw_kind shclw_i_fail(shclw_error *err, shclw_kind kind, const char *path, const char *why, int sys_errno) {
+	set_error(err, kind, path, why, sys_errno);
 	return kind;
 }
 
-shclw_kind shclw_i_ok(shclw_error *err) {
+static void clear_error(shclw_error *err) {
 	if (err) {
 		err->kind = SHCLW_OK;
 		err->sys_errno = 0;
 		err->msg[0] = '\0';
 	}
+}
+
+// No branches, as with shclw_i_fail.
+shclw_kind shclw_i_ok(shclw_error *err) {
+	clear_error(err);
 	return SHCLW_OK;
 }
 

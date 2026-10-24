@@ -738,24 +738,6 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- Without `--ci`, the format stage rewrites tracked files with `gofmt -w`, `cargo fmt`, and `clang-format -i`.
 		- Until then a full test run goes in 2 steps, `--ci --leakcheck --no-sync -y` and then the fuzz by hand.
 
-- CTU pass reports a null pointer to memcmp in the upgrade
-	- ID: 2026102320384131
-	- Type: Bug
-	- Status: Queued
-	- Severity: Low
-	- Opened: 2026-10-23 20:38
-	- Related IDs: 2026101513330009, 2026102113393169
-	- Steps to reproduce [Bug]:
-		- Run `bash cicd/c-checks.bash leakcheck 3 WORK` and read `cicd/artifacts/leakcheck/c-leakcheck-v3/ctu-v3-shclw3.c.log`.
-	- Incorrect behavior [Bug]:
-		- `shclw3.c:1491`, in `upgraded_ends`: "Null pointer passed to 1st parameter expecting 'nonnull'" (core.NonNullParamChecker), on `memcmp(t, text, len)`.
-	- Expected behavior [Bug]:
-		- The CTU logs are empty, as the other 5 are.
-	- Reproduced [Bug]: 2026-10-23, at round-1023 with 2026101513330009's fix, the first leak run since 2026-10-21 to reach CTU.
-	- Possible cause [Bug]: `t` can stay NULL when `shclw_i_place_block` succeeds with an empty result, and `memcmp` with a NULL pointer is undefined even at length 0. Not checked.
-	- Notes:
-		- The CTU logs are written but nothing reads them, so this doesn't fail the run.
-
 - Say which layer a read came from
 	- ID: 2026102114101028
 	- Type: Enhancement
@@ -944,6 +926,35 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- The copy beside the wrapper wins over the installed one, since bundling it is a choice. Waits on JC with the parent's question.
 	- Commit: a4909af
 	- Test case: `source/python/tests/test_shclw.py`, `test_copied` and `test_none`.
+
+- CTU pass reports a null pointer to memcmp in the upgrade
+	- ID: 2026102320384131
+	- Type: Bug
+	- Status: Done
+	- Severity: Low
+	- Opened: 2026-10-23 20:38
+	- Related IDs: 2026101513330009, 2026102113393169
+	- Steps to reproduce [Bug]:
+		- Run `bash cicd/c-checks.bash leakcheck 3 WORK` and read `cicd/artifacts/leakcheck/c-leakcheck-v3/ctu-v3-shclw3.c.log`.
+	- Incorrect behavior [Bug]:
+		- `shclw3.c:1491`, in `upgraded_ends`: "Null pointer passed to 1st parameter expecting 'nonnull'" (core.NonNullParamChecker), on `memcmp(t, text, len)`.
+	- Expected behavior [Bug]:
+		- The CTU logs are empty, as the other 5 are.
+	- Reproduced [Bug]: 2026-10-23, at round-1023 with 2026101513330009's fix, the first leak run since 2026-10-21 to reach CTU. Also on the host's clang 19.
+	- Possible cause [Bug]: `t` can stay NULL when `shclw_i_place_block` succeeds with an empty result, and `memcmp` with a NULL pointer is undefined even at length 0. Not checked.
+	- Actual cause [Bug]:
+		- A false report. `shclw_i_place_block` never returns OK with no text. The path is 6 calls deep, past the analyzer's inlining depth, so it didn't follow `shclw_i_fail` and guessed that a failed allocation returned `SHCLW_OK`. With the always-inline size raised, the report went away with no code change.
+	- Notes:
+		- The CTU logs are written but nothing reads them, so this doesn't fail the run.
+	- Actual fix [Bug]:
+		- `shclw_i_fail` and `shclw_i_ok` have no branches now, with the message work moved to a helper, so the analyzer inlines them at any depth.
+		- A CTU log that isn't empty fails the leak run.
+	- Verified: the leak run passed (CodeQL, CTU with all 6 logs empty, the heaptrack soak). With the old `shclw.c` and the new check, the same run failed on this finding. Also the C container lint, the sanitized C tests, and `cicd.bash --ci --quick -y`.
+	- Swept: every function in `source/c` that returns a `shclw_kind` from an `shclw_error`. `too_new` and `not_finite` have no branches, and `set_err` maps a status. All 6 CTU logs are empty.
+	- Branch: round-1023
+	- Test case: the leak run's CTU step, which now fails on any finding.
+	- Acceptance signoff: Self-closed: a false report, and the new check was watched to fail on it.
+	- Closed: 2026-10-23 21:20
 
 - Report blocks that shcl merged because they share a name
 	- ID: 2026101513330009
