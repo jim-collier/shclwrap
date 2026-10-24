@@ -182,7 +182,7 @@ The full list of calls, and what the wrapper does differently from each shcl ver
 
 ## Building from source
 
-Go 1.21 or newer, Rust 1.88 or newer, Python 3.11 or newer, and a C11 compiler. The C lint also wants gcc-15, clang-format, and clang-tidy. The pipeline pins Rust 1.96 in `source/rust/rust-toolchain.toml`.
+Go 1.21 or newer, Rust 1.88 or newer, Python 3.11 or newer, and a C11 compiler. The C lint also wants gcc-15, clang-format, clang-tidy, and mingw-w64's gcc. The pipeline pins Rust 1.96 in `source/rust/rust-toolchain.toml`.
 
 ~~~bash
 cicd/cicd.bash           # everything: format, lint, tests, leak checks, and fuzzing

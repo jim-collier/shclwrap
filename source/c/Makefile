@@ -8,6 +8,7 @@
 #   make SHCL_DIR=... SHCL2_DIR=... test     API tests: sanitized, plain, and built as C++
 #   make SHCL_DIR=... SHCL2_DIR=... drive    the sanitized shclw-drive, for the shared cases
 #   make SHCL_DIR=... SHCL2_DIR=... strict   compile only, with gcc-15 at C17
+#   make SHCL_DIR=... SHCL2_DIR=... mingw    compile only, with mingw-w64 gcc
 #   make SHCL_DIR=... SHCL2_DIR=... lint     clang-tidy
 #   make SHCL_DIR=... SHCL2_DIR=... analyze-shcl   the analyzers over shcl itself, held to shcl-known/
 #   make format-check | format
@@ -26,6 +27,7 @@ OUT      ?= build
 CC       ?= gcc
 CXX      ?= g++
 CC15     ?= gcc-15
+MINGW_CC ?= x86_64-w64-mingw32-gcc
 CLANG    ?= clang
 CLANG_TIDY ?= clang-tidy
 CLANG_FORMAT ?= clang-format
@@ -46,7 +48,7 @@ V2_DEPS := shclw3_v2.h shclw3_v2_names.h $(SHCL2_DIR)/shcl.h
 
 FORMATTED := $(wildcard *.c *.h tests/*.c)
 
-.PHONY: all test drive drive-plain strict lint analyze analyze-shcl analyze-shcl-report names format format-check clean FORCE
+.PHONY: all test drive drive-plain strict mingw lint analyze analyze-shcl analyze-shcl-report names format format-check clean FORCE
 all: test drive strict
 
 $(OUT)/asan $(OUT)/plain $(OUT)/cxx:
@@ -115,6 +117,12 @@ names: $(OUT)/plain/shclw3_v2.o $(OUT)/plain/shclw3_v2_impl.o
 strict:
 	$(CC15) -std=c17 $(WARN) -I. -I$(SHCL_DIR) -fsyntax-only $(LIB) shclw-drive.c tests/api_test.c
 	$(CC15) -std=c17 $(WARN) -I. -I$(SHCL2_DIR) -fsyntax-only shclw3_v2.c
+
+# Test vGSU9: the Windows build at the same warnings. api_test.c waits on
+# 2026102323122732.
+mingw:
+	$(MINGW_CC) -std=c11 $(WARN) -I. -I$(SHCL_DIR) -fsyntax-only $(LIB) shclw-drive.c
+	$(MINGW_CC) -std=c11 $(WARN) -I. -I$(SHCL2_DIR) -fsyntax-only shclw3_v2.c
 
 lint:
 	$(CLANG_TIDY) --quiet $(LIB) shclw-drive.c tests/api_test.c -- -std=c11 -I. -I$(SHCL_DIR)

@@ -31,6 +31,8 @@ docker build --quiet --file "${here}/C.Dockerfile" \
 	--build-arg "GCC15_PACKAGE=${PIN_GCC15_PACKAGE}" \
 	--build-arg "CLANG_PACKAGE=${PIN_CLANG_PACKAGE}" \
 	--build-arg "HEAPTRACK_PACKAGE=${PIN_HEAPTRACK_PACKAGE}" \
+	--build-arg "MINGW_PACKAGE=${PIN_MINGW_PACKAGE}" \
+	--build-arg "MINGW_HEADERS_PACKAGE=${PIN_MINGW_HEADERS_PACKAGE}" \
 	--tag "${tag}" "${here}"
 newId="$(docker image inspect --format '{{.Id}}' "${tag}")"
 

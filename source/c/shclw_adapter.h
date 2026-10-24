@@ -8,6 +8,20 @@
 
 #include "shclw.h"
 
+// mingw-w64's math.h passes a double to the float branch of these too, which
+// -Wconversion rejects. The builtins are what glibc uses (2026102323122737).
+#if defined(__MINGW32__) && !defined(__cplusplus)
+#include <math.h>
+#undef signbit
+#undef isnan
+#undef isinf
+#undef isfinite
+#define signbit(x) __builtin_signbit(x)
+#define isnan(x) __builtin_isnan(x)
+#define isinf(x) __builtin_isinf(x)
+#define isfinite(x) __builtin_isfinite(x)
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif
