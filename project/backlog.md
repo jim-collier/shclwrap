@@ -715,6 +715,22 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- There's no CLI of its own here. The nearest thing is the ops runners the shared cases drive.
 		- Both local Macs are Intel, so this is the only Apple Silicon run.
 
+- cicd flags for a full run that changes nothing in the tree
+	- ID: 2026102319573100
+	- Type: Enhancement
+	- Status: Queued
+	- Priority: Avg
+	- Opened: 2026-10-23
+	- Opened by: JC
+	- Requirements:
+		- One command line runs every check without rewriting a tracked file.
+		- A flag to turn off each stage that has none today: format, lint, and tests.
+		- Fuzz can run with `--ci`, which today turns it off with no way back on.
+		- Give the C container a name or label, so a run's container can be found.
+	- Notes:
+		- Without `--ci`, the format stage rewrites tracked files with `gofmt -w`, `cargo fmt`, and `clang-format -i`.
+		- Until then a full test run goes in 2 steps, `--ci --leakcheck --no-sync -y` and then the fuzz by hand.
+
 - Say which layer a read came from
 	- ID: 2026102114101028
 	- Type: Enhancement
