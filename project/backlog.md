@@ -261,6 +261,33 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Acceptance signoff: JC, 2026-10-24.
 	- Closed: 2026-10-24
 
+- Shared cases fail on a Windows clone with Git's default line ends
+	- ID: 2026102323122721
+	- Type: Bug
+	- Status: Waiting on automated testing
+	- Needs external testing: Windows, on vm925w: the Rust, Python and C shared cases from a clone with Git for Windows' default `core.autocrlf=true`.
+	- Severity: Avg
+	- Opened: 2026-10-23 23:12
+	- Related IDs: 2026101512024174, 2026101513330014
+	- Steps to reproduce [Bug]:
+		- On Windows, with Git for Windows' `core.autocrlf=true` from its system gitconfig, clone the repo and run `cargo test --all-features` in `source/rust`.
+	- Incorrect behavior [Bug]:
+		- All 59 shared cases fail in Rust, and most in Python, since each case's `doc.shcl` and ops are checked out with CRLF.
+	- Expected behavior [Bug]:
+		- The cases pass on a default clone, as they do with `core.autocrlf` off.
+	- Reproduced [Bug]: 2026-10-23, on vm925w. 2026-10-24 on Linux too, from a clone with `core.autocrlf=true`: Rust failed 59 of 59 cases, and Python most of them.
+	- Possible cause [Bug]: the repo has no `.gitattributes`, so test data that must stay LF, such as `tests/cases/`, gets the clone's line ends. Case 027 has CRLF on purpose and would need its own rule.
+	- Actual cause [Bug]:
+		- With no `.gitattributes`, `core.autocrlf=true` checks out every text file with CRLF. The cases, the sha256 check of the 2.0 copy `_shclw_shcl2.py`, and gofmt's check all want the bytes as committed.
+	- Actual fix [Bug]: `.gitattributes` checks out every text file as LF, and leaves `tests/cases/` exactly as committed, so the 4 CRLF case files in 027 and 051 keep their CRLF.
+	- Progress log:
+		- 2026-10-24: Verified on Linux from clones with `core.autocrlf=true`. Without the fix Rust failed 59 of 59 cases, Python's cases failed, and gofmt listed 14 files. With it Rust, Python's cases and tests, and Go passed, gofmt listed none, and the CRLF case files stayed CRLF. Also `cicd.bash --ci --quick -y`.
+		- Swept: the readers of `tests/cases/` in all 4 languages go through the one rule. Outside the cases, the 2.0 copy's sha256, the bash scripts, the pre-push hook and the Makefile want LF too, which the default rule gives. No other tracked file has CRLF.
+	- Decisions:
+		- LF for every text file, not only the cases, since gofmt, bash and the 2.0 copy's sha256 need it too. A Windows editor set to CRLF still gets LF.
+	- Commit: 88e56c1
+	- Test case: vGSLJ, `cicd/eol-test.bash`, in the tests stage. It checks out every tracked file with `core.autocrlf=true` and compares each to what's committed. It failed on 269 files without `.gitattributes`, and passes with it.
+
 - Create-only Write
 	- ID: 2026101513330015
 	- Type: Feature
@@ -399,22 +426,6 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Estimated effort: Avg
 	- Progress log:
 		- 2026-10-23: Split into 2026102321270143 (the triage), 2026102321270148 (the lists made fatal), 2026102321270154 (CTU into shcl), and 2026102321270159 (gcc at `-O0`).
-
-- Shared cases fail on a Windows clone with Git's default line ends
-	- ID: 2026102323122721
-	- Type: Bug
-	- Status: Queued
-	- Severity: Avg
-	- Opened: 2026-10-23 23:12
-	- Related IDs: 2026101512024174, 2026101513330014
-	- Steps to reproduce [Bug]:
-		- On Windows, with Git for Windows' `core.autocrlf=true` from its system gitconfig, clone the repo and run `cargo test --all-features` in `source/rust`.
-	- Incorrect behavior [Bug]:
-		- All 59 shared cases fail in Rust, and most in Python, since each case's `doc.shcl` and ops are checked out with CRLF.
-	- Expected behavior [Bug]:
-		- The cases pass on a default clone, as they do with `core.autocrlf` off.
-	- Reproduced [Bug]: 2026-10-23, on vm925w.
-	- Possible cause [Bug]: the repo has no `.gitattributes`, so test data that must stay LF, such as `tests/cases/`, gets the clone's line ends. Case 027 has CRLF on purpose and would need its own rule.
 
 - C doesn't build with mingw-w64 at the Makefile's warnings
 	- ID: 2026102323122737
