@@ -176,6 +176,51 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 			- Add shcl's two implementation files to the CTU map, so the CTU pass follows our calls into shcl.
 			- gcc's analyzer at `-O1` missed a planted leak it found at `-O0`. Check whether `-O0` finds more in our code, and what it costs.
 	- Estimated effort: Avg
+	- Progress log:
+		- 2026-10-23: Split into 2026102321270143 (the triage), 2026102321270148 (the lists made fatal), 2026102321270154 (CTU into shcl), and 2026102321270159 (gcc at `-O0`).
+
+- Sort shcl's analyzer and CodeQL findings
+	- ID: 2026102321270143
+	- Type: Task
+	- Status: Waiting on UAT
+	- Priority: High
+	- Opened: 2026-10-23 21:27
+	- Parent ID: 2026102113393169
+	- Requirements:
+		- Sort each finding in `cicd/artifacts/leakcheck/c-analyze-shcl/`, and each shcl one in the leak run's `codeql.sarif`, into a real bug or a false report. Real bugs in 3.0 get reported to shcl. 2.0's are listed as accepted, each with why.
+	- Progress log:
+		- 2026-10-23: Read all 46. In 3.0: gcc 1, clang 15, CodeQL 14. In 2.0: clang 8, CodeQL 8. None is a bug in effect. Each one's reason is in `source/c/shcl-known/<pin>.txt`.
+		- Most of clang's null dereferences have one shape: a map entry is put only after the element it indexes is pushed, and the analyzer doesn't carry that across the two. Two more come from `arena_panic`, which never returns but isn't `_Noreturn`.
+		- gcc's leak is the `volatile` pointer in `shcl_generate`. The null check reads it again.
+		- CodeQL's 3 stack-address results are the recovery point. Every caller read disarms it on each way out.
+		- Nothing goes to shcl as a bug. Two small changes would quiet the analyzers for every program that builds shcl: `_Noreturn` on `arena_panic`, and a plain pointer for `own` in `shcl_generate`. Drafted in the round report for JC, not filed.
+	- Decisions:
+		- 3.0's two stream findings at 13605 are harmless, not false. A failed read does loop for one more `fread`, but the file is refused after it.
+	- Test case: the lists are what 2026102321270148's gate matches against.
+	- Verified: `cicd/shcl_known.py` matched the saved reports and `codeql.sarif` against both lists exactly, and so did a fresh container lint with clang-22.
+	- Acceptance signoff: waits on JC, since some calls are on security queries (`toctou-race-condition`, `path-injection`, `stack-address-escape`).
+
+- CTU pass follows our calls into shcl
+	- ID: 2026102321270154
+	- Type: Task
+	- Status: Queued
+	- Priority: High
+	- Opened: 2026-10-23 21:27
+	- Parent ID: 2026102113393169
+	- Prereq IDs: 2026102321270148
+	- Requirements:
+		- Add shcl's two implementation files, `tests/shcl_impl.c` and `shclw3_v2_impl.c`, to the CTU map, so the CTU pass follows our calls into shcl.
+		- Since 86d5c2f any non-empty CTU log fails the leak run. Findings inside shcl go to the pin's known list, the way CodeQL's do.
+
+- gcc's analyzer at `-O0`
+	- ID: 2026102321270159
+	- Type: Task
+	- Status: Queued
+	- Priority: Avg
+	- Opened: 2026-10-23 21:27
+	- Parent ID: 2026102113393169
+	- Requirements:
+		- gcc's analyzer at `-O1` missed a planted leak it found at `-O0`. Check whether `-O0` finds more in our code, and what it costs.
 
 - Layered loading
 	- ID: 2026101512024156
@@ -926,6 +971,27 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- The copy beside the wrapper wins over the installed one, since bundling it is a choice. Waits on JC with the parent's question.
 	- Commit: a4909af
 	- Test case: `source/python/tests/test_shclw.py`, `test_copied` and `test_none`.
+
+- Make shcl's analyzer and CodeQL findings fatal, per pin
+	- ID: 2026102321270148
+	- Type: Task
+	- Status: Done
+	- Priority: High
+	- Opened: 2026-10-23 21:27
+	- Parent ID: 2026102113393169
+	- Prereq IDs: 2026102321270143
+	- Requirements:
+		- Make the passes fatal, with a list of known findings per pin, matched exactly. A pin bump that adds a finding fails, and one that loses one asks for the list to be pruned.
+	- Progress log:
+		- 2026-10-23: Each pin's list is `source/c/shcl-known/<rev>.txt`, a line per finding with its reason. `cicd/shcl_known.py` matches a report or the SARIF against it, and names each finding that's new or gone. `make analyze-shcl` and the leak run's CodeQL step fail on either. `make analyze-shcl-report` writes the reports only, and `shcl_known.py list` prints a report as list lines, for a new pin.
+	- Decisions:
+		- A finding is matched on tool, file, line, column and check, not on the message, since clang 19 and 22 word some checks differently.
+		- This reverses 2026101916500102's "shcl's findings report rather than fail for now", as this item asked.
+	- Verified: `bash cicd/c-checks.bash lint 3 WORK` passed with gcc-15 and clang-22, both pins matching their lists, probe vGAuM included. `leakcheck-resume` over the saved `codeql.sarif` passed CodeQL, CTU and the heaptrack soak, and failed naming the finding with one line taken out of 3.0's list. The compare also failed on a dropped, an added, and a doubled line, and on a pin with no list. `cicd/cicd.bash --ci --quick -y`, `cicd/flags-test.bash`, ruff and shellcheck passed.
+	- Swept: every reader of shcl's findings: `make analyze-shcl`, the lint probe, the CodeQL split, and the lint stage's line in `cicd.bash`. The CTU pass reads our files only until 2026102321270154.
+	- Test case: vGAuM, in `cicd/c-in-container.bash` lint mode.
+	- Acceptance signoff: Self-closed: the gate was watched to fail both ways, and passes on both pins.
+	- Closed: 2026-10-23 21:53
 
 - CTU pass reports a null pointer to memcmp in the upgrade
 	- ID: 2026102320384131

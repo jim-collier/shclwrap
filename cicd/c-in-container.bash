@@ -53,11 +53,19 @@ void shcl_probe_use(int *p);
 void shcl_probe(void) { int *p = malloc(sizeof *p); if (!p) return; shcl_probe_use(p); free(p); free(p); }
 #endif
 EOF
-		make_c -j "${jobs}" analyze-shcl SHCL_DIR="${probe_dir}/inc" SHCL2_DIR="${probe_dir}/inc" SHCL_REPORT="${probe_dir}/out" >/dev/null
+		make_c -j "${jobs}" analyze-shcl-report SHCL_DIR="${probe_dir}/inc" SHCL2_DIR="${probe_dir}/inc" SHCL_REPORT="${probe_dir}/out" >/dev/null
 		## By check name at the planted line. clang 22 reworded clang 19's "Attempt to free released memory".
 		for log in shcl3.gcc shcl3.clang shcl2.gcc shcl2.clang; do
 			grep -qE '/shcl\.h:4:[0-9]+: warning: .*\[(-Wanalyzer-double-free|unix\.Malloc)\]' "${probe_dir}/out/${log}.txt" || { echo "analyze-shcl missed the planted double free (${log})" >&2; exit 1; }
 		done
+		## Test vGAuM: the known list must fail on the planted finding, pass once it's listed, and fail once it's gone.
+		python3 "${here}/shcl_known.py" list gcc "${probe_dir}/out/shcl3.gcc.txt" > "${probe_dir}/known.txt"
+		python3 "${here}/shcl_known.py" list clang "${probe_dir}/out/shcl3.clang.txt" >> "${probe_dir}/known.txt"
+		make_c analyze-shcl SHCL_DIR="${probe_dir}/inc" SHCL2_DIR="${probe_dir}/inc" SHCL_REPORT="${probe_dir}/out" SHCL_KNOWN="${probe_dir}/known.txt" SHCL2_KNOWN="${probe_dir}/known.txt" >/dev/null
+		: > "${probe_dir}/none.txt"
+		if make_c analyze-shcl SHCL_DIR="${probe_dir}/inc" SHCL2_DIR="${probe_dir}/inc" SHCL_REPORT="${probe_dir}/out" SHCL_KNOWN="${probe_dir}/none.txt" SHCL2_KNOWN="${probe_dir}/known.txt" >/dev/null 2>&1; then echo "analyze-shcl passed a finding not in its list" >&2; exit 1; fi
+		printf 'clang\tshcl.h:99:1\tcore.NullDereference\n' >> "${probe_dir}/known.txt"
+		if make_c analyze-shcl SHCL_DIR="${probe_dir}/inc" SHCL2_DIR="${probe_dir}/inc" SHCL_REPORT="${probe_dir}/out" SHCL_KNOWN="${probe_dir}/known.txt" SHCL2_KNOWN="${probe_dir}/known.txt" >/dev/null 2>&1; then echo "analyze-shcl passed a listed finding that's gone" >&2; exit 1; fi
 		make_c -j "${jobs}" analyze-shcl SHCL_REPORT=/artifacts/c-analyze-shcl
 		make_c lint strict analyze format-check
 		;;
@@ -147,9 +155,9 @@ EOF
 			/work/codeql-queries/cpp/ql/src/AlertSuppression.ql \
 			--format=sarif-latest --output="${artifact_dir}/codeql.sarif"
 		fi
-		## Findings in shcl itself are reported, not fatal, until they're triaged (backlog 2026102113393169).
+		## Findings in shcl itself must match each pin's list in source/c/shcl-known/ (backlog 2026102321270148).
 		openQuery='[.runs[].results[]? | select(([.suppressions[]?.kind] | index("inSource")) == null) | select((.locations[0].physicalLocation.artifactLocation.uri // "" | startswith("cicd/cache/")) == $shcl)] | length'
-		echo "CodeQL findings in shcl, not fatal yet: $(jq --argjson shcl true "${openQuery}" "${artifact_dir}/codeql.sarif")"
+		python3 "${here}/shcl_known.py" codeql "${root}/source/c/shcl-known" "${artifact_dir}/codeql.sarif" "${SHCL3_REV}" "${SHCL2_REV}" || { echo "CodeQL findings in shcl differ from the known lists; see ${artifact_dir}/codeql.sarif" >&2; exit 1; }
 		[[ "$(jq --argjson shcl false "${openQuery}" "${artifact_dir}/codeql.sarif")" == 0 ]] || { echo "CodeQL findings; see ${artifact_dir}/codeql.sarif" >&2; exit 1; }
 		ctu_dir="/work/ctu/v3"
 		mkdir -p "${ctu_dir}/ast"
