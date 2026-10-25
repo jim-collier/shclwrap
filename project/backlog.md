@@ -454,6 +454,8 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Priority: High
 	- Opened: 2026-10-24 16:40
 	- Opened by: JC
+	- Prereq IDs: 2026102319573100
+		- 2026-10-25: `--no-container` is one of the standard flags there.
 	- Requirements:
 		- Per `Containers` in the shared CICD rules. The C checks already run in a pinned image.
 		- Sweeping override, 2026-10-24: this supersedes any earlier decision on this project that conflicts with it.
@@ -470,6 +472,8 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Opened: 2026-10-24 16:40
 	- Opened by: JC
 	- Related IDs: 2026101916500100, 2026102319573100
+	- Prereq IDs: 2026102319573100
+		- 2026-10-25: `--keep-temp` is one of the standard flags there.
 	- Requirements:
 		- Per the container bullets in `Cleanup after a run` in the shared CICD rules. The C container already runs with `--rm` and an init, and an older C image no container uses is removed.
 		- Sweeping override, 2026-10-24: this supersedes any earlier decision on this project that conflicts with it.
@@ -604,6 +608,8 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Opened: 2026-10-24 16:40
 	- Opened by: JC
 	- Related IDs: 2026101916500100
+	- Prereq IDs: 2026102319573100
+		- 2026-10-25: `--keep-temp` is one of the standard flags there.
 	- Requirements:
 		- Per `Temp files` and `Safe removal` in the shared CICD rules. Each run already makes a scratch folder of its own with an ownership mark, and removes it at exit.
 		- Sweeping override, 2026-10-24: this supersedes any earlier decision on this project that conflicts with it.
