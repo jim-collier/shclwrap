@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-##	Purpose: Test vGTf8. cicd runs started in the same second each get their own
+##	Purpose: Test decdx. cicd runs started in the same second each get their own
 ##		run log, and lint-report.bash reads the newest (2026102409544336).
 ##	Copyright © 2026 Jim Collier [ID: 2უNაɘ«҂թȹɤξπ๙¿ձϖ]
 ##	SPDX-License-Identifier: MIT
@@ -15,7 +15,7 @@ fCleanup(){
 	return 0
 }
 trap fCleanup EXIT
-fFail(){ echo "vGTf8: $*" >&2; exit 1; }
+fFail(){ echo "decdx: $*" >&2; exit 1; }
 
 ## A stand-in for the start of a cicd run, teeing its output the same way.
 cat > "${scratch}/standin.bash" <<'EOF'
@@ -59,4 +59,4 @@ done
 newest="$(printf '%s\n' "${files[@]##*/}" | sed 's/^run_\([0-9-]*\).*/\1/' | sort | tail -n 1)"
 report="$(bash "${here}/utility/lint-report.bash" --dir "${logs}")" || fFail "lint-report failed: ${report}"
 [[ "${report}" == "CLEAN run_${newest}"* ]] || fFail "lint-report didn't read the newest log, run_${newest}: ${report}"
-echo "OK: runs started in the same second get their own logs (vGTf8)"
+echo "PASS decdx runs started in the same second get their own logs"

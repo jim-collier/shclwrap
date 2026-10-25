@@ -97,8 +97,8 @@ fi
 ##	The last line, not any line: a publish echoes the pre-push gate's nested run,
 ##	done line and all. An unfinished log never gets the marker, since a look taken
 ##	mid-run used to mark it seen and the warnings and abort that followed were
-##	never shown.
-lastLine="$(grep -v '^[[:space:]]*$' "$log" 2>/dev/null | tail -n 1 || true)"
+##	never shown. The run's own cleanup line comes after the done line.
+lastLine="$(grep -v -e '^[[:space:]]*$' -e '^Cleanup: ' "$log" 2>/dev/null | tail -n 1 || true)"
 finished=0
 if [[ "$lastLine" == *"CI/CD: done."* ]] || grep -qE '^\[ FAILED: |CICD ABORTED' "$log" 2>/dev/null; then finished=1; fi
 
@@ -115,10 +115,12 @@ fi
 ##	require, but your code doesn't appear to call" block is informational and prints
 ##	on every run), and the echoed command lines that contain the word: cppcheck's
 ##	`--enable=warning`, and clippy's `-D warnings`, which the pre-push gate's
-##	nested run echoes during publish and which used to read as a finding.
+##	nested run echoes during publish and which used to read as a finding. A test's
+##	own PASS or SKIP line is a result, whatever its name says.
 warns="$(grep -inE 'warning|rustsec-|vulnerab|unmaintained|yanked' "$log" 2>/dev/null \
 	| grep -viE 'generated 0 warnings|: 0 warnings|no warnings|0 warnings emitted' \
-	| grep -viE 'no vulnerabilities found|affected by 0 vulnerabilities|this scan also found|appear to call|^[0-9]+:these vulnerabilities\.$|enable=warning|-D warnings' || true)"
+	| grep -viE 'no vulnerabilities found|affected by 0 vulnerabilities|this scan also found|appear to call|^[0-9]+:these vulnerabilities\.$|enable=warning|-D warnings' \
+	| grep -vE '^[0-9]+:(PASS|SKIP) [0-9a-z]{5} ' || true)"
 if [[ -n "$warns" ]]; then n=$(printf '%s\n' "$warns" | grep -c .); else n=0; fi
 
 ##	A failed run is never CLEAN. Case-sensitive: each tool prints its failure one
@@ -155,3 +157,5 @@ fi
 ##		  fortnight-old run reads as one.
 ##		- 20260919: `[ FAILED: ... ]` counts as a failure. A log with no done or
 ##		  abort line is INCOMPLETE and never marked seen.
+##		- 20261025: A test's PASS or SKIP line isn't a warning.
+##		- 20261025: The Cleanup line after the done line doesn't hide it.

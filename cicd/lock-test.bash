@@ -2,7 +2,7 @@
 
 #  shellcheck disable=2016  ## The grep looks for a literal "${root}".
 
-##	Purpose: Test vGSqu. Two cicd runs in one tree must not overlap, since they
+##	Purpose: Test decc9. Two cicd runs in one tree must not overlap, since they
 ##		share cicd/artifacts/ (2026102323244600). A second run waits for the
 ##		first, and a script the locked run starts doesn't wait on it.
 ##	Copyright © 2026 Jim Collier [ID: 2უNაɘ«҂թȹɤξπ๙¿ձϖ]
@@ -12,7 +12,7 @@ set -Eeuo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 lib="${here}/utility/include/run-lock.bash"
-[[ -f "${lib}" ]] || { echo "vGSqu: no ${lib}" >&2; exit 1; }
+[[ -f "${lib}" ]] || { echo "decc9: no ${lib}" >&2; exit 1; }
 scratch="$(mktemp -d "${TMPDIR:-/tmp}/test_shclw_lock_XXXXXX")"
 touch "${scratch}/.shclw-lock-owned"
 fCleanup(){
@@ -20,7 +20,7 @@ fCleanup(){
 	return 0
 }
 trap fCleanup EXIT
-fFail(){ echo "vGSqu: $*" >&2; exit 1; }
+fFail(){ echo "decc9: $*" >&2; exit 1; }
 
 ## A stand-in for a cicd run: takes the lock, notes when it starts and ends.
 cat > "${scratch}/standin.bash" <<'EOF'
@@ -60,4 +60,4 @@ order="$(paste -sd ' ' "${tree}/order")"
 for script in cicd.bash c-checks.bash; do
 	grep -qF 'fRunLock "${root}" ' "${here}/${script}" || fFail "${script} doesn't take the run lock"
 done
-echo "OK: one cicd run per tree at a time (vGSqu)"
+echo "PASS decc9 one cicd run per tree at a time"
