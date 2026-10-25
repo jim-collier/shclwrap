@@ -660,6 +660,7 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Related IDs: 2026101916500100
 	- Notes:
 		- 2026-10-25: `--keep-temp` is in since `533c1df` (2026102319573100).
+		- 2026-10-25: on macOS the run's scratch path has a `//`, since `$TMPDIR` ends in `/`. The guard refuses that, so build the folder from a `realpath`'d temp root.
 	- Requirements:
 		- Per `Temp files` and `Safe removal` in the shared CICD rules. Each run already makes a scratch folder of its own with an ownership mark, and removes it at exit.
 		- Sweeping override, 2026-10-24: this supersedes any earlier decision on this project that conflicts with it.
@@ -955,6 +956,21 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Expected behavior [Bug]:
 		- Placeholders in the template and quoted tool output pass, so a round's docs gate on the backlog is clean.
 	- Reproduced [Bug]: 2026-10-24, on dev and on round-1024, with the same hits.
+
+- lint-report flags a full run because of a CodeQL query's file name
+	- ID: 2026102509580000
+	- Type: Bug
+	- Status: Queued
+	- Severity: Low
+	- Opened: 2026-10-25 09:58
+	- Opened by: JC
+	- Related IDs: 2026102319573100
+	- Steps to reproduce [Bug]:
+		- `cicd/cicd.bash --backlog-run-full`, then `bash cicd/utility/lint-report.bash`.
+	- Incorrect behavior [Bug]: `FLAG ... (4 warning line(s))`, and every line it lists is CodeQL's progress output for `Diagnostics/ExtractionWarnings.ql`.
+	- Expected behavior [Bug]: CLEAN, since all 21 tests passed and nothing warned.
+	- Reproduced [Bug]: 2026-10-25, on the full run at `2a034a0`.
+	- Possible cause [Bug]: lint-report matches "warning" anywhere in a line, query paths included.
 
 - Say which layer a read came from
 	- ID: 2026102114101028
