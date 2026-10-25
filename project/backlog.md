@@ -142,6 +142,35 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Swept: every `docker build`, `docker run` and prune in cicd is in `c-checks.bash`, `lang-checks.bash` and `docker-tidy.bash`, and dedqv checks them by text. No `rmi -f` or `system prune` anywhere. design.md's `Fuzzing` part was the only doc on the cleanup. The 4 language bindings don't read cicd flags.
 	- Acceptance signoff: the `Cleanup:` line's wording, and the departures under Decisions.
 
+- CICD reset: step output
+	- ID: 2026102416400040
+	- Type: Enhancement
+	- Status: Waiting on UAT
+	- Priority: High
+	- Opened: 2026-10-24 16:40
+	- Opened by: JC
+	- Requirements:
+		- Per the step lines in `CICD style guide` in the shared CICD rules. Each stage already opens with a rule and a `N/5  Name` header.
+		- Sweeping override, 2026-10-24: this supersedes any earlier decision on this project that conflicts with it.
+		- Each step opens with a `Starting` line and closes with a `PASS` or `FAIL` line, both as `Step N of M` with a local timestamp to the hundredth of a second.
+		- The rule is 79 characters wide. Today it's 74.
+		- A step that's turned off isn't counted in the total, and the first section lists those with the flag or reason for each.
+		- One blank line between sections, and one at the end.
+	- Progress log:
+		- 2026-10-25: Built as asked. The output helpers moved to `cicd/utility/include/steps.bash`, with the step lines. cicd.bash lists every step once, in `fStep_Plan`, and each flag that turns one off adds a `fStep_Off` line naming itself, so new flags join there. The steps run off that list, and a run where a step that's on never passed fails at the end.
+		- The first section ends with `Steps` and `Turned off` lines, such as `C leak checks (--ci --quick without --leakcheck)`. `--quiet` now prints the section with only those 2 lines, where it printed nothing before.
+		- A failure closes the open step with FAIL, once, after the `FAILED` or `CICD ABORTED` line. A failure inside `( ... )` still prints the ABORTED line twice, as before, but with one blank line now.
+		2026-10-25: Verified: the full run at `2a034a0` (`cicd/cicd.bash --backlog-run-full`, 2026-10-25 09:18 to 09:30) printed Step 1 to 5 of 5, each with a `Starting` and a `PASS` line to the hundredth of a second, C leak checks and Fuzz included. The rule is 79 wide, the first section lists `Remote sync (--backlog-run-full)` as turned off, and the log has one blank line between sections and one at the end.
+		The log also starts with a blank line, before the first rule.
+	- Decisions:
+		- The step lines and the 79-wide rule go through the existing `fEcho` and `fSection`, which moved with them, so the test runs the same code cicd.bash does.
+	- Branch: round-1025
+	- Commit: 0e66480
+	- Test case: dedm7, `cicd/steps-test.bash`, in cicd's tests stage: the rule, the step lines and their local time, the count leaving out steps turned off, single blank lines, one FAIL from a plain, subshell or `fDie` failure, and the off list with its flags for 8 flag mixes through `--dry-run`.
+	- Verified: dedm7 failed 8 checks against the old cicd.bash and passes now. It also failed with the rule at 78, with steps turned off counted, with the time to the thousandth, with FAIL printed twice from a subshell, with an extra blank line, and with the end check off. `cicd/cicd.bash --ci --quick -y` passed, with Step 1 to 3 of 3 and the off list, and `lint-report.bash` gave CLEAN. Real runs with a failing `gofmt`, a `gofmt` that lists a file, and a failing `staticcheck` inside a subshell each closed their step with one FAIL line and one blank line. shellcheck and vFKCk passed.
+	- Swept: cicd.bash is the only script with sections or step lines. c-checks.bash, c-in-container.bash and the other cicd scripts print no rule. lint-report.bash keys on the done, `FAILED` and `CICD ABORTED` lines, which stay, and vFKCk's `(skipped)` preflight lines stay too. No doc describes the output.
+	- Acceptance signoff: waits on JC, for the wording of the step lines and the turned-off list.
+
 - Layered loading
 	- ID: 2026101512024156
 	- Type: Feature
@@ -368,151 +397,6 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Commit: a18e5f5
 	- Test case: shared case `061-commented-defaults` and new lines in `041-wovenshell`, in all 4 languages, plus the `commented` op in the fuzz.
 	- Acceptance signoff: waits on JC after the full run, for the README line and the calls in Decisions.
-
-- CICD reset: CPU and priority
-	- ID: 2026102416400030
-	- Type: Enhancement
-	- Status: Waiting on automated testing
-	- Needs local test suite run?: Yes, a full run, for CodeQL's thread count and the leak and fuzz stages at a quarter.
-	- Needs external testing: macOS, on b26 or vmKt6m: `cicd/cicd.bash --dry-run` shows a CPU cap and `nice 19`, from the macOS paths for the CPU count and load. Windows, on vm925w: any `win-tests.ps1` run, which now runs below normal with its own count.
-	- Priority: High
-	- Opened: 2026-10-24 16:40
-	- Opened by: JC
-	- Related IDs: 2026101512024174
-	- Requirements:
-		- Per `Machine use` in the shared CICD rules. Half the cores is worked out once already, and cargo and `go test` get it.
-		- Sweeping override, 2026-10-24: this supersedes any earlier decision on this project that conflicts with it.
-		- Every tool that runs in parallel gets the count from that one place, `go vet`, staticcheck, ruff, `make -j` and the C container's own count included.
-		- A busy check at the start and before each step: with the 1-minute load over half the CPU count, the cap drops to a quarter.
-		- A quarter, busy or not, for the hard steps: the leak checks, the sanitized builds, the soak and the fuzz.
-		- `nice -n 19`, plus `ionice -c 3`, over the whole run.
-		- `--cpus` and `--cpu-shares 256` on each `docker run`, and `nice` inside the container too.
-		- The same rules on other hosts, with that host's CPU count and load.
-	- Progress log:
-		- 2026-10-25: `cicd/utility/include/cpu-cap.bash` works out the count and the load, and lowers the priority. `cicd.bash` and `c-checks.bash` both use it, and check the load again at each stage.
-		- The count goes to cargo, `go vet`, `go test`, `go build` and Go's fuzzer as flags. It goes to staticcheck, ruff and Rust's test threads through `GOMAXPROCS`, `RAYON_NUM_THREADS` and `RUST_TEST_THREADS`. The C container gets `--cpus`, `--cpu-shares 256`, `nice -n 19`, and its `make -j` and CodeQL's `--threads` from `SHCLW_JOBS`.
-		- The private Windows scripts `win-tests.ps1` and `win-go-fat.ps1` run below normal, with a count from the CPU count and load.
-		- Verified: `cicd/cicd.bash --ci --quick -y` passed, and `lint-report.bash` gave CLEAN. Its tools and the container's `make` ran at nice 19, with `--cpus 16` at load 5. `c-checks.bash test 3 WORK` passed with `--cpus 8`. shellcheck is clean, and PSScriptAnalyzer is clean on the Windows scripts.
-		- Swept: every `cargo`, `go` and `docker run` call in `cicd/`, every `nproc`, and the private tools. The other private tools run serially, or go through `c-checks.bash`.
-	- Decisions:
-		- `c-checks.bash` checks the load itself, not taking `cicd.bash`'s count, since it's a step of its own and also runs alone.
-		- Inside the container the count comes only from `SHCLW_JOBS`, since `nproc` there sees every host CPU.
-		- Windows has no load average, so busy there means the CPUs are over half used.
-	- Branch: round-1025
-	- Commit: 9ba77f5
-	- Test case: dedkv, `cicd/cpu-cap-test.bash`, in the tests stage. It checks the count against a table, `nice 19` and idle IO, and that every parallel call and `docker run` takes the count. On the old scripts it failed 15 checks, and it passes now. Its ID is in the reset's new format.
-
-- CICD reset: step output
-	- ID: 2026102416400040
-	- Type: Enhancement
-	- Status: Waiting on automated testing
-	- Needs local test suite run?: Yes, step 1 of the full run (`cicd/cicd.bash --ci --leakcheck --no-sync -y`), to see the C leak checks step close with PASS and the run end on Step 4 of 4. The Fuzz step's lines show only in a cicd.bash run with fuzz on, which formats in place today, so they wait for `--backlog-run-full` from 2026102319573100. Then signoff on the wording.
-	- Priority: High
-	- Opened: 2026-10-24 16:40
-	- Opened by: JC
-	- Requirements:
-		- Per the step lines in `CICD style guide` in the shared CICD rules. Each stage already opens with a rule and a `N/5  Name` header.
-		- Sweeping override, 2026-10-24: this supersedes any earlier decision on this project that conflicts with it.
-		- Each step opens with a `Starting` line and closes with a `PASS` or `FAIL` line, both as `Step N of M` with a local timestamp to the hundredth of a second.
-		- The rule is 79 characters wide. Today it's 74.
-		- A step that's turned off isn't counted in the total, and the first section lists those with the flag or reason for each.
-		- One blank line between sections, and one at the end.
-	- Progress log:
-		- 2026-10-25: Built as asked. The output helpers moved to `cicd/utility/include/steps.bash`, with the step lines. cicd.bash lists every step once, in `fStep_Plan`, and each flag that turns one off adds a `fStep_Off` line naming itself, so new flags join there. The steps run off that list, and a run where a step that's on never passed fails at the end.
-		- The first section ends with `Steps` and `Turned off` lines, such as `C leak checks (--ci --quick without --leakcheck)`. `--quiet` now prints the section with only those 2 lines, where it printed nothing before.
-		- A failure closes the open step with FAIL, once, after the `FAILED` or `CICD ABORTED` line. A failure inside `( ... )` still prints the ABORTED line twice, as before, but with one blank line now.
-	- Decisions:
-		- The step lines and the 79-wide rule go through the existing `fEcho` and `fSection`, which moved with them, so the test runs the same code cicd.bash does.
-	- Branch: round-1025
-	- Test case: dedm7, `cicd/steps-test.bash`, in cicd's tests stage: the rule, the step lines and their local time, the count leaving out steps turned off, single blank lines, one FAIL from a plain, subshell or `fDie` failure, and the off list with its flags for 8 flag mixes through `--dry-run`.
-	- Verified: dedm7 failed 8 checks against the old cicd.bash and passes now. It also failed with the rule at 78, with steps turned off counted, with the time to the thousandth, with FAIL printed twice from a subshell, with an extra blank line, and with the end check off. `cicd/cicd.bash --ci --quick -y` passed, with Step 1 to 3 of 3 and the off list, and `lint-report.bash` gave CLEAN. Real runs with a failing `gofmt`, a `gofmt` that lists a file, and a failing `staticcheck` inside a subshell each closed their step with one FAIL line and one blank line. shellcheck and vFKCk passed.
-	- Swept: cicd.bash is the only script with sections or step lines. c-checks.bash, c-in-container.bash and the other cicd scripts print no rule. lint-report.bash keys on the done, `FAILED` and `CICD ABORTED` lines, which stay, and vFKCk's `(skipped)` preflight lines stay too. No doc describes the output.
-
-- Test IDs: cicd's own checks
-	- ID: 2026102507142900
-	- Type: Enhancement
-	- Status: Waiting on automated testing
-	- Needs local test suite run?: `bash cicd/c-checks.bash leakcheck 3 WORK`, or a `--leakcheck` run, for deb9f's PASS line from the CTU probe. Lint and quick modes are done.
-	- Priority: High
-	- Opened: 2026-10-25 07:14
-	- Opened by: JC
-	- Parent ID: 2026102416400060
-	- Requirements:
-		- The 13 checks with old base 62 IDs convert once to the shared scheme, from the time each ID gives.
-		- One helper prints `PASS`, `FAIL` or `SKIP`, the ID and the name. cicd's own checks print through it.
-	- Progress log:
-		- 2026-10-25: Old to new: vFKCk de7yv, vFKcU de7zp, vGAuM deb8c, vGBSI deb9f, vGBqv deba8, vGBt9 debab, vGS64 decas, vGSLJ decb9, vGSU9 decbj, vGSqu decc9, vGTH7 decd4, vGTf8 decdx, vGTig dece1. dedkv and dedm7 were already new.
-		- `fTest` and friends in `steps.bash` print the lines. cicd.bash and the C container print one per check, and a check that doesn't run prints `SKIP` with the flag or the missing piece. The container checks' names are in `c-tests.bash`, so both sides name them alike. `make mingw` runs on its own now, to get its own line.
-		- `lint-report.bash` no longer reads a test's `PASS` or `SKIP` line as a warning, since two test names say "warnings".
-		- Verified: `cicd.bash --ci --quick -y` passed with every line printed, and `lint-report.bash` says CLEAN. `c-checks.bash lint 3` passed with a PASS line for each of its 5 checks. Each cicd test script passed on its own. dedm7 failed with the ERR trap's test FAIL taken out, with fTest's own FAIL taken out, and with one ID given two names.
-		- Swept: every old ID in the repo outside the backlog, and every `OK:` line the tests stage printed for a test. Go, Rust, Python and C tests, the shared cases and the fuzz are the other children's.
-	- Commit: dddbb33
-	- Test case: dedm7, `cicd/steps-test.bash`, now covers the test lines and one name per ID.
-
-- cicd flags for a full run that changes nothing in the tree
-	- ID: 2026102319573100
-	- Type: Enhancement
-	- Status: Waiting on automated testing
-	- Needs local test suite run?: Yes, `cicd/cicd.bash --backlog-run-full`, with `git status` and `git diff` the same before and after, to see the leak checks and fuzz pass under a run that rewrites nothing.
-	- Priority: High
-	- Opened: 2026-10-23
-	- Opened by: JC
-	- Requirements:
-		- One command line runs every check without rewriting a tracked file.
-		- A flag to turn off each stage that has none today: format, lint, and tests.
-		- Fuzz can run with `--ci`, which today turns it off with no way back on.
-		- Give the C container a name or label, so a run's container can be found.
-		- Sweeping override, 2026-10-24: this supersedes any earlier decision on this project that conflicts with it.
-		- Overrides JC's `--fuzz` decision below, design.md's `Fuzzing` part where `--ci` is the pre-push hook, and the private notes' line that the hook runs `--ci` on every push.
-	- Notes:
-		- Without `--ci`, the format stage rewrites tracked files with `gofmt -w`, `cargo fmt`, and `clang-format -i`.
-		- Until then a full test run goes in 2 steps, `--ci --leakcheck --no-sync -y` and then the fuzz by hand.
-		- 2026-10-24, CICD reset: this is the reset's `standard flags` item, raised to High, per the flags in `CICD style guide` and per `Merge gate` in the shared CICD rules. The default run fits in about an hour, beside `--quick`, `--long` with `--slow` as another name, `--leakcheck`, `--no-leakcheck`, `--backlog-run-quick [<area>...]`, `--backlog-run-full`, `--merge-gate`, `--no-container`, `--no-remote`, `--no-sync`, `--keep-temp`, `--list`, `--help` and `--quiet`. `--gate` and `--ci` stay as other names for `--backlog-run-quick` and `--merge-gate`, and say so in one line. `--backlog-run-full` is the one full line that rewrites nothing, in place of `--fuzz`. None of the 3 dogfood, publish, commit, push, install, sync, rewrite a tracked file or prompt. The pre-push hook runs `--merge-gate` only on a push to main, and skips one that changes only docs and `project/`. A push to dev runs no gate.
-	- Progress log:
-		- 2026-10-25: Built the standard flags. `--merge-gate` and `--backlog-run-full` run every check of the default run, fuzz and leak checks included, and `--backlog-run-quick [go|rust|python|c|cicd...]` the format check, lint and the fast tests. None of the 3 syncs or prompts, format only checks, and cargo runs `--locked`, since `Cargo.lock` is tracked. `--ci` and `--gate` say which name they stand for.
-		- `--no-format`, `--no-lint` and `--no-tests` turn their step off, with the flag in the off list. `--long` and `--slow` are the default run, since nothing here takes hours. `--list` is `--dry-run` for now, `--no-remote` does nothing until there are other hosts, and `--keep-temp` keeps the scratch folder and prints where it is.
-		- `--no-container` skips C, which runs only in its container, until 2026102416400010 brings the host fallback.
-		- The pre-push hook runs `--merge-gate --quiet` only on a push to main. A push to main that changes only `*.md` and `project/`, the `docsOnly` list in the hook, skips it, and so does a branch delete.
-		- Each C container is named `shclwrap-<run folder>-<mode>`, labeled `dev.project=shclwrap` and `dev.run=<run folder>`. Stopping them by label at the end is 2026102416400020.
-		- Split off 2026102507433885: `--list` naming the test IDs, which waits on the tests getting IDs.
-		- 2026-10-25: de7yv's asserts for `--ci` changed, since `--ci` is now `--merge-gate`. `--ci` and `--ci --leakcheck` were sync on, fuzz off, and are sync off, fuzz on. `--ci --quick` and `--ci --quick --leakcheck` had fuzz off, and now on. dedm7's off lists for `--ci` mixes now name `Remote sync (--merge-gate)` in place of `Fuzz (--ci)` and `C leak checks (--ci ...)`.
-	- Decisions:
-		- JC, 2026-10-24: a `--fuzz` flag turns fuzz back on under `--ci`, so `--ci --leakcheck --fuzz --no-sync -y` is the one full line. Overridden by the 2026-10-24 reset: `--backlog-run-full` is that line.
-		- `--quick` with a named run keeps the named run's no-rewrite rules, so `--ci --quick` is a format check, lint, quick tests and a 10s fuzz, with no sync.
-		- The C container's name has the hook's PID added when a container of that name already exists, which only happens with `c-checks.bash` run by hand on a WORK folder name another tree uses.
-	- Branch: round-1025
-	- Test case: de7yv (`cicd/flags-test.bash`, 25 flag mixes, the Mode line, the 2 other names and an unknown area), dedm7 (off lists for the new flags), dedn4 (`cicd/hook-test.bash`), and dedn5 (every container run in cicd named and labeled), all in the tests stage.
-	- Verified: dedn4 failed 11 of 11 cases with the old hook, and 2 with an empty docs list, and passes now. dedn5 failed with the `--name` or the project label taken out. `--backlog-run-quick` passed, CLEAN, with the tree's diff and status the same before and after, and a C container named `shclwrap-test_shclw_20261025-07341430-quick` with its `dev.run` label showed while it ran. A `--backlog-run-quick python c --no-format --no-lint --no-container --keep-temp` run fetched the pins in the tests step, skipped C with the flag, and kept its folder. shellcheck passed.
-	- Swept: every `docker run` in cicd is the one in `c-checks.bash`. cicd.bash, the hook, README.md and design.md's `Fuzzing` part were the only places naming `--ci` or the hook's flags. The 4 language bindings don't read cicd flags.
-
-- CICD reset: Go, Rust and Python in a pinned image
-	- ID: 2026102507474940
-	- Type: Enhancement
-	- Status: Waiting on automated testing
-	- Needs local test suite run?: Yes, `cicd/cicd.bash --backlog-run-full`, to see the format check, lint, tests, drivers and both fuzzers pass through the image in one full run.
-	- Priority: High
-	- Opened: 2026-10-25 07:47
-	- Opened by: JC
-	- Parent ID: 2026102416400010
-	- Prereq IDs: 2026102507474935
-	- Related IDs: 2026102416400020
-	- Requirements:
-		- Go, Rust, and Python build and test in a pinned image, from a recipe in `cicd/`, with the toolchains in `cicd/tool-pins.env` and `rust-toolchain.toml`.
-		- Falls back to the host the same way as the C checks. `--no-container` runs them on the host.
-		- A test whose point is the real OS, such as Windows file behavior, stays on the host or a test box.
-	- Progress log:
-		- 2026-10-25: `cicd/Lang.Dockerfile` builds Go, Rust (rustup, from `rust-toolchain.toml`), Python 3.14, staticcheck and ruff on the C image's base, each pinned by version and the downloads by sha256. `cicd/lang-checks.bash` runs a mode in it, or on the host the way `c-checks.bash` does, with one `WARNING: Go, Rust and Python run on the host:` line. `lang-in-container.bash` has the commands that were in cicd.bash.
-		- The format step, lint, tests, fuzz drivers, Go's fuzzer and the no-C fuzz go through it. shellcheck and cicd's own tests stay on the host. Module, crate, build and ruff caches are kept in `cicd/cache/lang-home/`.
-		- In the image a tool off its pin is fatal. That caught `python3` 3.14.8-1 bringing interpreter 3.14.9, so `python3.14` is pinned too.
-		- shellcheck's file list and dedkv's `nproc` sweep now skip `cicd/cache/` and `cicd/artifacts/`, which hold the crate and module checkouts.
-	- Decisions:
-		- The tree is mounted read-only, except for the format step that rewrites it and Go's fuzzer, which saves failing inputs into `testdata/`.
-		- The container has the network, for a cold module or crate cache.
-		- After a real rebuild the build cache prune keeps a week (`--filter until=168h`). The C image's unfiltered prune is left for 2026102416400020.
-	- Branch: round-1025
-	- Test case: dedpt, `cicd/lang-host-test.bash`, in the tests stage. It runs a copy of `lang-checks.bash` with a fake docker that's down, one whose build fails, and one that works, and under `SHCLW_LANG_HOST=1`, and checks the mounts and areas the container gets. dedkv now also covers the new scripts.
-	- Verified: dedpt failed with the build failure's fallback taken out and with the tree mounted writable for fuzz, and passes. dedkv failed with a job count or `fLowPriority` taken out. In the image: format check, lint, tests, drivers, a 20s fuzz and Go's fuzzer. `--backlog-run-quick go rust python cicd` was CLEAN, and passed again with `--no-container` and with a docker whose daemon is down, on the host. `--ci --quick` with only the fuzz step passed with the image's drivers in the C container. The tree's status was the same before and after. shellcheck passed.
-	- Swept: cicd.bash has no Go, cargo, ruff or staticcheck call left, and its `python3` calls are cicd's own tests. Every `docker run` in cicd is named, labeled, capped and niced (dedn5, dedkv). design.md's `Fuzzing` part was the only doc naming where Go, Rust and Python run. The 4 language bindings don't read cicd flags.
 
 - Create-only Write
 	- ID: 2026101513330015
@@ -1394,6 +1278,136 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Swept: `Upgrade` and `UpgradeFile` in Go `shclw3` and Rust `v3`. The 1.2 and 2.0 adapters convert nothing. A format 3 file passed with `from` 2 that 2.0 has errors on, such as `tags: [a, b]`, is still left alone.
 	- Closed: 20261017-11325800
 	- Acceptance signoff: Self-closed: the 2.0 check is now required in every build, per 2026101613005800, and the test failed before the fix and passes after.
+
+- CICD reset: CPU and priority
+	- ID: 2026102416400030
+	- Type: Enhancement
+	- Status: Done
+	- Priority: High
+	- Opened: 2026-10-24 16:40
+	- Opened by: JC
+	- Related IDs: 2026101512024174
+	- Requirements:
+		- Per `Machine use` in the shared CICD rules. Half the cores is worked out once already, and cargo and `go test` get it.
+		- Sweeping override, 2026-10-24: this supersedes any earlier decision on this project that conflicts with it.
+		- Every tool that runs in parallel gets the count from that one place, `go vet`, staticcheck, ruff, `make -j` and the C container's own count included.
+		- A busy check at the start and before each step: with the 1-minute load over half the CPU count, the cap drops to a quarter.
+		- A quarter, busy or not, for the hard steps: the leak checks, the sanitized builds, the soak and the fuzz.
+		- `nice -n 19`, plus `ionice -c 3`, over the whole run.
+		- `--cpus` and `--cpu-shares 256` on each `docker run`, and `nice` inside the container too.
+		- The same rules on other hosts, with that host's CPU count and load.
+	- Progress log:
+		- 2026-10-25: `cicd/utility/include/cpu-cap.bash` works out the count and the load, and lowers the priority. `cicd.bash` and `c-checks.bash` both use it, and check the load again at each stage.
+		- The count goes to cargo, `go vet`, `go test`, `go build` and Go's fuzzer as flags. It goes to staticcheck, ruff and Rust's test threads through `GOMAXPROCS`, `RAYON_NUM_THREADS` and `RUST_TEST_THREADS`. The C container gets `--cpus`, `--cpu-shares 256`, `nice -n 19`, and its `make -j` and CodeQL's `--threads` from `SHCLW_JOBS`.
+		- The private Windows scripts `win-tests.ps1` and `win-go-fat.ps1` run below normal, with a count from the CPU count and load.
+		- Verified: `cicd/cicd.bash --ci --quick -y` passed, and `lint-report.bash` gave CLEAN. Its tools and the container's `make` ran at nice 19, with `--cpus 16` at load 5. `c-checks.bash test 3 WORK` passed with `--cpus 8`. shellcheck is clean, and PSScriptAnalyzer is clean on the Windows scripts.
+		- Swept: every `cargo`, `go` and `docker run` call in `cicd/`, every `nproc`, and the private tools. The other private tools run serially, or go through `c-checks.bash`.
+		2026-10-25: Verified: the full run at `2a034a0` (`cicd/cicd.bash --backlog-run-full`, 2026-10-25 09:18 to 09:30) passed at nice 19 and idle IO, with `Jobs: 8 of 32 CPUs` at each step under a load of 20 to 50. CodeQL's thread count isn't in the log, so dedkv is what covers it.
+		Verified on b26, macOS 15.8.1, from a clone of `round-1025`: `cicd.bash --backlog-run-full --dry-run` showed `CPU cap: 4 of 8 CPUs, load 1.84` and `Priority: nice 19`, and `fCpuCap hard` gave 2 at that load.
+		Verified on vm925w: `win-tests.ps1` ran at `BelowNormal`, with 4 jobs of 8, not busy. Its Rust, Python and C tests passed, except 058's `mode` lines, which print 0666 on Windows as before.
+	- Decisions:
+		- `c-checks.bash` checks the load itself, not taking `cicd.bash`'s count, since it's a step of its own and also runs alone.
+		- Inside the container the count comes only from `SHCLW_JOBS`, since `nproc` there sees every host CPU.
+		- Windows has no load average, so busy there means the CPUs are over half used.
+	- Branch: round-1025
+	- Commit: 9ba77f5
+	- Test case: dedkv, `cicd/cpu-cap-test.bash`, in the tests stage. It checks the count against a table, `nice 19` and idle IO, and that every parallel call and `docker run` takes the count. On the old scripts it failed 15 checks, and it passes now. Its ID is in the reset's new format.
+	- Closed: 2026-10-25 09:53
+	- Acceptance signoff: Self-closed: dedkv covers it, and the full run, b26 and vm925w each showed the caps and the low priority.
+
+- Test IDs: cicd's own checks
+	- ID: 2026102507142900
+	- Type: Enhancement
+	- Status: Done
+	- Priority: High
+	- Opened: 2026-10-25 07:14
+	- Opened by: JC
+	- Parent ID: 2026102416400060
+	- Requirements:
+		- The 13 checks with old base 62 IDs convert once to the shared scheme, from the time each ID gives.
+		- One helper prints `PASS`, `FAIL` or `SKIP`, the ID and the name. cicd's own checks print through it.
+	- Progress log:
+		- 2026-10-25: Old to new: vFKCk de7yv, vFKcU de7zp, vGAuM deb8c, vGBSI deb9f, vGBqv deba8, vGBt9 debab, vGS64 decas, vGSLJ decb9, vGSU9 decbj, vGSqu decc9, vGTH7 decd4, vGTf8 decdx, vGTig dece1. dedkv and dedm7 were already new.
+		- `fTest` and friends in `steps.bash` print the lines. cicd.bash and the C container print one per check, and a check that doesn't run prints `SKIP` with the flag or the missing piece. The container checks' names are in `c-tests.bash`, so both sides name them alike. `make mingw` runs on its own now, to get its own line.
+		- `lint-report.bash` no longer reads a test's `PASS` or `SKIP` line as a warning, since two test names say "warnings".
+		- Verified: `cicd.bash --ci --quick -y` passed with every line printed, and `lint-report.bash` says CLEAN. `c-checks.bash lint 3` passed with a PASS line for each of its 5 checks. Each cicd test script passed on its own. dedm7 failed with the ERR trap's test FAIL taken out, with fTest's own FAIL taken out, and with one ID given two names.
+		- Swept: every old ID in the repo outside the backlog, and every `OK:` line the tests stage printed for a test. Go, Rust, Python and C tests, the shared cases and the fuzz are the other children's.
+		2026-10-25: Verified: the full run at `2a034a0` (`cicd/cicd.bash --backlog-run-full`, 2026-10-25 09:18 to 09:30) printed `PASS deb9f CTU follows a call into shcl.h, held to the known list` in the C leak checks step, among 21 PASS lines and no FAIL or SKIP.
+	- Commit: dddbb33
+	- Test case: dedm7, `cicd/steps-test.bash`, now covers the test lines and one name per ID.
+	- Closed: 2026-10-25 09:53
+	- Acceptance signoff: Self-closed: every one of cicd's checks prints its line with its new ID, and dedm7 covers the lines.
+
+- cicd flags for a full run that changes nothing in the tree
+	- ID: 2026102319573100
+	- Type: Enhancement
+	- Status: Done
+	- Priority: High
+	- Opened: 2026-10-23
+	- Opened by: JC
+	- Requirements:
+		- One command line runs every check without rewriting a tracked file.
+		- A flag to turn off each stage that has none today: format, lint, and tests.
+		- Fuzz can run with `--ci`, which today turns it off with no way back on.
+		- Give the C container a name or label, so a run's container can be found.
+		- Sweeping override, 2026-10-24: this supersedes any earlier decision on this project that conflicts with it.
+		- Overrides JC's `--fuzz` decision below, design.md's `Fuzzing` part where `--ci` is the pre-push hook, and the private notes' line that the hook runs `--ci` on every push.
+	- Notes:
+		- Without `--ci`, the format stage rewrites tracked files with `gofmt -w`, `cargo fmt`, and `clang-format -i`.
+		- Until then a full test run goes in 2 steps, `--ci --leakcheck --no-sync -y` and then the fuzz by hand.
+		- 2026-10-24, CICD reset: this is the reset's `standard flags` item, raised to High, per the flags in `CICD style guide` and per `Merge gate` in the shared CICD rules. The default run fits in about an hour, beside `--quick`, `--long` with `--slow` as another name, `--leakcheck`, `--no-leakcheck`, `--backlog-run-quick [<area>...]`, `--backlog-run-full`, `--merge-gate`, `--no-container`, `--no-remote`, `--no-sync`, `--keep-temp`, `--list`, `--help` and `--quiet`. `--gate` and `--ci` stay as other names for `--backlog-run-quick` and `--merge-gate`, and say so in one line. `--backlog-run-full` is the one full line that rewrites nothing, in place of `--fuzz`. None of the 3 dogfood, publish, commit, push, install, sync, rewrite a tracked file or prompt. The pre-push hook runs `--merge-gate` only on a push to main, and skips one that changes only docs and `project/`. A push to dev runs no gate.
+	- Progress log:
+		- 2026-10-25: Built the standard flags. `--merge-gate` and `--backlog-run-full` run every check of the default run, fuzz and leak checks included, and `--backlog-run-quick [go|rust|python|c|cicd...]` the format check, lint and the fast tests. None of the 3 syncs or prompts, format only checks, and cargo runs `--locked`, since `Cargo.lock` is tracked. `--ci` and `--gate` say which name they stand for.
+		- `--no-format`, `--no-lint` and `--no-tests` turn their step off, with the flag in the off list. `--long` and `--slow` are the default run, since nothing here takes hours. `--list` is `--dry-run` for now, `--no-remote` does nothing until there are other hosts, and `--keep-temp` keeps the scratch folder and prints where it is.
+		- `--no-container` skips C, which runs only in its container, until 2026102416400010 brings the host fallback.
+		- The pre-push hook runs `--merge-gate --quiet` only on a push to main. A push to main that changes only `*.md` and `project/`, the `docsOnly` list in the hook, skips it, and so does a branch delete.
+		- Each C container is named `shclwrap-<run folder>-<mode>`, labeled `dev.project=shclwrap` and `dev.run=<run folder>`. Stopping them by label at the end is 2026102416400020.
+		- Split off 2026102507433885: `--list` naming the test IDs, which waits on the tests getting IDs.
+		- 2026-10-25: de7yv's asserts for `--ci` changed, since `--ci` is now `--merge-gate`. `--ci` and `--ci --leakcheck` were sync on, fuzz off, and are sync off, fuzz on. `--ci --quick` and `--ci --quick --leakcheck` had fuzz off, and now on. dedm7's off lists for `--ci` mixes now name `Remote sync (--merge-gate)` in place of `Fuzz (--ci)` and `C leak checks (--ci ...)`.
+		2026-10-25: Verified: the full run at `2a034a0` (`cicd/cicd.bash --backlog-run-full`, 2026-10-25 09:18 to 09:30) passed all 5 steps, the leak checks and both fuzzers included, with `git status` clean before and after and no shclwrap container left.
+	- Decisions:
+		- JC, 2026-10-24: a `--fuzz` flag turns fuzz back on under `--ci`, so `--ci --leakcheck --fuzz --no-sync -y` is the one full line. Overridden by the 2026-10-24 reset: `--backlog-run-full` is that line.
+		- `--quick` with a named run keeps the named run's no-rewrite rules, so `--ci --quick` is a format check, lint, quick tests and a 10s fuzz, with no sync.
+		- The C container's name has the hook's PID added when a container of that name already exists, which only happens with `c-checks.bash` run by hand on a WORK folder name another tree uses.
+	- Branch: round-1025
+	- Commit: 533c1df
+	- Test case: de7yv (`cicd/flags-test.bash`, 25 flag mixes, the Mode line, the 2 other names and an unknown area), dedm7 (off lists for the new flags), dedn4 (`cicd/hook-test.bash`), and dedn5 (every container run in cicd named and labeled), all in the tests stage.
+	- Verified: dedn4 failed 11 of 11 cases with the old hook, and 2 with an empty docs list, and passes now. dedn5 failed with the `--name` or the project label taken out. `--backlog-run-quick` passed, CLEAN, with the tree's diff and status the same before and after, and a C container named `shclwrap-test_shclw_20261025-07341430-quick` with its `dev.run` label showed while it ran. A `--backlog-run-quick python c --no-format --no-lint --no-container --keep-temp` run fetched the pins in the tests step, skipped C with the flag, and kept its folder. shellcheck passed.
+	- Swept: every `docker run` in cicd is the one in `c-checks.bash`. cicd.bash, the hook, README.md and design.md's `Fuzzing` part were the only places naming `--ci` or the hook's flags. The 4 language bindings don't read cicd flags.
+	- Closed: 2026-10-25 09:53
+	- Acceptance signoff: Self-closed: de7yv, dedm7, dedn4 and dedn5 cover the flags, and the full line ran end to end without changing the tree.
+
+- CICD reset: Go, Rust and Python in a pinned image
+	- ID: 2026102507474940
+	- Type: Enhancement
+	- Status: Done
+	- Priority: High
+	- Opened: 2026-10-25 07:47
+	- Opened by: JC
+	- Parent ID: 2026102416400010
+	- Prereq IDs: 2026102507474935
+	- Related IDs: 2026102416400020
+	- Requirements:
+		- Go, Rust, and Python build and test in a pinned image, from a recipe in `cicd/`, with the toolchains in `cicd/tool-pins.env` and `rust-toolchain.toml`.
+		- Falls back to the host the same way as the C checks. `--no-container` runs them on the host.
+		- A test whose point is the real OS, such as Windows file behavior, stays on the host or a test box.
+	- Progress log:
+		- 2026-10-25: `cicd/Lang.Dockerfile` builds Go, Rust (rustup, from `rust-toolchain.toml`), Python 3.14, staticcheck and ruff on the C image's base, each pinned by version and the downloads by sha256. `cicd/lang-checks.bash` runs a mode in it, or on the host the way `c-checks.bash` does, with one `WARNING: Go, Rust and Python run on the host:` line. `lang-in-container.bash` has the commands that were in cicd.bash.
+		- The format step, lint, tests, fuzz drivers, Go's fuzzer and the no-C fuzz go through it. shellcheck and cicd's own tests stay on the host. Module, crate, build and ruff caches are kept in `cicd/cache/lang-home/`.
+		- In the image a tool off its pin is fatal. That caught `python3` 3.14.8-1 bringing interpreter 3.14.9, so `python3.14` is pinned too.
+		- shellcheck's file list and dedkv's `nproc` sweep now skip `cicd/cache/` and `cicd/artifacts/`, which hold the crate and module checkouts.
+		2026-10-25: Verified: the full run at `2a034a0` (`cicd/cicd.bash --backlog-run-full`, 2026-10-25 09:18 to 09:30) ran the format check, lint, tests, drivers, the 60s fuzz and Go's 30s fuzzer through the image, with no `WARNING: Go, Rust and Python run on the host` line, and all passed. The 60s fuzz got 187 cases at a load near 50.
+	- Decisions:
+		- The tree is mounted read-only, except for the format step that rewrites it and Go's fuzzer, which saves failing inputs into `testdata/`.
+		- The container has the network, for a cold module or crate cache.
+		- After a real rebuild the build cache prune keeps a week (`--filter until=168h`). The C image's unfiltered prune is left for 2026102416400020.
+	- Branch: round-1025
+	- Commit: 731403d
+	- Test case: dedpt, `cicd/lang-host-test.bash`, in the tests stage. It runs a copy of `lang-checks.bash` with a fake docker that's down, one whose build fails, and one that works, and under `SHCLW_LANG_HOST=1`, and checks the mounts and areas the container gets. dedkv now also covers the new scripts.
+	- Verified: dedpt failed with the build failure's fallback taken out and with the tree mounted writable for fuzz, and passes. dedkv failed with a job count or `fLowPriority` taken out. In the image: format check, lint, tests, drivers, a 20s fuzz and Go's fuzzer. `--backlog-run-quick go rust python cicd` was CLEAN, and passed again with `--no-container` and with a docker whose daemon is down, on the host. `--ci --quick` with only the fuzz step passed with the image's drivers in the C container. The tree's status was the same before and after. shellcheck passed.
+	- Swept: cicd.bash has no Go, cargo, ruff or staticcheck call left, and its `python3` calls are cicd's own tests. Every `docker run` in cicd is named, labeled, capped and niced (dedn5, dedkv). design.md's `Fuzzing` part was the only doc naming where Go, Rust and Python run. The 4 language bindings don't read cicd flags.
+	- Closed: 2026-10-25 09:53
+	- Acceptance signoff: Self-closed: dedpt covers the host fallback, and the full run passed through the image.
 
 - CICD reset: C falls back to the host
 	- ID: 2026102507474935
