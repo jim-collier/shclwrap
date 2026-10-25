@@ -33,8 +33,9 @@ for header in "${shcl2Dir}/shcl.h" "${shcl3Dir}/shcl.h"; do
 	[[ -f "${header}" ]] || { echo "missing pinned C header: ${header}" >&2; exit 1; }
 done
 
-## Half the cores, as in cicd.bash. Only builds get it; parallel lint output is a mess to read.
-jobs=$(( $(nproc) / 2 )); if ((jobs < 1)); then jobs=1; fi
+## From c-checks.bash, since nproc here sees every host CPU. Only builds get it; parallel lint output is a mess to read.
+jobs="${SHCLW_JOBS:-}"
+[[ "${jobs}" =~ ^[1-9][0-9]*$ ]] || { echo "SHCLW_JOBS is '${jobs}'; run this through c-checks.bash" >&2; exit 2; }
 
 make_c(){
 	make -s -C "${root}/source/c" \
@@ -161,10 +162,10 @@ EOF
 		bash -n /work/codeql-build.bash
 		bash /work/codeql-build.bash validate
 		## The repo root, not source/c, so shcl.h under cicd/cache is inside it. CodeQL reports only on files there.
-		"${codeql}" database create --language=cpp --source-root="${root}" \
+		"${codeql}" database create --threads="${jobs}" --language=cpp --source-root="${root}" \
 			--command="bash /work/codeql-build.bash capture" \
 			/work/codeql-db
-		"${codeql}" database analyze /work/codeql-db "${queries}" \
+		"${codeql}" database analyze --threads="${jobs}" /work/codeql-db "${queries}" \
 			/work/codeql-queries/cpp/ql/src/AlertSuppression.ql \
 			--format=sarif-latest --output="${artifact_dir}/codeql.sarif"
 		fi

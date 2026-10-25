@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # shellcheck disable=1091
+# shellcheck disable=2154  ## cpuJobs is set by cpu-cap.bash.
 
 set -Eeuo pipefail
 
@@ -7,6 +8,8 @@ here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 root="$(cd "${here}/.." && pwd)"
 source "${here}/tool-pins.env"
 source "${here}/utility/include/run-lock.bash"
+source "${here}/utility/include/cpu-cap.bash"
+fLowPriority
 
 if (($# < 3)); then
 	echo "usage: c-checks.bash MODE VERSION WORKDIR [FUZZ ARGS...]" >&2
@@ -18,6 +21,11 @@ version="$2"
 work="$(realpath "$3")"
 ## Its own lock when run alone; under cicd.bash this passes straight through.
 fRunLock "${root}" "c-checks.bash $*"
+## Checked here, not taken from cicd.bash, since the load may have moved since its stage began.
+case "${mode}" in
+	test|fuzz|leakcheck|leakcheck-resume) fCpuCap hard ;;
+	*) fCpuCap ;;
+esac
 artifacts="${root}/cicd/artifacts/leakcheck"
 ## Kept between runs, so CodeQL's compiled queries are too (about 40 min cold).
 home="${root}/cicd/cache/c-home"
@@ -54,11 +62,13 @@ network=none
 if [[ "${mode}" == leakcheck ]]; then network=bridge; fi
 
 ## The init passes Ctrl+C on to the whole tree, so an aborted run doesn't leave the container going.
+## nice on this side doesn't reach the container, so it gets a CPU cap, a low share, and its own nice.
 exec docker run --rm --init --env TINI_KILL_PROCESS_GROUP=1 --user "$(id -u):$(id -g)" --network="${network}" \
+	--cpus "${cpuJobs}" --cpu-shares 256 --env SHCLW_JOBS="${cpuJobs}" --env GOMAXPROCS="${cpuJobs}" \
 	--env HOME=/home/ci \
 	--mount "type=bind,src=${home},dst=/home/ci" \
 	--mount "type=bind,src=${root},dst=/src,readonly" \
 	--mount "type=bind,src=${work},dst=/work" \
 	--mount "type=bind,src=${artifacts},dst=/artifacts" \
 	--workdir /src \
-	"${tag}" bash /src/cicd/c-in-container.bash "${mode}" "${version}" "${@:4}"
+	"${tag}" nice -n 19 bash /src/cicd/c-in-container.bash "${mode}" "${version}" "${@:4}"

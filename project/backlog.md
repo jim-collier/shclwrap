@@ -332,6 +332,37 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Test case: shared case `061-commented-defaults` and new lines in `041-wovenshell`, in all 4 languages, plus the `commented` op in the fuzz.
 	- Acceptance signoff: waits on JC after the full run, for the README line and the calls in Decisions.
 
+- CICD reset: CPU and priority
+	- ID: 2026102416400030
+	- Type: Enhancement
+	- Status: Waiting on automated testing
+	- Needs local test suite run?: Yes, a full run, for CodeQL's thread count and the leak and fuzz stages at a quarter.
+	- Needs external testing: macOS, on b26 or vmKt6m: `cicd/cicd.bash --dry-run` shows a CPU cap and `nice 19`, from the macOS paths for the CPU count and load. Windows, on vm925w: any `win-tests.ps1` run, which now runs below normal with its own count.
+	- Priority: High
+	- Opened: 2026-10-24 16:40
+	- Opened by: JC
+	- Related IDs: 2026101512024174
+	- Requirements:
+		- Per `Machine use` in the shared CICD rules. Half the cores is worked out once already, and cargo and `go test` get it.
+		- Sweeping override, 2026-10-24: this supersedes any earlier decision on this project that conflicts with it.
+		- Every tool that runs in parallel gets the count from that one place, `go vet`, staticcheck, ruff, `make -j` and the C container's own count included.
+		- A busy check at the start and before each step: with the 1-minute load over half the CPU count, the cap drops to a quarter.
+		- A quarter, busy or not, for the hard steps: the leak checks, the sanitized builds, the soak and the fuzz.
+		- `nice -n 19`, plus `ionice -c 3`, over the whole run.
+		- `--cpus` and `--cpu-shares 256` on each `docker run`, and `nice` inside the container too.
+		- The same rules on other hosts, with that host's CPU count and load.
+	- Progress log:
+		- 2026-10-25: `cicd/utility/include/cpu-cap.bash` works out the count and the load, and lowers the priority. `cicd.bash` and `c-checks.bash` both use it, and check the load again at each stage.
+		- The count goes to cargo, `go vet`, `go test`, `go build` and Go's fuzzer as flags. It goes to staticcheck, ruff and Rust's test threads through `GOMAXPROCS`, `RAYON_NUM_THREADS` and `RUST_TEST_THREADS`. The C container gets `--cpus`, `--cpu-shares 256`, `nice -n 19`, and its `make -j` and CodeQL's `--threads` from `SHCLW_JOBS`.
+		- The private Windows scripts `win-tests.ps1` and `win-go-fat.ps1` run below normal, with a count from the CPU count and load.
+		- Verified: `cicd/cicd.bash --ci --quick -y` passed, and `lint-report.bash` gave CLEAN. Its tools and the container's `make` ran at nice 19, with `--cpus 16` at load 5. `c-checks.bash test 3 WORK` passed with `--cpus 8`. shellcheck is clean, and PSScriptAnalyzer is clean on the Windows scripts.
+		- Swept: every `cargo`, `go` and `docker run` call in `cicd/`, every `nproc`, and the private tools. The other private tools run serially, or go through `c-checks.bash`.
+	- Decisions:
+		- `c-checks.bash` checks the load itself, not taking `cicd.bash`'s count, since it's a step of its own and also runs alone.
+		- Inside the container the count comes only from `SHCLW_JOBS`, since `nproc` there sees every host CPU.
+		- Windows has no load average, so busy there means the CPUs are over half used.
+	- Test case: dedkv, `cicd/cpu-cap-test.bash`, in the tests stage. It checks the count against a table, `nice 19` and idle IO, and that every parallel call and `docker run` takes the count. On the old scripts it failed 15 checks, and it passes now. Its ID is in the reset's new format.
+
 - Create-only Write
 	- ID: 2026101513330015
 	- Type: Feature
@@ -485,23 +516,6 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- `docker builder prune -f --filter until=168h` in place of the unfiltered prune.
 		- Cache volumes follow the 2 GB rule.
 		- One line at the end says what went and about what it freed, from `docker system df` before and after.
-
-- CICD reset: CPU and priority
-	- ID: 2026102416400030
-	- Type: Enhancement
-	- Status: Queued
-	- Priority: High
-	- Opened: 2026-10-24 16:40
-	- Opened by: JC
-	- Requirements:
-		- Per `Machine use` in the shared CICD rules. Half the cores is worked out once already, and cargo and `go test` get it.
-		- Sweeping override, 2026-10-24: this supersedes any earlier decision on this project that conflicts with it.
-		- Every tool that runs in parallel gets the count from that one place, `go vet`, staticcheck, ruff, `make -j` and the C container's own count included.
-		- A busy check at the start and before each step: with the 1-minute load over half the CPU count, the cap drops to a quarter.
-		- A quarter, busy or not, for the hard steps: the leak checks, the sanitized builds, the soak and the fuzz.
-		- `nice -n 19`, plus `ionice -c 3`, over the whole run.
-		- `--cpus` and `--cpu-shares 256` on each `docker run`, and `nice` inside the container too.
-		- The same rules on other hosts, with that host's CPU count and load.
 
 - CICD reset: step output
 	- ID: 2026102416400040
