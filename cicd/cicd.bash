@@ -1,16 +1,18 @@
 #!/usr/bin/env bash
 
 #  shellcheck disable=1091  ## 'source is valid here, but shellcheck doesn't know the path to it.'
-#  shellcheck disable=2154  ## 'referenced but not assigned.' False hit on trap strings that assign the var they use (rc=$?).
+#  shellcheck disable=2154  ## 'referenced but not assigned.' False hit on vars the sourced includes set, such as fRunLog's log fd.
 
 ##	- Purpose: Local CI/CD pipeline for the shcl wrappers.
-##	- Stages (fail-fast, any error aborts before the next stage):
-##	   0. remote sync (fast-forward from upstream before anything is built)
-##	   1. format (in place; check-only under --ci)
-##	   2. lint (go vet, staticcheck, clippy, clang-tidy, gcc-15, shellcheck, ruff)
-##	   3. tests (shared cases in every language, Python's included)
-##	   4. leak checks (CodeQL, CTU analysis, and the heaptrack soak, for C)
-##	   5. fuzz (Rust, C, and Python against Go from generated cases, plus Go's own fuzzer)
+##	- Steps, in this order (fail-fast, any error aborts before the next step).
+##	  The output numbers only the ones that run, and the first section says
+##	  which flag turned off each of the rest.
+##	   - remote sync (fast-forward from upstream before anything is built)
+##	   - format (in place; check-only under --ci)
+##	   - lint (go vet, staticcheck, clippy, clang-tidy, gcc-15, shellcheck, ruff)
+##	   - tests (shared cases in every language, Python's included)
+##	   - leak checks (CodeQL, CTU analysis, and the heaptrack soak, for C)
+##	   - fuzz (Rust, C, and Python against Go from generated cases, plus Go's own fuzzer)
 ##	- Syntax:
 ##	  cicd/cicd.bash [options]
 ##	  With no options it runs every stage.
@@ -22,7 +24,7 @@
 ##	                   shcl.h isn't cached yet, and Python when shcl.py isn't.
 ##	   --leakcheck     add the leak checks to --ci or --quick. Needs the network.
 ##	   --no-leakcheck  skip the leak checks
-##	   -q, --quiet     no preflight block and no prompt
+##	   -q, --quiet     only the step list up front, and no prompt
 ##	   -y, --yes       no prompt
 ##	   --no-sync       skip the remote sync stage
 ##	   --no-fuzz       skip the fuzz stage
@@ -63,6 +65,7 @@ source "${root}/source/python/shcl-pins.env"
 source "${here}/utility/include/gfs-rotate.bash"
 source "${here}/utility/include/run-lock.bash"
 source "${here}/utility/include/cpu-cap.bash"
+source "${here}/utility/include/steps.bash"
 fLowPriority
 stamp="$(date +%Y%m%d-%H%M%S)"
 
@@ -74,39 +77,45 @@ fCpuCap
 
 cmdLine="$*"
 doCi=0; doQuick=0; doLeakcheck=""; doQuiet=0; assumeYes=0; doSync=1; doFuzz=1; dryRun=0
+## Which flag turned each step off, for the first section. The later flag wins.
+syncOffBy=""; leakOffBy=""; fuzzOffBy=""
 while (($#)); do case "$1" in
-	--ci)       doCi=1; doFuzz=0; shift ;;
-	--quick)    doQuick=1; doSync=0; shift ;;
+	--ci)       doCi=1; doFuzz=0; fuzzOffBy="--ci"; shift ;;
+	--quick)    doQuick=1; doSync=0; syncOffBy="--quick"; shift ;;
 	--leakcheck) doLeakcheck=1; shift ;;
-	--no-leakcheck) doLeakcheck=0; shift ;;
+	--no-leakcheck) doLeakcheck=0; leakOffBy="--no-leakcheck"; shift ;;
 	-q|--quiet) doQuiet=1; assumeYes=1; shift ;;
 	-y|--yes)   assumeYes=1; shift ;;
-	--no-sync)  doSync=0; shift ;;
-	--no-fuzz)  doFuzz=0; shift ;;
+	--no-sync)  doSync=0; syncOffBy="--no-sync"; shift ;;
+	--no-fuzz)  doFuzz=0; fuzzOffBy="--no-fuzz"; shift ;;
 	--dry-run)  dryRun=1; shift ;;
 	-h|--help)  sed -n '/^##	- Purpose:/,/^##	History:/p' "${BASH_SOURCE[0]}" | sed '$d; s/^##	\{0,1\}//'; exit 0 ;;
 	*) echo "unknown option: $1 (try --help)" >&2; exit 2 ;;
 esac; done
-if [[ -z "${doLeakcheck}" ]]; then doLeakcheck=$( ((doCi || doQuick)) && echo 0 || echo 1); fi
+if [[ -z "${doLeakcheck}" ]]; then
+	doLeakcheck=$( ((doCi || doQuick)) && echo 0 || echo 1)
+	leakOffBy="without --leakcheck"
+	if ((doQuick)); then leakOffBy="--quick ${leakOffBy}"; fi
+	if ((doCi));    then leakOffBy="--ci ${leakOffBy}"; fi
+fi
+
+## Every step in run order. A flag that turns one off adds a line here.
+fStep_Plan "Remote sync" "Format" "Lint" "Tests" "C leak checks" "Fuzz"
+((doSync))      || fStep_Off "Remote sync"   "${syncOffBy}"
+((doLeakcheck)) || fStep_Off "C leak checks" "${leakOffBy}"
+((doFuzz))      || fStep_Off "Fuzz"          "${fuzzOffBy}"
 
 fuzzSecs="${SHCLW_FUZZ_SECONDS:-$( ((doQuick)) && echo 10 || echo 60)}"
 goFuzzSecs="${SHCLW_GOFUZZ_SECONDS:-$( ((doQuick)) && echo 0 || echo 30)}"
 [[ "${fuzzSecs}" =~ ^[0-9]+$ ]]   || { echo "SHCLW_FUZZ_SECONDS is not a count" >&2; exit 2; }
 [[ "${goFuzzSecs}" =~ ^[0-9]+$ ]] || { echo "SHCLW_GOFUZZ_SECONDS is not a count" >&2; exit 2; }
 
-## Output helpers: fEcho / fEcho_Clean, blank-collapsing.
-declare -i _wasLastEchoBlank=0
-fEcho_ResetBlankCounter(){ _wasLastEchoBlank=0; }
-fEcho_Clean(){ if [[ -n "${1:-}" ]]; then echo -e "$*"; _wasLastEchoBlank=0; elif [[ "${_wasLastEchoBlank}" == 0 ]] && echo; then _wasLastEchoBlank=1; fi; }
-fEcho(){       if [[ -n "$*"     ]]; then fEcho_Clean "[ $* ]"; else fEcho_Clean ""; fi; }
-fEcho_Force(){ fEcho_ResetBlankCounter; fEcho "$*"; }
-_letterbox="••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••"
-fSection(){ fEcho_Clean; fEcho_Clean "${_letterbox}"; fEcho "$*"; }
+## Output helpers (fEcho, fEcho_Clean, fSection) and step lines are in utility/include/steps.bash.
 fCpuNote(){ printf '%s of %s CPUs, load %s%s' "${cpuJobs}" "${cpuCount}" "${cpuLoad}" "$( ((cpuBusy)) && echo ' (busy)')"; }
-## fStep NAME [hard]: the stage header, with the CPU cap checked again for it.
-fStep(){ fSection "$1"; fCpuCap "${2:-}"; fEcho_Clean "Jobs: $(fCpuNote)"; }
-fDie(){ { fEcho_Force "FAILED: $*"; echo; } >&2; exit 1; }
-trap 'rc=$?; printf "\n[ CICD ABORTED (exit %s) at line %s: %s ]\n\n" "$rc" "$LINENO" "$BASH_COMMAND" >&2; exit $rc' ERR
+## fStep NAME [hard]: opens the step, with the CPU cap checked again for it.
+fStep(){ fStep_Start "$1"; fCpuCap "${2:-}"; fEcho_Clean "Jobs: $(fCpuNote)"; }
+fDie(){ { fEcho_Force "FAILED: $*"; fStep_Fail; echo; } >&2; exit 1; }
+trap 'fStep_Abort "$?" "${LINENO}" "${BASH_COMMAND}"' ERR
 
 ## Warns when a tool on this box isn't the pinned version.
 fCheckPin(){   ## fCheckPin NAME PINNED ACTUAL
@@ -180,11 +189,11 @@ fFuzzFail_Prune(){
 	return 0
 }
 
+## The first section. --quiet keeps only the step list, except under --dry-run.
 fPreflight(){
 	local mode ni
-	fEcho_Clean
-	fEcho_Clean "shclwrap local CI/CD"
-	fEcho_Clean
+	fSection "shclwrap local CI/CD"
+	if ((doQuiet && ! dryRun)); then fStep_Summary; return 0; fi
 	fEcho_Clean "Repo root ....: ${root}"
 	if   ((doCi && doQuick)); then mode='ci, quick (format check, fast lint, fast tests)'
 	elif ((doCi));            then mode='ci (format check, lint, tests)'
@@ -200,6 +209,7 @@ fPreflight(){
 	ni="$(ps -o ni= -p "$$" 2>/dev/null || true)"
 	fEcho_Clean "Priority .....: nice ${ni// /}$(command -v ionice >/dev/null && echo ", IO $(ionice -p $$ 2>/dev/null)")"
 	fEcho_Clean "Scratch ......: ${work}"
+	fStep_Summary
 }
 
 ## The run's scratch folder, with a marker so cleanup only ever removes its own.
@@ -219,10 +229,8 @@ fScratchName
 exec > >(tee -a "/dev/fd/${logFd}") 2>&1
 exec {logFd}>&-
 
-if ((! doQuiet)); then
-	fPreflight
-	if ((! assumeYes)); then read -r -p "Proceed? (Ctrl+C aborts, Enter continues) " _; fi
-fi
+fPreflight
+if ((! assumeYes)); then read -r -p "Proceed? (Ctrl+C aborts, Enter continues) " _; fi
 fRunLock "${root}" "cicd.bash ${cmdLine}"
 ## Another tree's run can pick the same name under the same TMPDIR.
 mkdir -p "${work%/*}"
@@ -234,8 +242,8 @@ done
 touch "${work}/.shclw-cicd-owned"
 
 #•••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••
-if ((doSync)); then
-	fStep "0/5  Remote sync"
+if fStep_On "Remote sync"; then
+	fStep "Remote sync"
 	branch="$(git -C "${root}" symbolic-ref --quiet --short HEAD || true)"
 	upstream="$(git -C "${root}" rev-parse --abbrev-ref --symbolic-full-name '@{upstream}' 2>/dev/null || true)"
 	if [[ -z "${branch}" ]]; then
@@ -263,10 +271,11 @@ if ((doSync)); then
 		else                 fEcho "OK: level with ${upstream}"
 		fi
 	fi
+	fStep_Pass
 fi
 
 #•••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••
-fStep "1/5  Format"
+fStep "Format"
 if ((doCi)); then
 	unformatted="$(cd "${root}/source/go" && gofmt -l .)"
 	[[ -z "${unformatted}" ]] || fDie "gofmt would change: ${unformatted}"
@@ -279,9 +288,10 @@ else
 	make -s -C "${root}/source/c" format
 	fEcho "OK: gofmt, cargo fmt, and clang-format applied"
 fi
+fStep_Pass
 
 #•••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••
-fStep "2/5  Lint"
+fStep "Lint"
 fCheckPin go           "${PIN_GO}"          "$(go version)"
 fCheckPin staticcheck  "${PIN_STATICCHECK}" "$(staticcheck --version 2>/dev/null || echo missing)"
 fCheckPin shellcheck   "${PIN_SHELLCHECK}"  "$(shellcheck --version 2>/dev/null | sed -n 2p || echo missing)"
@@ -318,9 +328,10 @@ fEcho "OK: C Makefile targets (${#phonyTargets[@]})"
 ruff check --quiet "${root}/cicd" "${root}/source/python"
 ruff format --check --quiet "${root}/cicd" "${root}/source/python"
 fEcho "OK: ruff"
+fStep_Pass
 
 #•••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••
-fStep "3/5  Tests"
+fStep "Tests"
 (cd "${root}/source/go" && TMPDIR="${work}" go test -p "${cpuJobs}" ./...)
 fEcho "OK: Go tests"
 (cd "${root}/source/rust" && TMPDIR="${work}" cargo test --quiet -j "${cpuJobs}" --all-features)
@@ -346,6 +357,8 @@ TMPDIR="${work}" bash "${here}/eol-test.bash" >/dev/null
 fEcho "OK: line ends under core.autocrlf=true"
 bash "${here}/cpu-cap-test.bash" >/dev/null
 fEcho "OK: CPU caps and low priority"
+bash "${here}/steps-test.bash" >/dev/null
+fEcho "OK: step lines"
 if ((doC && doQuick)); then
 	bash "${here}/c-checks.bash" quick 3 "${work}"
 	fEcho "OK: gcc-15 at C17, C API tests, and shared cases over shcl 3, plain build"
@@ -353,17 +366,19 @@ elif ((doC)); then
 	bash "${here}/c-checks.bash" test 3 "${work}"
 	fEcho "OK: C API tests and shared cases over shcl 3, sanitized, plain, and as C++"
 fi
+fStep_Pass
 
 #•••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••
-if ((doLeakcheck)); then
-	fStep "4/5  C leak checks" hard
+if fStep_On "C leak checks"; then
+	fStep "C leak checks" hard
 	bash "${here}/c-checks.bash" leakcheck 3 "${work}"
 	fEcho "OK: CodeQL, clang CTU, and heaptrack soak"
+	fStep_Pass
 fi
 
 #•••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••
-if ((doFuzz)); then
-	fStep "5/5  Fuzz" hard
+if fStep_On "Fuzz"; then
+	fStep "Fuzz" hard
 	mkdir -p "${work}/bin"
 	(cd "${root}/source/go" && go build -p "${cpuJobs}" -o "${work}/bin/go-drive" ./cmd/shclw-drive)
 	(cd "${root}/source/rust" && cargo build --quiet -j "${cpuJobs}" --release --all-features --bin shclw-drive)
@@ -388,11 +403,11 @@ if ((doFuzz)); then
 		(cd "${root}/source/go" && TMPDIR="${work}" go test ./shclw/ -run '^$' -fuzz=FuzzRun -fuzztime="${goFuzzSecs}s" -p "${cpuJobs}" -parallel "${cpuJobs}")
 	fi
 	fEcho "OK: fuzz"
+	fStep_Pass
 fi
 
-fEcho_Clean
-fEcho_Clean "${_letterbox}"
-fEcho "shclwrap CI/CD: done."
+fStep_AllPassed
+fSection "shclwrap CI/CD: done."
 fEcho_Clean
 
 
@@ -408,4 +423,5 @@ fEcho_Clean
 ##		- 2026-10-21 JC: Python: lint, tests, shared cases, and fuzz.
 ##		- 2026-10-24 JC: A second run in the same tree waits for the first.
 ##		- 2026-10-24 JC: Two runs started in the same second get their own logs and scratch folders.
+##		- 2026-10-25 JC: Step lines with Starting, PASS and FAIL. Steps turned off aren't counted, and the first section says why each is off.
 ##		- 2026-10-25 JC: nice 19 and idle IO. A quarter of the CPUs when busy, and for the hard stages. go vet, staticcheck, ruff, and Rust's test threads get the count too.

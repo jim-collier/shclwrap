@@ -365,6 +365,32 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Commit: 9ba77f5
 	- Test case: dedkv, `cicd/cpu-cap-test.bash`, in the tests stage. It checks the count against a table, `nice 19` and idle IO, and that every parallel call and `docker run` takes the count. On the old scripts it failed 15 checks, and it passes now. Its ID is in the reset's new format.
 
+- CICD reset: step output
+	- ID: 2026102416400040
+	- Type: Enhancement
+	- Status: Waiting on automated testing
+	- Needs local test suite run?: Yes, step 1 of the full run (`cicd/cicd.bash --ci --leakcheck --no-sync -y`), to see the C leak checks step close with PASS and the run end on Step 4 of 4. The Fuzz step's lines show only in a cicd.bash run with fuzz on, which formats in place today, so they wait for `--backlog-run-full` from 2026102319573100. Then signoff on the wording.
+	- Priority: High
+	- Opened: 2026-10-24 16:40
+	- Opened by: JC
+	- Requirements:
+		- Per the step lines in `CICD style guide` in the shared CICD rules. Each stage already opens with a rule and a `N/5  Name` header.
+		- Sweeping override, 2026-10-24: this supersedes any earlier decision on this project that conflicts with it.
+		- Each step opens with a `Starting` line and closes with a `PASS` or `FAIL` line, both as `Step N of M` with a local timestamp to the hundredth of a second.
+		- The rule is 79 characters wide. Today it's 74.
+		- A step that's turned off isn't counted in the total, and the first section lists those with the flag or reason for each.
+		- One blank line between sections, and one at the end.
+	- Progress log:
+		- 2026-10-25: Built as asked. The output helpers moved to `cicd/utility/include/steps.bash`, with the step lines. cicd.bash lists every step once, in `fStep_Plan`, and each flag that turns one off adds a `fStep_Off` line naming itself, so new flags join there. The steps run off that list, and a run where a step that's on never passed fails at the end.
+		- The first section ends with `Steps` and `Turned off` lines, such as `C leak checks (--ci --quick without --leakcheck)`. `--quiet` now prints the section with only those 2 lines, where it printed nothing before.
+		- A failure closes the open step with FAIL, once, after the `FAILED` or `CICD ABORTED` line. A failure inside `( ... )` still prints the ABORTED line twice, as before, but with one blank line now.
+	- Decisions:
+		- The step lines and the 79-wide rule go through the existing `fEcho` and `fSection`, which moved with them, so the test runs the same code cicd.bash does.
+	- Branch: round-1025
+	- Test case: dedm7, `cicd/steps-test.bash`, in cicd's tests stage: the rule, the step lines and their local time, the count leaving out steps turned off, single blank lines, one FAIL from a plain, subshell or `fDie` failure, and the off list with its flags for 8 flag mixes through `--dry-run`.
+	- Verified: dedm7 failed 8 checks against the old cicd.bash and passes now. It also failed with the rule at 78, with steps turned off counted, with the time to the thousandth, with FAIL printed twice from a subshell, with an extra blank line, and with the end check off. `cicd/cicd.bash --ci --quick -y` passed, with Step 1 to 3 of 3 and the off list, and `lint-report.bash` gave CLEAN. Real runs with a failing `gofmt`, a `gofmt` that lists a file, and a failing `staticcheck` inside a subshell each closed their step with one FAIL line and one blank line. shellcheck and vFKCk passed.
+	- Swept: cicd.bash is the only script with sections or step lines. c-checks.bash, c-in-container.bash and the other cicd scripts print no rule. lint-report.bash keys on the done, `FAILED` and `CICD ABORTED` lines, which stay, and vFKCk's `(skipped)` preflight lines stay too. No doc describes the output.
+
 - Create-only Write
 	- ID: 2026101513330015
 	- Type: Feature
@@ -518,21 +544,6 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- `docker builder prune -f --filter until=168h` in place of the unfiltered prune.
 		- Cache volumes follow the 2 GB rule.
 		- One line at the end says what went and about what it freed, from `docker system df` before and after.
-
-- CICD reset: step output
-	- ID: 2026102416400040
-	- Type: Enhancement
-	- Status: Queued
-	- Priority: High
-	- Opened: 2026-10-24 16:40
-	- Opened by: JC
-	- Requirements:
-		- Per the step lines in `CICD style guide` in the shared CICD rules. Each stage already opens with a rule and a `N/5  Name` header.
-		- Sweeping override, 2026-10-24: this supersedes any earlier decision on this project that conflicts with it.
-		- Each step opens with a `Starting` line and closes with a `PASS` or `FAIL` line, both as `Step N of M` with a local timestamp to the hundredth of a second.
-		- The rule is 79 characters wide. Today it's 74.
-		- A step that's turned off isn't counted in the total, and the first section lists those with the flag or reason for each.
-		- One blank line between sections, and one at the end.
 
 - CICD reset: a test for every Done item
 	- ID: 2026102416400050
