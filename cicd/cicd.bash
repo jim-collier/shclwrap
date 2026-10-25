@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 
 #  shellcheck disable=1091  ## 'source is valid here, but shellcheck doesn't know the path to it.'
+#  shellcheck disable=2016  ## 'Expressions don't expand in single quotes.' fDockerLabels greps for literal text.
 #  shellcheck disable=2154  ## 'referenced but not assigned.' False hit on vars the sourced includes set, such as fRunLog's log fd.
 
 ##	- Purpose: Local CI/CD pipeline for the shcl wrappers.
@@ -8,27 +9,45 @@
 ##	  The output numbers only the ones that run, and the first section says
 ##	  which flag turned off each of the rest.
 ##	   - remote sync (fast-forward from upstream before anything is built)
-##	   - format (in place; check-only under --ci)
+##	   - format (in place; check-only under the 3 runs below that rewrite nothing)
 ##	   - lint (go vet, staticcheck, clippy, clang-tidy, gcc-15, shellcheck, ruff)
 ##	   - tests (shared cases in every language, Python's included)
 ##	   - leak checks (CodeQL, CTU analysis, and the heaptrack soak, for C)
 ##	   - fuzz (Rust, C, and Python against Go from generated cases, plus Go's own fuzzer)
 ##	- Syntax:
 ##	  cicd/cicd.bash [options]
-##	  With no options it runs every stage.
+##	  With no options it runs every stage, in about 10 minutes.
 ##	  Options:
-##	   --ci            format check, lint, and tests only; what the pre-push hook runs
 ##	   --quick         the fast checks only, in about a minute. No remote sync,
 ##	                   C analyzers, sanitizers, or leak checks, and a short fuzz.
 ##	                   Nothing that needs the network. C is skipped when a pinned
 ##	                   shcl.h isn't cached yet, and Python when shcl.py isn't.
-##	   --leakcheck     add the leak checks to --ci or --quick. Needs the network.
+##	   --long, --slow  everything. The same as no options here, since nothing takes hours.
+##	   --leakcheck     add the leak checks to --quick. Needs the network.
 ##	   --no-leakcheck  skip the leak checks
+##	  These 3 never sync, rewrite a tracked file or prompt:
+##	   --backlog-run-quick [AREA...]  format check, lint, and the fast tests, in a few
+##	                   minutes. AREA is go, rust, python, c or cicd, and picks what
+##	                   the format, lint and test steps check. Default: all.
+##	   --backlog-run-full  every check of the default run
+##	   --merge-gate    every check of the default run; what the pre-push hook runs
+##	                   on a push to main
+##	   --gate          another name for --backlog-run-quick
+##	   --ci            another name for --merge-gate
+##	  Turning steps off, or picking where they run:
+##	   --no-sync       skip the remote sync stage
+##	   --no-format     skip the format stage
+##	   --no-lint       skip the lint stage
+##	   --no-tests      skip the tests stage
+##	   --no-fuzz       skip the fuzz stage
+##	   --no-container  run on the host. C runs only in its container, so its
+##	                   checks are skipped.
+##	   --no-remote     skip other hosts and VMs. There are none yet.
+##	  Other:
+##	   --keep-temp     keep the run's scratch folder, and print where it is
+##	   --list, --dry-run  show which stages would run, and stop
 ##	   -q, --quiet     only the step list up front, and no prompt
 ##	   -y, --yes       no prompt
-##	   --no-sync       skip the remote sync stage
-##	   --no-fuzz       skip the fuzz stage
-##	   --dry-run       show which stages would run, and stop
 ##	   -h, --help      show this help
 ##	- Fuzz budgets, in seconds: SHCLW_FUZZ_SECONDS (default 60, 10 with --quick)
 ##	  for Rust and C against Go, and SHCLW_GOFUZZ_SECONDS (default 30, 0 with --quick)
@@ -77,32 +96,63 @@ export PATH="${HOME}/.cargo/bin:${PATH}"
 fCpuCap
 
 cmdLine="$*"
-doCi=0; doQuick=0; doLeakcheck=""; doQuiet=0; assumeYes=0; doSync=1; doFuzz=1; dryRun=0
+doQuick=0; doLeakcheck=""; doQuiet=0; assumeYes=0; dryRun=0; keepTemp=0
+doSync=1; doFormat=1; doLint=1; doTests=1; doFuzz=1; doContainer=1
+## checkOnly: format checks and nothing syncs or prompts. runName is the named run that set it.
+checkOnly=0; runName=""; aliasNote=""
+declare -a areas=()
 ## Which flag turned each step off, for the first section. The later flag wins.
 syncOffBy=""; leakOffBy=""; fuzzOffBy=""
+fNamedRun(){   ## fNamedRun FLAG: the 3 runs that rewrite nothing
+	checkOnly=1; assumeYes=1; runName="$1"; doSync=0; syncOffBy="$1"
+}
 while (($#)); do case "$1" in
-	--ci)       doCi=1; doFuzz=0; fuzzOffBy="--ci"; shift ;;
 	--quick)    doQuick=1; doSync=0; syncOffBy="--quick"; shift ;;
+	--long|--slow) shift ;;
 	--leakcheck) doLeakcheck=1; shift ;;
 	--no-leakcheck) doLeakcheck=0; leakOffBy="--no-leakcheck"; shift ;;
+	--gate|--backlog-run-quick)
+		if [[ "$1" == --gate ]]; then aliasNote="--gate is another name for --backlog-run-quick"; fi
+		fNamedRun --backlog-run-quick; doQuick=1; doFuzz=0; fuzzOffBy="--backlog-run-quick"; shift
+		while (($#)) && [[ "$1" != -* ]]; do
+			case "$1" in go|rust|python|c|cicd) areas+=("$1") ;; *) echo "unknown area: $1 (go, rust, python, c or cicd)" >&2; exit 2 ;; esac
+			shift
+		done ;;
+	--ci|--merge-gate)
+		if [[ "$1" == --ci ]]; then aliasNote="--ci is another name for --merge-gate"; fi
+		fNamedRun --merge-gate; shift ;;
+	--backlog-run-full) fNamedRun "$1"; shift ;;
 	-q|--quiet) doQuiet=1; assumeYes=1; shift ;;
 	-y|--yes)   assumeYes=1; shift ;;
-	--no-sync)  doSync=0; syncOffBy="--no-sync"; shift ;;
-	--no-fuzz)  doFuzz=0; fuzzOffBy="--no-fuzz"; shift ;;
-	--dry-run)  dryRun=1; shift ;;
+	--no-sync)  doSync=0; syncOffBy="$1"; shift ;;
+	--no-format) doFormat=0; shift ;;
+	--no-lint)  doLint=0; shift ;;
+	--no-tests) doTests=0; shift ;;
+	--no-fuzz)  doFuzz=0; fuzzOffBy="$1"; shift ;;
+	--no-container) doContainer=0; shift ;;
+	--no-remote) shift ;;
+	--keep-temp) keepTemp=1; shift ;;
+	--dry-run|--list) dryRun=1; shift ;;
 	-h|--help)  sed -n '/^##	- Purpose:/,/^##	History:/p' "${BASH_SOURCE[0]}" | sed '$d; s/^##	\{0,1\}//'; exit 0 ;;
 	*) echo "unknown option: $1 (try --help)" >&2; exit 2 ;;
 esac; done
 if [[ -z "${doLeakcheck}" ]]; then
-	doLeakcheck=$( ((doCi || doQuick)) && echo 0 || echo 1)
-	leakOffBy="without --leakcheck"
-	if ((doQuick)); then leakOffBy="--quick ${leakOffBy}"; fi
-	if ((doCi));    then leakOffBy="--ci ${leakOffBy}"; fi
+	doLeakcheck=$( ((doQuick)) && echo 0 || echo 1)
+	leakOffBy="--quick without --leakcheck"
+	if [[ "${runName}" == --backlog-run-quick ]]; then leakOffBy="--backlog-run-quick without --leakcheck"; fi
 fi
+if ((doLeakcheck && ! doContainer)); then doLeakcheck=0; leakOffBy="--no-container"; fi
+## Cargo.lock is tracked, so a run that rewrites nothing leaves it as it is.
+cargoLocked=(); if ((checkOnly)); then cargoLocked=(--locked); fi
+## fArea NAME: true when NAME is one of the areas asked for, or none were.
+fArea(){ local a; ((${#areas[@]})) || return 0; for a in "${areas[@]}"; do [[ "${a}" != "$1" ]] || return 0; done; return 1; }
 
 ## Every step in run order. A flag that turns one off adds a line here.
 fStep_Plan "Remote sync" "Format" "Lint" "Tests" "C leak checks" "Fuzz"
 ((doSync))      || fStep_Off "Remote sync"   "${syncOffBy}"
+((doFormat))    || fStep_Off "Format"        "--no-format"
+((doLint))      || fStep_Off "Lint"          "--no-lint"
+((doTests))     || fStep_Off "Tests"         "--no-tests"
 ((doLeakcheck)) || fStep_Off "C leak checks" "${leakOffBy}"
 ((doFuzz))      || fStep_Off "Fuzz"          "${fuzzOffBy}"
 
@@ -194,13 +244,12 @@ fFuzzFail_Prune(){
 fPreflight(){
 	local mode ni
 	fSection "shclwrap local CI/CD"
+	if [[ -n "${aliasNote}" ]]; then fEcho_Clean "Note .........: ${aliasNote}"; fi
 	if ((doQuiet && ! dryRun)); then fStep_Summary; return 0; fi
 	fEcho_Clean "Repo root ....: ${root}"
-	if   ((doCi && doQuick)); then mode='ci, quick (format check, fast lint, fast tests)'
-	elif ((doCi));            then mode='ci (format check, lint, tests)'
-	elif ((doQuick));         then mode='quick (format, fast lint, fast tests, short fuzz)'
-	else                           mode='full'
-	fi
+	mode="$( ((doQuick)) && echo quick || echo full)"
+	if [[ -n "${runName}" ]]; then mode="${runName#--}, ${mode}, format check only"; fi
+	if ((${#areas[@]})); then mode+=", areas: ${areas[*]}"; fi
 	fEcho_Clean "Mode .........: ${mode}"
 	fEcho_Clean "Remote sync ..: $( ((doSync)) && echo 'fast-forward when behind; abort when diverged' || echo '(skipped)')"
 	fEcho_Clean "Leak checks ..: $( ((doLeakcheck)) && echo 'CodeQL, CTU, heaptrack soak' || echo '(skipped)')"
@@ -213,11 +262,26 @@ fPreflight(){
 	fStep_Summary
 }
 
+## Each container is named and labeled by its run, so a run's containers can be found.
+fDockerLabels(){
+	local script runs named bad=0
+	for script in "${here}"/*.bash; do
+		[[ "${script##*/}" != cpu-cap-test.bash ]] || continue
+		runs="$(grep -cE '^[^#]*docker[[:space:]]run ' "${script}" || true)"
+		((runs)) || continue
+		named="$(grep -cF -- '--name "${name}" --label dev.project=shclwrap --label "dev.run=${runId}"' "${script}" || true)"
+		if [[ "${named}" != "${runs}" ]]; then echo "${script##*/}: ${runs} container run(s), ${named} named and labeled" >&2; bad=1; fi
+	done
+	return "${bad}"
+}
+
 ## The run's scratch folder, with a marker so cleanup only ever removes its own.
 fScratchName(){ work="${TMPDIR:-/tmp}/test_shclw_${stamp}$(printf '%02d' $((RANDOM % 100)))"; }
 fScratchName
 fCleanup(){
-	if [[ -f "${work}/.shclw-cicd-owned" ]]; then rm -rf -- "${work}"; fi
+	if [[ ! -f "${work}/.shclw-cicd-owned" ]]; then return 0; fi
+	if ((keepTemp)); then fEcho_Clean "Kept the scratch folder: ${work}"; fEcho_Clean; return 0; fi
+	rm -rf -- "${work}"
 	return 0
 }
 trap fCleanup EXIT
@@ -275,104 +339,151 @@ if fStep_On "Remote sync"; then
 	fStep_Pass
 fi
 
-#•••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••
-fStep "Format"
-if ((doCi)); then
-	unformatted="$(cd "${root}/source/go" && gofmt -l .)"
-	[[ -z "${unformatted}" ]] || fDie "gofmt would change: ${unformatted}"
-	(cd "${root}/source/rust" && cargo fmt --check) || fDie "cargo fmt would change files"
-	make -s -C "${root}/source/c" format-check || fDie "clang-format would change files"
-	fEcho "OK: formatted"
-else
-	(cd "${root}/source/go" && gofmt -w .)
-	(cd "${root}/source/rust" && cargo fmt)
-	make -s -C "${root}/source/c" format
-	fEcho "OK: gofmt, cargo fmt, and clang-format applied"
-fi
-fStep_Pass
-
-#•••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••
-fStep "Lint"
-fCheckPin go           "${PIN_GO}"          "$(go version)"
-fCheckPin staticcheck  "${PIN_STATICCHECK}" "$(staticcheck --version 2>/dev/null || echo missing)"
-fCheckPin shellcheck   "${PIN_SHELLCHECK}"  "$(shellcheck --version 2>/dev/null | sed -n 2p || echo missing)"
-fCheckPin ruff         "${PIN_RUFF}"        "$(ruff --version 2>/dev/null || echo missing)"
-fCheckPin gcc          "${PIN_GCC}"         "$(gcc --version 2>/dev/null | sed -n 1p || echo missing)"
-fCheckPin clang-format "${PIN_CLANG_FORMAT}" "$(clang-format --version 2>/dev/null || echo missing)"
-(cd "${root}/source/go" && go vet -p "${cpuJobs}" ./... && staticcheck ./...)
-fEcho "OK: go vet, staticcheck"
-(cd "${root}/source/rust" && cargo clippy --quiet -j "${cpuJobs}" --all-features --all-targets -- -D warnings -W clippy::pedantic)
-fEcho "OK: clippy"
-doC=1
-fShclHeader "${SHCL2_REV}" "${SHCL2_SHA256}" || doC=0
-fShclHeader "${SHCL3_REV}" "${SHCL3_SHA256}" || doC=0
-fShclHeader_Prune
-doPy=1
-fShclPy || doPy=0
+## The pinned shcl.h and shcl.py, once, from whichever step needs them first.
+## Sets doC and doPy.
+shclFetched=0; doC=0; doPy=0
 pyPath="${root}/cicd/cache/shcl-py/${SHCL3_PY_REV}"
-if ((doC && ! doQuick)); then
-	bash "${here}/c-checks.bash" lint 3 "${work}"
-	fEcho "OK: clang-tidy, gcc-15 at C17, and static analyzers (C over shcl 3; shcl's own held to source/c/shcl-known/)"
-elif ((doC)); then
-	fCTest_Skip "--quick" "${cTestsAnalyze[@]}"
-else
-	fCTest_Skip "no shcl.h" "${cTestsLint[@]}"
-fi
-mapfile -t shellFiles < <(find "${root}/cicd" -type f \( -name '*.bash' -o -path '*/hooks/*' \) | sort)
-((${#shellFiles[@]})) || fDie "shellcheck found no files"
-shellcheck "${shellFiles[@]}"
-fEcho "OK: shellcheck (${#shellFiles[@]} files)"
-## A .PHONY name with no rule makes make say "nothing to be done" and pass.
-fTest_Start debab "C Makefile .PHONY names have rules"
-read -ra phonyTargets < <(sed -n 's/^\.PHONY:[[:space:]]*//p' "${root}/source/c/Makefile") || true
-((${#phonyTargets[@]})) || fDie "no .PHONY line in source/c/Makefile"
-makeRules="$(grep -oE '^[A-Za-z0-9_-]+:' "${root}/source/c/Makefile")"
-for target in "${phonyTargets[@]}"; do
-	grep -qxF -- "${target}:" <<<"${makeRules}" || fDie "source/c/Makefile: .PHONY names ${target}, which has no rule"
-done
-fTest_Pass
-ruff check --quiet "${root}/cicd" "${root}/source/python"
-ruff format --check --quiet "${root}/cicd" "${root}/source/python"
-fEcho "OK: ruff"
-fStep_Pass
+fShclFetch(){
+	((! shclFetched)) || return 0
+	shclFetched=1; doC=1; doPy=1
+	fShclHeader "${SHCL2_REV}" "${SHCL2_SHA256}" || doC=0
+	fShclHeader "${SHCL3_REV}" "${SHCL3_SHA256}" || doC=0
+	fShclHeader_Prune
+	fShclPy || doPy=0
+	if ((doC && ! doContainer)); then fEcho "WARNING: C runs only in its container; --no-container skips it"; fi
+	return 0
+}
 
 #•••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••
-fStep "Tests"
-(cd "${root}/source/go" && TMPDIR="${work}" go test -p "${cpuJobs}" ./...)
-fEcho "OK: Go tests"
-(cd "${root}/source/rust" && TMPDIR="${work}" cargo test --quiet -j "${cpuJobs}" --all-features)
-fEcho "OK: Rust tests"
-if ((doPy)); then
-	## A text read or write left to the locale's encoding fails here, not first on Windows.
-	fTest_Start decd4 "Python tests and shared cases, encoding warnings as errors"
-	export PYTHONWARNDEFAULTENCODING=1 PYTHONWARNINGS=error::EncodingWarning
-	(cd "${root}/source/python" && TMPDIR="${work}" PYTHONPATH="${pyPath}" PYTHONPYCACHEPREFIX="${work}/pycache" python3 -m unittest discover -q -s tests)
-	PYTHONPATH="${pyPath}" PYTHONPYCACHEPREFIX="${work}/pycache" python3 "${here}/c_cases.py" --lang Python --version 3 --cases "${root}/tests/cases" \
-		--drive python3 "${root}/source/python/shclw_drive.py"
-	unset PYTHONWARNDEFAULTENCODING PYTHONWARNINGS
-	fTest_Pass
-else
-	fTest_Skip decd4 "Python tests and shared cases, encoding warnings as errors" "no shcl.py"
+if fStep_On "Format"; then
+	fStep "Format"
+	if ((checkOnly)); then
+		if fArea go; then
+			unformatted="$(cd "${root}/source/go" && gofmt -l .)"
+			[[ -z "${unformatted}" ]] || fDie "gofmt would change: ${unformatted}"
+		fi
+		if fArea rust; then (cd "${root}/source/rust" && cargo fmt --check) || fDie "cargo fmt would change files"; fi
+		if fArea c; then make -s -C "${root}/source/c" format-check || fDie "clang-format would change files"; fi
+		fEcho "OK: formatted"
+	else
+		(cd "${root}/source/go" && gofmt -w .)
+		(cd "${root}/source/rust" && cargo fmt)
+		make -s -C "${root}/source/c" format
+		fEcho "OK: gofmt, cargo fmt, and clang-format applied"
+	fi
+	fStep_Pass
 fi
-fTest -q de7yv "cicd flag mixes" bash "${here}/flags-test.bash"
-fTest dece1 "fuzz corpus keeps its bytes" env PYTHONPYCACHEPREFIX="${work}/pycache" PYTHONWARNDEFAULTENCODING=1 PYTHONWARNINGS=error::EncodingWarning python3 "${here}/fuzz_test.py" -q
-fTest -q decc9 "one cicd run per tree at a time" env TMPDIR="${work}" bash "${here}/lock-test.bash"
-fTest -q decdx "runs started in the same second get their own logs" env TMPDIR="${work}" bash "${here}/log-name-test.bash"
-fTest -q decb9 "line ends under core.autocrlf=true" env TMPDIR="${work}" bash "${here}/eol-test.bash"
-fTest -q dedkv "CPU caps and low priority" bash "${here}/cpu-cap-test.bash"
-fTest -q dedm7 "step and test lines" bash "${here}/steps-test.bash"
-if ((doC && doQuick)); then
-	bash "${here}/c-checks.bash" quick 3 "${work}"
-	fEcho "OK: gcc-15 at C17, C API tests, and shared cases over shcl 3, plain build"
-elif ((doC)); then
-	bash "${here}/c-checks.bash" test 3 "${work}"
-	fEcho "OK: C API tests and shared cases over shcl 3, sanitized, plain, and as C++"
+
+#•••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••
+if fStep_On "Lint"; then
+	fStep "Lint"
+	fCheckPin go           "${PIN_GO}"          "$(go version)"
+	fCheckPin staticcheck  "${PIN_STATICCHECK}" "$(staticcheck --version 2>/dev/null || echo missing)"
+	fCheckPin shellcheck   "${PIN_SHELLCHECK}"  "$(shellcheck --version 2>/dev/null | sed -n 2p || echo missing)"
+	fCheckPin ruff         "${PIN_RUFF}"        "$(ruff --version 2>/dev/null || echo missing)"
+	fCheckPin gcc          "${PIN_GCC}"         "$(gcc --version 2>/dev/null | sed -n 1p || echo missing)"
+	fCheckPin clang-format "${PIN_CLANG_FORMAT}" "$(clang-format --version 2>/dev/null || echo missing)"
+	if fArea go; then
+		(cd "${root}/source/go" && go vet -p "${cpuJobs}" ./... && staticcheck ./...)
+		fEcho "OK: go vet, staticcheck"
+	fi
+	if fArea rust; then
+		(cd "${root}/source/rust" && cargo clippy --quiet "${cargoLocked[@]}" -j "${cpuJobs}" --all-features --all-targets -- -D warnings -W clippy::pedantic)
+		fEcho "OK: clippy"
+	fi
+	fShclFetch
+	if ! fArea c; then
+		:
+	elif ((! doC)); then
+		fCTest_Skip "no shcl.h" "${cTestsLint[@]}"
+	elif ((doQuick)); then
+		fCTest_Skip "--quick" "${cTestsAnalyze[@]}"
+	elif ((! doContainer)); then
+		fCTest_Skip "--no-container" "${cTestsLint[@]}"
+	else
+		bash "${here}/c-checks.bash" lint 3 "${work}"
+		fEcho "OK: clang-tidy, gcc-15 at C17, and static analyzers (C over shcl 3; shcl's own held to source/c/shcl-known/)"
+	fi
+	if fArea cicd; then
+		mapfile -t shellFiles < <(find "${root}/cicd" -type f \( -name '*.bash' -o -path '*/hooks/*' \) | sort)
+		((${#shellFiles[@]})) || fDie "shellcheck found no files"
+		shellcheck "${shellFiles[@]}"
+		fEcho "OK: shellcheck (${#shellFiles[@]} files)"
+	fi
+	if fArea c; then
+		## A .PHONY name with no rule makes make say "nothing to be done" and pass.
+		fTest_Start debab "C Makefile .PHONY names have rules"
+		read -ra phonyTargets < <(sed -n 's/^\.PHONY:[[:space:]]*//p' "${root}/source/c/Makefile") || true
+		((${#phonyTargets[@]})) || fDie "no .PHONY line in source/c/Makefile"
+		makeRules="$(grep -oE '^[A-Za-z0-9_-]+:' "${root}/source/c/Makefile")"
+		for target in "${phonyTargets[@]}"; do
+			grep -qxF -- "${target}:" <<<"${makeRules}" || fDie "source/c/Makefile: .PHONY names ${target}, which has no rule"
+		done
+		fTest_Pass
+	fi
+	if fArea python || fArea cicd; then
+		ruff check --quiet "${root}/cicd" "${root}/source/python"
+		ruff format --check --quiet "${root}/cicd" "${root}/source/python"
+		fEcho "OK: ruff"
+	fi
+	fStep_Pass
 fi
-fStep_Pass
+
+#•••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••
+if fStep_On "Tests"; then
+	fStep "Tests"
+	fShclFetch
+	if fArea go; then
+		(cd "${root}/source/go" && TMPDIR="${work}" go test -p "${cpuJobs}" ./...)
+		fEcho "OK: Go tests"
+	fi
+	if fArea rust; then
+		(cd "${root}/source/rust" && TMPDIR="${work}" cargo test --quiet "${cargoLocked[@]}" -j "${cpuJobs}" --all-features)
+		fEcho "OK: Rust tests"
+	fi
+	if ! fArea python; then
+		:
+	elif ((doPy)); then
+		## A text read or write left to the locale's encoding fails here, not first on Windows.
+		fTest_Start decd4 "Python tests and shared cases, encoding warnings as errors"
+		export PYTHONWARNDEFAULTENCODING=1 PYTHONWARNINGS=error::EncodingWarning
+		(cd "${root}/source/python" && TMPDIR="${work}" PYTHONPATH="${pyPath}" PYTHONPYCACHEPREFIX="${work}/pycache" python3 -m unittest discover -q -s tests)
+		PYTHONPATH="${pyPath}" PYTHONPYCACHEPREFIX="${work}/pycache" python3 "${here}/c_cases.py" --lang Python --version 3 --cases "${root}/tests/cases" \
+			--drive python3 "${root}/source/python/shclw_drive.py"
+		unset PYTHONWARNDEFAULTENCODING PYTHONWARNINGS
+		fTest_Pass
+	else
+		fTest_Skip decd4 "Python tests and shared cases, encoding warnings as errors" "no shcl.py"
+	fi
+	if fArea cicd; then
+		fTest -q de7yv "cicd flag mixes" bash "${here}/flags-test.bash"
+		fTest dece1 "fuzz corpus keeps its bytes" env PYTHONPYCACHEPREFIX="${work}/pycache" PYTHONWARNDEFAULTENCODING=1 PYTHONWARNINGS=error::EncodingWarning python3 "${here}/fuzz_test.py" -q
+		fTest -q decc9 "one cicd run per tree at a time" env TMPDIR="${work}" bash "${here}/lock-test.bash"
+		fTest -q decdx "runs started in the same second get their own logs" env TMPDIR="${work}" bash "${here}/log-name-test.bash"
+		fTest -q decb9 "line ends under core.autocrlf=true" env TMPDIR="${work}" bash "${here}/eol-test.bash"
+		fTest -q dedkv "CPU caps and low priority" bash "${here}/cpu-cap-test.bash"
+		fTest -q dedm7 "step and test lines" bash "${here}/steps-test.bash"
+		fTest -q dedn4 "pre-push hook gates only a push to main that changes more than docs" env TMPDIR="${work}" bash "${here}/hook-test.bash"
+		fTest dedn5 "C containers carry the run's name and labels" fDockerLabels
+	fi
+	if ! fArea c || ((! doC)); then
+		:
+	elif ((! doContainer)); then
+		if ((doQuick)); then fCTest_Skip "--no-container" decbj; fi
+	elif ((doQuick)); then
+		bash "${here}/c-checks.bash" quick 3 "${work}"
+		fEcho "OK: gcc-15 at C17, C API tests, and shared cases over shcl 3, plain build"
+	else
+		bash "${here}/c-checks.bash" test 3 "${work}"
+		fEcho "OK: C API tests and shared cases over shcl 3, sanitized, plain, and as C++"
+	fi
+	fStep_Pass
+fi
 
 #•••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••
 if fStep_On "C leak checks"; then
 	fStep "C leak checks" hard
+	fShclFetch
 	bash "${here}/c-checks.bash" leakcheck 3 "${work}"
 	fEcho "OK: CodeQL, clang CTU, and heaptrack soak"
 	fStep_Pass
@@ -383,12 +494,13 @@ fi
 #•••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••
 if fStep_On "Fuzz"; then
 	fStep "Fuzz" hard
+	fShclFetch
 	mkdir -p "${work}/bin"
 	(cd "${root}/source/go" && go build -p "${cpuJobs}" -o "${work}/bin/go-drive" ./cmd/shclw-drive)
-	(cd "${root}/source/rust" && cargo build --quiet -j "${cpuJobs}" --release --all-features --bin shclw-drive)
+	(cd "${root}/source/rust" && cargo build --quiet "${cargoLocked[@]}" -j "${cpuJobs}" --release --all-features --bin shclw-drive)
 	cp "${root}/source/rust/target/release/shclw-drive" "${work}/bin/rust-drive"
 	failDir="${root}/cicd/artifacts/fuzz/${stamp}"
-	if ((fuzzSecs > 0 && doC)); then
+	if ((fuzzSecs > 0 && doC && doContainer)); then
 		## In the container, where the C drivers were built. Go's and Rust's run there too.
 		cDrive=shclw-drive; if ((doQuick)); then cDrive=shclw-drive-plain; fi
 		bash "${here}/c-checks.bash" fuzz 3 "${work}" "${cDrive}" --seconds "${fuzzSecs}" || {
@@ -429,3 +541,4 @@ fEcho_Clean
 ##		- 2026-10-24 JC: Two runs started in the same second get their own logs and scratch folders.
 ##		- 2026-10-25 JC: Step lines with Starting, PASS and FAIL. Steps turned off aren't counted, and the first section says why each is off.
 ##		- 2026-10-25 JC: nice 19 and idle IO. A quarter of the CPUs when busy, and for the hard stages. go vet, staticcheck, ruff, and Rust's test threads get the count too.
+##		- 2026-10-25 JC: The standard flags: --backlog-run-quick with areas, --backlog-run-full and --merge-gate rewrite nothing, and --ci and --gate are other names. --no-format, --no-lint, --no-tests, --no-container, --no-remote, --keep-temp, --list, --long. The C container is named and labeled by run.

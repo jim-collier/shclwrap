@@ -1,17 +1,42 @@
 #!/usr/bin/env bash
 
-##	Purpose: Runs the cicd checks (format check, lint, tests) before a push, so
-##		nothing reaches dev or main unverified. Turned on per clone with
-##		'git config core.hooksPath cicd/hooks'.
+##	Purpose: Runs cicd's merge gate before a push to main, per the Merge gate
+##		rule in the shared CICD rules. A push to any other branch, a branch
+##		delete, and a push to main that changes only docs run nothing.
+##		Turned on per clone with 'git config core.hooksPath cicd/hooks'.
 ##	Copyright © 2026 Jim Collier [ID: 2უNაɘ«҂թȹɤξπ๙¿ձϖ]
 ##	SPDX-License-Identifier: MIT
 
 set -Eeuo pipefail
 
+## Paths that no build or test reads. A push to main that changes only these skips the gate.
+docsOnly=('*.md' 'project/*')
+
 root="$(git rev-parse --show-toplevel)"
+
+fNeedsGate(){   ## fNeedsGate PATH
+	local glob
+	for glob in "${docsOnly[@]}"; do
+		# shellcheck disable=2053  ## glob match on purpose
+		[[ "$1" != ${glob} ]] || return 1
+	done
+	return 0
+}
+
+## stdin has one line per ref: local ref, local sha, remote ref, remote sha.
+gate=0
+while read -r _ localSha remoteRef remoteSha; do
+	[[ "${remoteRef}" == refs/heads/main ]] || continue
+	[[ ! "${localSha}" =~ ^0+$ ]] || continue
+	if [[ "${remoteSha}" =~ ^0+$ ]] || ! git cat-file -e "${remoteSha}^{commit}" 2>/dev/null; then gate=1; continue; fi
+	while IFS= read -r path; do
+		if fNeedsGate "${path}"; then gate=1; break; fi
+	done < <(git diff --name-only "${remoteSha}" "${localSha}")
+done
+((gate)) || exit 0
 
 ## GIT_DIR and friends from the hook would point every git call in the gate at
 ## this repo's internals.
 for gitVar in $(git rev-parse --local-env-vars); do unset "${gitVar}"; done
 
-exec "${root}/cicd/cicd.bash" --ci --quiet --no-sync
+exec "${root}/cicd/cicd.bash" --merge-gate --quiet

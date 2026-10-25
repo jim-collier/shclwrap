@@ -412,6 +412,42 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Commit: dddbb33
 	- Test case: dedm7, `cicd/steps-test.bash`, now covers the test lines and one name per ID.
 
+- cicd flags for a full run that changes nothing in the tree
+	- ID: 2026102319573100
+	- Type: Enhancement
+	- Status: Waiting on automated testing
+	- Needs local test suite run?: Yes, `cicd/cicd.bash --backlog-run-full`, with `git status` and `git diff` the same before and after, to see the leak checks and fuzz pass under a run that rewrites nothing.
+	- Priority: High
+	- Opened: 2026-10-23
+	- Opened by: JC
+	- Requirements:
+		- One command line runs every check without rewriting a tracked file.
+		- A flag to turn off each stage that has none today: format, lint, and tests.
+		- Fuzz can run with `--ci`, which today turns it off with no way back on.
+		- Give the C container a name or label, so a run's container can be found.
+		- Sweeping override, 2026-10-24: this supersedes any earlier decision on this project that conflicts with it.
+		- Overrides JC's `--fuzz` decision below, design.md's `Fuzzing` part where `--ci` is the pre-push hook, and the private notes' line that the hook runs `--ci` on every push.
+	- Notes:
+		- Without `--ci`, the format stage rewrites tracked files with `gofmt -w`, `cargo fmt`, and `clang-format -i`.
+		- Until then a full test run goes in 2 steps, `--ci --leakcheck --no-sync -y` and then the fuzz by hand.
+		- 2026-10-24, CICD reset: this is the reset's `standard flags` item, raised to High, per the flags in `CICD style guide` and per `Merge gate` in the shared CICD rules. The default run fits in about an hour, beside `--quick`, `--long` with `--slow` as another name, `--leakcheck`, `--no-leakcheck`, `--backlog-run-quick [<area>...]`, `--backlog-run-full`, `--merge-gate`, `--no-container`, `--no-remote`, `--no-sync`, `--keep-temp`, `--list`, `--help` and `--quiet`. `--gate` and `--ci` stay as other names for `--backlog-run-quick` and `--merge-gate`, and say so in one line. `--backlog-run-full` is the one full line that rewrites nothing, in place of `--fuzz`. None of the 3 dogfood, publish, commit, push, install, sync, rewrite a tracked file or prompt. The pre-push hook runs `--merge-gate` only on a push to main, and skips one that changes only docs and `project/`. A push to dev runs no gate.
+	- Progress log:
+		- 2026-10-25: Built the standard flags. `--merge-gate` and `--backlog-run-full` run every check of the default run, fuzz and leak checks included, and `--backlog-run-quick [go|rust|python|c|cicd...]` the format check, lint and the fast tests. None of the 3 syncs or prompts, format only checks, and cargo runs `--locked`, since `Cargo.lock` is tracked. `--ci` and `--gate` say which name they stand for.
+		- `--no-format`, `--no-lint` and `--no-tests` turn their step off, with the flag in the off list. `--long` and `--slow` are the default run, since nothing here takes hours. `--list` is `--dry-run` for now, `--no-remote` does nothing until there are other hosts, and `--keep-temp` keeps the scratch folder and prints where it is.
+		- `--no-container` skips C, which runs only in its container, until 2026102416400010 brings the host fallback.
+		- The pre-push hook runs `--merge-gate --quiet` only on a push to main. A push to main that changes only `*.md` and `project/`, the `docsOnly` list in the hook, skips it, and so does a branch delete.
+		- Each C container is named `shclwrap-<run folder>-<mode>`, labeled `dev.project=shclwrap` and `dev.run=<run folder>`. Stopping them by label at the end is 2026102416400020.
+		- Split off 2026102507433885: `--list` naming the test IDs, which waits on the tests getting IDs.
+		- 2026-10-25: de7yv's asserts for `--ci` changed, since `--ci` is now `--merge-gate`. `--ci` and `--ci --leakcheck` were sync on, fuzz off, and are sync off, fuzz on. `--ci --quick` and `--ci --quick --leakcheck` had fuzz off, and now on. dedm7's off lists for `--ci` mixes now name `Remote sync (--merge-gate)` in place of `Fuzz (--ci)` and `C leak checks (--ci ...)`.
+	- Decisions:
+		- JC, 2026-10-24: a `--fuzz` flag turns fuzz back on under `--ci`, so `--ci --leakcheck --fuzz --no-sync -y` is the one full line. Overridden by the 2026-10-24 reset: `--backlog-run-full` is that line.
+		- `--quick` with a named run keeps the named run's no-rewrite rules, so `--ci --quick` is a format check, lint, quick tests and a 10s fuzz, with no sync.
+		- The C container's name has the hook's PID added when a container of that name already exists, which only happens with `c-checks.bash` run by hand on a WORK folder name another tree uses.
+	- Branch: round-1025
+	- Test case: de7yv (`cicd/flags-test.bash`, 25 flag mixes, the Mode line, the 2 other names and an unknown area), dedm7 (off lists for the new flags), dedn4 (`cicd/hook-test.bash`), and dedn5 (every container run in cicd named and labeled), all in the tests stage.
+	- Verified: dedn4 failed 11 of 11 cases with the old hook, and 2 with an empty docs list, and passes now. dedn5 failed with the `--name` or the project label taken out. `--backlog-run-quick` passed, CLEAN, with the tree's diff and status the same before and after, and a C container named `shclwrap-test_shclw_20261025-07341430-quick` with its `dev.run` label showed while it ran. A `--backlog-run-quick python c --no-format --no-lint --no-container --keep-temp` run fetched the pins in the tests step, skipped C with the flag, and kept its folder. shellcheck passed.
+	- Swept: every `docker run` in cicd is the one in `c-checks.bash`. cicd.bash, the hook, README.md and design.md's `Fuzzing` part were the only places naming `--ci` or the hook's flags. The 4 language bindings don't read cicd flags.
+
 - Create-only Write
 	- ID: 2026101513330015
 	- Type: Feature
@@ -637,26 +673,18 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Requirements:
 		- The generated fuzz in `fuzz.py`, each language against Go, and Go's own fuzzer each get an ID and print one line per run.
 
-- cicd flags for a full run that changes nothing in the tree
-	- ID: 2026102319573100
+- `--list` names the test IDs a run would run
+	- ID: 2026102507433885
 	- Type: Enhancement
 	- Status: Queued
 	- Priority: High
-	- Opened: 2026-10-23
+	- Opened: 2026-10-25 07:43
 	- Opened by: JC
+	- Parent ID: 2026102319573100
+	- Prereq IDs: 2026102507142902, 2026102507142905, 2026102507142907
 	- Requirements:
-		- One command line runs every check without rewriting a tracked file.
-		- A flag to turn off each stage that has none today: format, lint, and tests.
-		- Fuzz can run with `--ci`, which today turns it off with no way back on.
-		- Give the C container a name or label, so a run's container can be found.
-		- Sweeping override, 2026-10-24: this supersedes any earlier decision on this project that conflicts with it.
-		- Overrides JC's `--fuzz` decision below, design.md's `Fuzzing` part where `--ci` is the pre-push hook, and the private notes' line that the hook runs `--ci` on every push.
-	- Notes:
-		- Without `--ci`, the format stage rewrites tracked files with `gofmt -w`, `cargo fmt`, and `clang-format -i`.
-		- Until then a full test run goes in 2 steps, `--ci --leakcheck --no-sync -y` and then the fuzz by hand.
-		- 2026-10-24, CICD reset: this is the reset's `standard flags` item, raised to High, per the flags in `CICD style guide` and per `Merge gate` in the shared CICD rules. The default run fits in about an hour, beside `--quick`, `--long` with `--slow` as another name, `--leakcheck`, `--no-leakcheck`, `--backlog-run-quick [<area>...]`, `--backlog-run-full`, `--merge-gate`, `--no-container`, `--no-remote`, `--no-sync`, `--keep-temp`, `--list`, `--help` and `--quiet`. `--gate` and `--ci` stay as other names for `--backlog-run-quick` and `--merge-gate`, and say so in one line. `--backlog-run-full` is the one full line that rewrites nothing, in place of `--fuzz`. None of the 3 dogfood, publish, commit, push, install, sync, rewrite a tracked file or prompt. The pre-push hook runs `--merge-gate` only on a push to main, and skips one that changes only docs and `project/`. A push to dev runs no gate.
-	- Decisions:
-		- JC, 2026-10-24: a `--fuzz` flag turns fuzz back on under `--ci`, so `--ci --leakcheck --fuzz --no-sync -y` is the one full line.
+		- Per `--list` in `CICD style guide` in the shared CICD rules: print the steps and test IDs the other flags given would run, and run nothing.
+		- Today `--list` is another name for `--dry-run`, which lists the steps only. Most tests have no ID yet.
 
 - Run the tests on Windows and macOS
 	- ID: 2026101512024174

@@ -460,7 +460,11 @@ An ops script is one op per line, with fields split by tabs. `\t`, `\n`, `\r`, a
 
 - Go's own fuzzer runs `Run` on random documents and scripts against every version, looking for panics.
 
-- `cicd/cicd.bash` runs format, lint, tests, the C leak checks, and both fuzzers. `--ci` runs format check, lint, and tests, and is the pre-push hook. `--quick` leaves out the C sanitizers, analyzers, and leak checks, and anything that needs the network, and fuzzes for 10s. `--leakcheck` adds the leak checks to either, and `--no-leakcheck` drops them from any run. `--dry-run` shows the stages a mix of flags picks.
+- `cicd/cicd.bash` runs format, lint, tests, the C leak checks, and both fuzzers. `--quick` leaves out the C sanitizers, analyzers, and leak checks, and anything that needs the network, and fuzzes for 10s. `--leakcheck` adds the leak checks to it, and `--no-leakcheck` drops them from any run. `--dry-run` or `--list` shows the stages a mix of flags picks.
+	- 3 runs never sync, rewrite a tracked file, or prompt. Format only checks, and cargo runs `--locked`. `--merge-gate` and `--backlog-run-full` run every check of the default run. `--backlog-run-quick` runs the format check, lint, and the fast tests, and can be held to some of go, rust, python, c and cicd. `--ci` and `--gate` are other names for `--merge-gate` and `--backlog-run-quick`.
+	- `--no-format`, `--no-lint`, `--no-tests`, `--no-fuzz` and `--no-sync` turn one step off. `--no-container` skips C, which runs only in its container. `--keep-temp` keeps the run's scratch folder.
+	- The pre-push hook runs `--merge-gate` only on a push to main. A push to main that changes only `*.md` files and `project/` skips it, and so does a push to any other branch or a branch delete.
+	- Each C container is named `shclwrap-<run folder>-<mode>`, with labels `dev.project=shclwrap` and `dev.run=<run folder>`.
 
 - One run goes at a time in a tree, since runs share `cicd/artifacts/`, `cicd/cache/`, and the checkout. A second run, such as the push hook, waits for the first and says which run it waits on. `c-checks.bash` run alone takes the same lock. Runs in separate worktrees don't wait on each other. Each run still gets its own log in `cicd/artifacts/lint/`, named for the second it started, so a run started in the same second as another waits for the next second to name its log.
 

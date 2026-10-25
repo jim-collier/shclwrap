@@ -61,9 +61,16 @@ if [[ "$(fImageLayers "${tag}")" != "${oldLayers}" ]]; then docker builder prune
 network=none
 if [[ "${mode}" == leakcheck ]]; then network=bridge; fi
 
+## Named and labeled by the run's scratch folder, so a run's container can be found.
+runId="${work##*/}"; runId="${runId//[^A-Za-z0-9_.-]/_}"
+name="shclwrap-${runId}-${mode}"
+## A WORK name another tree also uses, run alone.
+if docker container inspect "${name}" >/dev/null 2>&1; then name+="-$$"; fi
+
 ## The init passes Ctrl+C on to the whole tree, so an aborted run doesn't leave the container going.
 ## nice on this side doesn't reach the container, so it gets a CPU cap, a low share, and its own nice.
 exec docker run --rm --init --env TINI_KILL_PROCESS_GROUP=1 --user "$(id -u):$(id -g)" --network="${network}" \
+	--name "${name}" --label dev.project=shclwrap --label "dev.run=${runId}" \
 	--cpus "${cpuJobs}" --cpu-shares 256 --env SHCLW_JOBS="${cpuJobs}" --env GOMAXPROCS="${cpuJobs}" \
 	--env HOME=/home/ci \
 	--mount "type=bind,src=${home},dst=/home/ci" \
