@@ -455,6 +455,7 @@ if fStep_On "Tests"; then
 		fTest -q dednv "C runs on the host without docker or its image" env TMPDIR="${work}" bash "${here}/c-host-test.bash"
 		fTest -q dedpt "Go, Rust and Python run on the host without docker or their image" env TMPDIR="${work}" bash "${here}/lang-host-test.bash"
 		fTest -q dedqv "a run's end removes its containers and stale images, and nothing else" env TMPDIR="${work}" bash "${here}/docker-tidy-test.bash"
+		fTest -q dedta "stale headers and fuzz sets are pruned, and nothing else" env TMPDIR="${work}" bash "${here}/prune-test.bash"
 	fi
 	if ! fArea c || ((! doC)); then
 		:
