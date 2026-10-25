@@ -361,6 +361,8 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- `c-checks.bash` checks the load itself, not taking `cicd.bash`'s count, since it's a step of its own and also runs alone.
 		- Inside the container the count comes only from `SHCLW_JOBS`, since `nproc` there sees every host CPU.
 		- Windows has no load average, so busy there means the CPUs are over half used.
+	- Branch: round-1025
+	- Commit: 9ba77f5
 	- Test case: dedkv, `cicd/cpu-cap-test.bash`, in the tests stage. It checks the count against a table, `nice 19` and idle IO, and that every parallel call and `docker run` takes the count. On the old scripts it failed 15 checks, and it passes now. Its ID is in the reset's new format.
 
 - Create-only Write
