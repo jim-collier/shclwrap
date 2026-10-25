@@ -448,6 +448,35 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Verified: dedn4 failed 11 of 11 cases with the old hook, and 2 with an empty docs list, and passes now. dedn5 failed with the `--name` or the project label taken out. `--backlog-run-quick` passed, CLEAN, with the tree's diff and status the same before and after, and a C container named `shclwrap-test_shclw_20261025-07341430-quick` with its `dev.run` label showed while it ran. A `--backlog-run-quick python c --no-format --no-lint --no-container --keep-temp` run fetched the pins in the tests step, skipped C with the flag, and kept its folder. shellcheck passed.
 	- Swept: every `docker run` in cicd is the one in `c-checks.bash`. cicd.bash, the hook, README.md and design.md's `Fuzzing` part were the only places naming `--ci` or the hook's flags. The 4 language bindings don't read cicd flags.
 
+- CICD reset: Go, Rust and Python in a pinned image
+	- ID: 2026102507474940
+	- Type: Enhancement
+	- Status: Waiting on automated testing
+	- Needs local test suite run?: Yes, `cicd/cicd.bash --backlog-run-full`, to see the format check, lint, tests, drivers and both fuzzers pass through the image in one full run.
+	- Priority: High
+	- Opened: 2026-10-25 07:47
+	- Opened by: JC
+	- Parent ID: 2026102416400010
+	- Prereq IDs: 2026102507474935
+	- Related IDs: 2026102416400020
+	- Requirements:
+		- Go, Rust, and Python build and test in a pinned image, from a recipe in `cicd/`, with the toolchains in `cicd/tool-pins.env` and `rust-toolchain.toml`.
+		- Falls back to the host the same way as the C checks. `--no-container` runs them on the host.
+		- A test whose point is the real OS, such as Windows file behavior, stays on the host or a test box.
+	- Progress log:
+		- 2026-10-25: `cicd/Lang.Dockerfile` builds Go, Rust (rustup, from `rust-toolchain.toml`), Python 3.14, staticcheck and ruff on the C image's base, each pinned by version and the downloads by sha256. `cicd/lang-checks.bash` runs a mode in it, or on the host the way `c-checks.bash` does, with one `WARNING: Go, Rust and Python run on the host:` line. `lang-in-container.bash` has the commands that were in cicd.bash.
+		- The format step, lint, tests, fuzz drivers, Go's fuzzer and the no-C fuzz go through it. shellcheck and cicd's own tests stay on the host. Module, crate, build and ruff caches are kept in `cicd/cache/lang-home/`.
+		- In the image a tool off its pin is fatal. That caught `python3` 3.14.8-1 bringing interpreter 3.14.9, so `python3.14` is pinned too.
+		- shellcheck's file list and dedkv's `nproc` sweep now skip `cicd/cache/` and `cicd/artifacts/`, which hold the crate and module checkouts.
+	- Decisions:
+		- The tree is mounted read-only, except for the format step that rewrites it and Go's fuzzer, which saves failing inputs into `testdata/`.
+		- The container has the network, for a cold module or crate cache.
+		- After a real rebuild the build cache prune keeps a week (`--filter until=168h`). The C image's unfiltered prune is left for 2026102416400020.
+	- Branch: round-1025
+	- Test case: dedpt, `cicd/lang-host-test.bash`, in the tests stage. It runs a copy of `lang-checks.bash` with a fake docker that's down, one whose build fails, and one that works, and under `SHCLW_LANG_HOST=1`, and checks the mounts and areas the container gets. dedkv now also covers the new scripts.
+	- Verified: dedpt failed with the build failure's fallback taken out and with the tree mounted writable for fuzz, and passes. dedkv failed with a job count or `fLowPriority` taken out. In the image: format check, lint, tests, drivers, a 20s fuzz and Go's fuzzer. `--backlog-run-quick go rust python cicd` was CLEAN, and passed again with `--no-container` and with a docker whose daemon is down, on the host. `--ci --quick` with only the fuzz step passed with the image's drivers in the C container. The tree's status was the same before and after. shellcheck passed.
+	- Swept: cicd.bash has no Go, cargo, ruff or staticcheck call left, and its `python3` calls are cicd's own tests. Every `docker run` in cicd is named, labeled, capped and niced (dedn5, dedkv). design.md's `Fuzzing` part was the only doc naming where Go, Rust and Python run. The 4 language bindings don't read cicd flags.
+
 - Create-only Write
 	- ID: 2026101513330015
 	- Type: Feature
@@ -582,21 +611,6 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Progress log:
 		- 2026-10-25: Split into 2026102507474935 (C falls back to the host) and 2026102507474940 (Go, Rust and Python in a pinned image).
 		- 2026-10-25: 2026102507474935 is Done. C runs on the host with docker missing, a C image that won't build, or `--no-container`.
-
-- CICD reset: Go, Rust and Python in a pinned image
-	- ID: 2026102507474940
-	- Type: Enhancement
-	- Status: Queued
-	- Priority: High
-	- Opened: 2026-10-25 07:47
-	- Opened by: JC
-	- Parent ID: 2026102416400010
-	- Prereq IDs: 2026102507474935
-	- Related IDs: 2026102416400020
-	- Requirements:
-		- Go, Rust, and Python build and test in a pinned image, from a recipe in `cicd/`, with the toolchains in `cicd/tool-pins.env` and `rust-toolchain.toml`.
-		- Falls back to the host the same way as the C checks. `--no-container` runs them on the host.
-		- A test whose point is the real OS, such as Windows file behavior, stays on the host or a test box.
 
 - CICD reset: container cleanup
 	- ID: 2026102416400020

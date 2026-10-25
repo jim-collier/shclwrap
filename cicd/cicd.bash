@@ -40,9 +40,9 @@
 ##	   --no-lint       skip the lint stage
 ##	   --no-tests      skip the tests stage
 ##	   --no-fuzz       skip the fuzz stage
-##	   --no-container  run C on the host too, skipping what it has no tool for,
-##	                   and the leak checks. C also runs on the host when docker is
-##	                   missing or its image won't build, and says so.
+##	   --no-container  run C, Go, Rust and Python on the host, skipping what it has
+##	                   no tool for, and the leak checks. Each also runs on the host
+##	                   when docker is missing or its image won't build, and says so.
 ##	   --no-remote     skip other hosts and VMs. There are none yet.
 ##	  Other:
 ##	   --keep-temp     keep the run's scratch folder, and print where it is
@@ -143,12 +143,12 @@ if [[ -z "${doLeakcheck}" ]]; then
 	if [[ "${runName}" == --backlog-run-quick ]]; then leakOffBy="--backlog-run-quick without --leakcheck"; fi
 fi
 if ((doLeakcheck && ! doContainer)); then doLeakcheck=0; leakOffBy="--no-container"; fi
-## c-checks.bash runs C on the host with this.
-if ((! doContainer)); then export SHCLW_C_HOST=1; fi
+## c-checks.bash and lang-checks.bash run on the host with these.
+if ((! doContainer)); then export SHCLW_C_HOST=1 SHCLW_LANG_HOST=1; fi
 ## Cargo.lock is tracked, so a run that rewrites nothing leaves it as it is.
-cargoLocked=(); if ((checkOnly)); then cargoLocked=(--locked); fi
-## fArea NAME: true when NAME is one of the areas asked for, or none were.
-fArea(){ local a; ((${#areas[@]})) || return 0; for a in "${areas[@]}"; do [[ "${a}" != "$1" ]] || return 0; done; return 1; }
+export SHCLW_CARGO_LOCKED="${checkOnly}" SHCLW_AREAS="${areas[*]}"
+## fArea NAME...: true when any NAME is one of the areas asked for, or none were.
+fArea(){ local a n; ((${#areas[@]})) || return 0; for a in "${areas[@]}"; do for n in "$@"; do [[ "${a}" != "${n}" ]] || return 0; done; done; return 1; }
 
 ## Every step in run order. A flag that turns one off adds a line here.
 fStep_Plan "Remote sync" "Format" "Lint" "Tests" "C leak checks" "Fuzz"
@@ -343,9 +343,8 @@ if fStep_On "Remote sync"; then
 fi
 
 ## The pinned shcl.h and shcl.py, once, from whichever step needs them first.
-## Sets doC and doPy.
+## Sets doC, and doPy, which lang-checks.bash gets as SHCLW_PY.
 shclFetched=0; doC=0; doPy=0
-pyPath="${root}/cicd/cache/shcl-py/${SHCL3_PY_REV}"
 fShclFetch(){
 	((! shclFetched)) || return 0
 	shclFetched=1; doC=1; doPy=1
@@ -353,6 +352,7 @@ fShclFetch(){
 	fShclHeader "${SHCL3_REV}" "${SHCL3_SHA256}" || doC=0
 	fShclHeader_Prune
 	fShclPy || doPy=0
+	export SHCLW_PY="${doPy}"
 	return 0
 }
 
@@ -360,16 +360,11 @@ fShclFetch(){
 if fStep_On "Format"; then
 	fStep "Format"
 	if ((checkOnly)); then
-		if fArea go; then
-			unformatted="$(cd "${root}/source/go" && gofmt -l .)"
-			[[ -z "${unformatted}" ]] || fDie "gofmt would change: ${unformatted}"
-		fi
-		if fArea rust; then (cd "${root}/source/rust" && cargo fmt --check) || fDie "cargo fmt would change files"; fi
+		if fArea go rust; then bash "${here}/lang-checks.bash" format-check "${work}" || fDie "gofmt or cargo fmt would change files"; fi
 		if fArea c; then make -s -C "${root}/source/c" format-check || fDie "clang-format would change files"; fi
 		fEcho "OK: formatted"
 	else
-		(cd "${root}/source/go" && gofmt -w .)
-		(cd "${root}/source/rust" && cargo fmt)
+		bash "${here}/lang-checks.bash" format "${work}"
 		make -s -C "${root}/source/c" format
 		fEcho "OK: gofmt, cargo fmt, and clang-format applied"
 	fi
@@ -379,20 +374,11 @@ fi
 #•••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••
 if fStep_On "Lint"; then
 	fStep "Lint"
-	fCheckPin go           "${PIN_GO}"          "$(go version)"
-	fCheckPin staticcheck  "${PIN_STATICCHECK}" "$(staticcheck --version 2>/dev/null || echo missing)"
 	fCheckPin shellcheck   "${PIN_SHELLCHECK}"  "$(shellcheck --version 2>/dev/null | sed -n 2p || echo missing)"
-	fCheckPin ruff         "${PIN_RUFF}"        "$(ruff --version 2>/dev/null || echo missing)"
 	fCheckPin gcc          "${PIN_GCC}"         "$(gcc --version 2>/dev/null | sed -n 1p || echo missing)"
 	fCheckPin clang-format "${PIN_CLANG_FORMAT}" "$(clang-format --version 2>/dev/null || echo missing)"
-	if fArea go; then
-		(cd "${root}/source/go" && go vet -p "${cpuJobs}" ./... && staticcheck ./...)
-		fEcho "OK: go vet, staticcheck"
-	fi
-	if fArea rust; then
-		(cd "${root}/source/rust" && cargo clippy --quiet "${cargoLocked[@]}" -j "${cpuJobs}" --all-features --all-targets -- -D warnings -W clippy::pedantic)
-		fEcho "OK: clippy"
-	fi
+	## go vet, staticcheck, clippy, and ruff over cicd and source/python.
+	if fArea go rust python cicd; then bash "${here}/lang-checks.bash" lint "${work}"; fi
 	fShclFetch
 	if ! fArea c; then
 		:
@@ -405,7 +391,9 @@ if fStep_On "Lint"; then
 		fEcho "OK: clang-tidy, gcc-15 at C17, and static analyzers (C over shcl 3; shcl's own held to source/c/shcl-known/)"
 	fi
 	if fArea cicd; then
-		mapfile -t shellFiles < <(find "${root}/cicd" -type f \( -name '*.bash' -o -path '*/hooks/*' \) | sort)
+		## cache/ holds other projects' code, such as the module and crate checkouts.
+		mapfile -t shellFiles < <(find "${root}/cicd" \( -path "${root}/cicd/cache" -o -path "${root}/cicd/artifacts" \) -prune \
+			-o -type f \( -name '*.bash' -o -path '*/hooks/*' \) -print | sort)
 		((${#shellFiles[@]})) || fDie "shellcheck found no files"
 		shellcheck "${shellFiles[@]}"
 		fEcho "OK: shellcheck (${#shellFiles[@]} files)"
@@ -421,11 +409,6 @@ if fStep_On "Lint"; then
 		done
 		fTest_Pass
 	fi
-	if fArea python || fArea cicd; then
-		ruff check --quiet "${root}/cicd" "${root}/source/python"
-		ruff format --check --quiet "${root}/cicd" "${root}/source/python"
-		fEcho "OK: ruff"
-	fi
 	fStep_Pass
 fi
 
@@ -433,28 +416,8 @@ fi
 if fStep_On "Tests"; then
 	fStep "Tests"
 	fShclFetch
-	if fArea go; then
-		(cd "${root}/source/go" && TMPDIR="${work}" go test -p "${cpuJobs}" ./...)
-		fEcho "OK: Go tests"
-	fi
-	if fArea rust; then
-		(cd "${root}/source/rust" && TMPDIR="${work}" cargo test --quiet "${cargoLocked[@]}" -j "${cpuJobs}" --all-features)
-		fEcho "OK: Rust tests"
-	fi
-	if ! fArea python; then
-		:
-	elif ((doPy)); then
-		## A text read or write left to the locale's encoding fails here, not first on Windows.
-		fTest_Start decd4 "Python tests and shared cases, encoding warnings as errors"
-		export PYTHONWARNDEFAULTENCODING=1 PYTHONWARNINGS=error::EncodingWarning
-		(cd "${root}/source/python" && TMPDIR="${work}" PYTHONPATH="${pyPath}" PYTHONPYCACHEPREFIX="${work}/pycache" python3 -m unittest discover -q -s tests)
-		PYTHONPATH="${pyPath}" PYTHONPYCACHEPREFIX="${work}/pycache" python3 "${here}/c_cases.py" --lang Python --version 3 --cases "${root}/tests/cases" \
-			--drive python3 "${root}/source/python/shclw_drive.py"
-		unset PYTHONWARNDEFAULTENCODING PYTHONWARNINGS
-		fTest_Pass
-	else
-		fTest_Skip decd4 "Python tests and shared cases, encoding warnings as errors" "no shcl.py"
-	fi
+	## The Go, Rust and Python tests, and Python's shared cases (decd4).
+	if fArea go rust python; then bash "${here}/lang-checks.bash" test "${work}"; fi
 	if fArea cicd; then
 		fTest -q de7yv "cicd flag mixes" bash "${here}/flags-test.bash"
 		fTest dece1 "fuzz corpus keeps its bytes" env PYTHONPYCACHEPREFIX="${work}/pycache" PYTHONWARNDEFAULTENCODING=1 PYTHONWARNINGS=error::EncodingWarning python3 "${here}/fuzz_test.py" -q LoadCorpus
@@ -467,6 +430,7 @@ if fStep_On "Tests"; then
 		fTest -q dedn4 "pre-push hook gates only a push to main that changes more than docs" env TMPDIR="${work}" bash "${here}/hook-test.bash"
 		fTest dedn5 "C containers carry the run's name and labels" fDockerLabels
 		fTest -q dednv "C runs on the host without docker or its image" env TMPDIR="${work}" bash "${here}/c-host-test.bash"
+		fTest -q dedpt "Go, Rust and Python run on the host without docker or their image" env TMPDIR="${work}" bash "${here}/lang-host-test.bash"
 	fi
 	if ! fArea c || ((! doC)); then
 		:
@@ -495,10 +459,7 @@ fi
 if fStep_On "Fuzz"; then
 	fStep "Fuzz" hard
 	fShclFetch
-	mkdir -p "${work}/bin"
-	(cd "${root}/source/go" && go build -p "${cpuJobs}" -o "${work}/bin/go-drive" ./cmd/shclw-drive)
-	(cd "${root}/source/rust" && cargo build --quiet "${cargoLocked[@]}" -j "${cpuJobs}" --release --all-features --bin shclw-drive)
-	cp "${root}/source/rust/target/release/shclw-drive" "${work}/bin/rust-drive"
+	bash "${here}/lang-checks.bash" drivers "${work}"
 	failDir="${root}/cicd/artifacts/fuzz/${stamp}"
 	if ((fuzzSecs > 0 && doC)); then
 		## Where the C drivers were built, in the container or on the host. Go's and Rust's run there too.
@@ -508,15 +469,13 @@ if fStep_On "Fuzz"; then
 			fDie "fuzz found failures; cases are in ${failDir}"
 		}
 	elif ((fuzzSecs > 0)); then
-		pyArgs=(); if ((doPy)); then pyArgs=(--python "${root}/source/python/shclw_drive.py" --python-path "${pyPath}"); fi
-		PYTHONPYCACHEPREFIX="${work}/pycache" python3 "${here}/fuzz.py" --go "${work}/bin/go-drive" --rust "${work}/bin/rust-drive" "${pyArgs[@]}" --seconds "${fuzzSecs}" \
-			--cases "${root}/tests/cases" --work "${work}/fuzz" --out "${failDir}" || {
-			if [[ -d "${failDir}" ]]; then touch "${failDir}/.shclw-cicd-owned"; fFuzzFail_Prune; fi
+		bash "${here}/lang-checks.bash" fuzz "${work}" --seconds "${fuzzSecs}" || {
+			if [[ -d "${work}/fuzz-fail" ]]; then mkdir -p "${failDir%/*}"; cp -r "${work}/fuzz-fail" "${failDir}"; touch "${failDir}/.shclw-cicd-owned"; fFuzzFail_Prune; fi
 			fDie "fuzz found failures; cases are in ${failDir}"
 		}
 	fi
 	if ((goFuzzSecs > 0)); then
-		(cd "${root}/source/go" && TMPDIR="${work}" go test ./shclw/ -run '^$' -fuzz=FuzzRun -fuzztime="${goFuzzSecs}s" -p "${cpuJobs}" -parallel "${cpuJobs}")
+		bash "${here}/lang-checks.bash" gofuzz "${work}" "${goFuzzSecs}"
 	fi
 	fEcho "OK: fuzz"
 	fStep_Pass
@@ -543,3 +502,4 @@ fEcho_Clean
 ##		- 2026-10-25 JC: nice 19 and idle IO. A quarter of the CPUs when busy, and for the hard stages. go vet, staticcheck, ruff, and Rust's test threads get the count too.
 ##		- 2026-10-25 JC: The standard flags: --backlog-run-quick with areas, --backlog-run-full and --merge-gate rewrite nothing, and --ci and --gate are other names. --no-format, --no-lint, --no-tests, --no-container, --no-remote, --keep-temp, --list, --long. The C container is named and labeled by run.
 ##		- 2026-10-25 JC: C runs on the host under --no-container, or when docker is missing or the C image won't build.
+##		- 2026-10-25 JC: Go, Rust and Python run in their own pinned image through lang-checks.bash, with the same host fallback.

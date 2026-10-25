@@ -62,20 +62,26 @@ plan="$(bash "${here}/cicd.bash" --dry-run)"
 [[ "${plan}" =~ CPU\ cap\ \.+:\ [0-9]+\ of\ [0-9]+\ CPUs ]] || fFail "cicd.bash doesn't show its CPU cap"
 
 ## Every entry point lowers its own priority and takes the cap from the include.
-for script in cicd.bash c-checks.bash; do
+for script in cicd.bash c-checks.bash lang-checks.bash; do
 	grep -qxF 'source "${here}/utility/include/cpu-cap.bash"' "${here}/${script}" || fFail "${script} doesn't source cpu-cap.bash"
 	grep -qx 'fLowPriority' "${here}/${script}" || fFail "${script} doesn't call fLowPriority"
 done
 ## Nothing else works out its own count.
 while IFS= read -r hit; do fFail "a count from nproc outside cpu-cap.bash: ${hit}"; done \
-	< <(grep -rnE '^[^#]*\bnproc\b' "${here}" --include='*.bash' --include='*.py' | grep -vF -e 'utility/include/cpu-cap.bash:' -e 'cpu-cap-test.bash:' || true)
-## Each parallel tool call in cicd.bash names the count.
-while IFS= read -r line; do
-	[[ "${line}" == *'-j "${cpuJobs}"'* ]] || fFail "cargo without the job count: ${line}"
-done < <(grep -E '^[^#]*\bcargo (build|test|clippy)' "${here}/cicd.bash")
-while IFS= read -r line; do
-	[[ "${line}" == *'-p "${cpuJobs}"'* ]] || fFail "go without the job count: ${line}"
-done < <(grep -E '^[^#]*\bgo (build|test|vet) ' "${here}/cicd.bash")
+	< <(grep -rnE '^[^#]*\bnproc\b' "${here}" --include='*.bash' --include='*.py' --exclude-dir=cache --exclude-dir=artifacts | grep -vF -e 'utility/include/cpu-cap.bash:' -e 'cpu-cap-test.bash:' || true)
+## Each parallel tool call names the count: cpuJobs in cicd.bash, and SHCLW_JOBS's copy in the image's script.
+fJobsNamed(){   ## fJobsNamed FILE VAR
+	local line
+	while IFS= read -r line; do
+		[[ "${line}" == *"-j \"\${$2}\""* ]] || fFail "${1##*/}: cargo without the job count: ${line}"
+	done < <(grep -E '^[^#]*\bcargo (build|test|clippy)' "$1")
+	while IFS= read -r line; do
+		[[ "${line}" == *"-p \"\${$2}\""* ]] || fFail "${1##*/}: go without the job count: ${line}"
+	done < <(grep -E '^[^#]*\bgo (build|test|vet) ' "$1")
+	return 0
+}
+fJobsNamed "${here}/cicd.bash" cpuJobs
+fJobsNamed "${here}/lang-in-container.bash" jobs
 ## Each docker run is capped, low-share, and niced inside.
 for script in "${here}"/*.bash; do
 	[[ "${script}" != "${BASH_SOURCE[0]}" && "${script##*/}" != cpu-cap-test.bash ]] || continue
@@ -85,7 +91,9 @@ for script in "${here}"/*.bash; do
 	niced="$(grep -c '"${tag}" nice -n 19 bash ' "${script}" || true)"
 	[[ "${capped}" == "${runs}" && "${niced}" == "${runs}" ]] || fFail "${script##*/}: ${runs} docker run(s), ${capped} capped, ${niced} niced"
 done
-grep -qF 'jobs="${SHCLW_JOBS:-}"' "${here}/c-in-container.bash" || fFail "c-in-container.bash doesn't take its count from SHCLW_JOBS"
+for script in c-in-container.bash lang-in-container.bash; do
+	grep -qF 'jobs="${SHCLW_JOBS:-}"' "${here}/${script}" || fFail "${script} doesn't take its count from SHCLW_JOBS"
+done
 
 if ((fails)); then echo "dedkv: ${fails} failure(s)" >&2; exit 1; fi
 echo "PASS dedkv CPU caps and low priority"
