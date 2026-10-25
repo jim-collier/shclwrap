@@ -409,6 +409,7 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- `lint-report.bash` no longer reads a test's `PASS` or `SKIP` line as a warning, since two test names say "warnings".
 		- Verified: `cicd.bash --ci --quick -y` passed with every line printed, and `lint-report.bash` says CLEAN. `c-checks.bash lint 3` passed with a PASS line for each of its 5 checks. Each cicd test script passed on its own. dedm7 failed with the ERR trap's test FAIL taken out, with fTest's own FAIL taken out, and with one ID given two names.
 		- Swept: every old ID in the repo outside the backlog, and every `OK:` line the tests stage printed for a test. Go, Rust, Python and C tests, the shared cases and the fuzz are the other children's.
+	- Commit: dddbb33
 	- Test case: dedm7, `cicd/steps-test.bash`, now covers the test lines and one name per ID.
 
 - Create-only Write
@@ -609,6 +610,7 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Requirements:
 		- Each case under `tests/cases/` gets an ID from its first commit, kept with the case.
 		- The Go, Rust, Python and C case runs print one line per case, with the language in the name.
+	- Note: `go test` shows a passing test's output only with `-v`, and cargo captures it, so Go's and Rust's lines may have to come from `go test -json` and cargo's own per-test lines, as in 2026102507142905. C and Python go through `cicd/c_cases.py`.
 
 - Test IDs: Go, Rust, Python and C tests
 	- ID: 2026102507142905
