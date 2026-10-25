@@ -40,8 +40,9 @@
 ##	   --no-lint       skip the lint stage
 ##	   --no-tests      skip the tests stage
 ##	   --no-fuzz       skip the fuzz stage
-##	   --no-container  run on the host. C runs only in its container, so its
-##	                   checks are skipped.
+##	   --no-container  run C on the host too, skipping what it has no tool for,
+##	                   and the leak checks. C also runs on the host when docker is
+##	                   missing or its image won't build, and says so.
 ##	   --no-remote     skip other hosts and VMs. There are none yet.
 ##	  Other:
 ##	   --keep-temp     keep the run's scratch folder, and print where it is
@@ -142,6 +143,8 @@ if [[ -z "${doLeakcheck}" ]]; then
 	if [[ "${runName}" == --backlog-run-quick ]]; then leakOffBy="--backlog-run-quick without --leakcheck"; fi
 fi
 if ((doLeakcheck && ! doContainer)); then doLeakcheck=0; leakOffBy="--no-container"; fi
+## c-checks.bash runs C on the host with this.
+if ((! doContainer)); then export SHCLW_C_HOST=1; fi
 ## Cargo.lock is tracked, so a run that rewrites nothing leaves it as it is.
 cargoLocked=(); if ((checkOnly)); then cargoLocked=(--locked); fi
 ## fArea NAME: true when NAME is one of the areas asked for, or none were.
@@ -350,7 +353,6 @@ fShclFetch(){
 	fShclHeader "${SHCL3_REV}" "${SHCL3_SHA256}" || doC=0
 	fShclHeader_Prune
 	fShclPy || doPy=0
-	if ((doC && ! doContainer)); then fEcho "WARNING: C runs only in its container; --no-container skips it"; fi
 	return 0
 }
 
@@ -398,8 +400,6 @@ if fStep_On "Lint"; then
 		fCTest_Skip "no shcl.h" "${cTestsLint[@]}"
 	elif ((doQuick)); then
 		fCTest_Skip "--quick" "${cTestsAnalyze[@]}"
-	elif ((! doContainer)); then
-		fCTest_Skip "--no-container" "${cTestsLint[@]}"
 	else
 		bash "${here}/c-checks.bash" lint 3 "${work}"
 		fEcho "OK: clang-tidy, gcc-15 at C17, and static analyzers (C over shcl 3; shcl's own held to source/c/shcl-known/)"
@@ -465,11 +465,10 @@ if fStep_On "Tests"; then
 		fTest -q dedm7 "step and test lines" bash "${here}/steps-test.bash"
 		fTest -q dedn4 "pre-push hook gates only a push to main that changes more than docs" env TMPDIR="${work}" bash "${here}/hook-test.bash"
 		fTest dedn5 "C containers carry the run's name and labels" fDockerLabels
+		fTest -q dednv "C runs on the host without docker or its image" env TMPDIR="${work}" bash "${here}/c-host-test.bash"
 	fi
 	if ! fArea c || ((! doC)); then
 		:
-	elif ((! doContainer)); then
-		if ((doQuick)); then fCTest_Skip "--no-container" decbj; fi
 	elif ((doQuick)); then
 		bash "${here}/c-checks.bash" quick 3 "${work}"
 		fEcho "OK: gcc-15 at C17, C API tests, and shared cases over shcl 3, plain build"
@@ -500,8 +499,8 @@ if fStep_On "Fuzz"; then
 	(cd "${root}/source/rust" && cargo build --quiet "${cargoLocked[@]}" -j "${cpuJobs}" --release --all-features --bin shclw-drive)
 	cp "${root}/source/rust/target/release/shclw-drive" "${work}/bin/rust-drive"
 	failDir="${root}/cicd/artifacts/fuzz/${stamp}"
-	if ((fuzzSecs > 0 && doC && doContainer)); then
-		## In the container, where the C drivers were built. Go's and Rust's run there too.
+	if ((fuzzSecs > 0 && doC)); then
+		## Where the C drivers were built, in the container or on the host. Go's and Rust's run there too.
 		cDrive=shclw-drive; if ((doQuick)); then cDrive=shclw-drive-plain; fi
 		bash "${here}/c-checks.bash" fuzz 3 "${work}" "${cDrive}" --seconds "${fuzzSecs}" || {
 			if [[ -d "${work}/fuzz-fail" ]]; then mkdir -p "${failDir%/*}"; cp -r "${work}/fuzz-fail" "${failDir}"; touch "${failDir}/.shclw-cicd-owned"; fFuzzFail_Prune; fi
@@ -542,3 +541,4 @@ fEcho_Clean
 ##		- 2026-10-25 JC: Step lines with Starting, PASS and FAIL. Steps turned off aren't counted, and the first section says why each is off.
 ##		- 2026-10-25 JC: nice 19 and idle IO. A quarter of the CPUs when busy, and for the hard stages. go vet, staticcheck, ruff, and Rust's test threads get the count too.
 ##		- 2026-10-25 JC: The standard flags: --backlog-run-quick with areas, --backlog-run-full and --merge-gate rewrite nothing, and --ci and --gate are other names. --no-format, --no-lint, --no-tests, --no-container, --no-remote, --keep-temp, --list, --long. The C container is named and labeled by run.
+##		- 2026-10-25 JC: C runs on the host under --no-container, or when docker is missing or the C image won't build.

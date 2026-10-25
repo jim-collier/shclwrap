@@ -579,6 +579,24 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- With docker missing or an image that won't build, the run falls back to the host and says so in one line. Today a missing docker fails the C checks.
 		- `--no-container` runs on the host on purpose.
 		- A test whose point is the real OS, such as Windows file behavior, stays on the host or a test box.
+	- Progress log:
+		- 2026-10-25: Split into 2026102507474935 (C falls back to the host) and 2026102507474940 (Go, Rust and Python in a pinned image).
+		- 2026-10-25: 2026102507474935 is Done. C runs on the host with docker missing, a C image that won't build, or `--no-container`.
+
+- CICD reset: Go, Rust and Python in a pinned image
+	- ID: 2026102507474940
+	- Type: Enhancement
+	- Status: Queued
+	- Priority: High
+	- Opened: 2026-10-25 07:47
+	- Opened by: JC
+	- Parent ID: 2026102416400010
+	- Prereq IDs: 2026102507474935
+	- Related IDs: 2026102416400020
+	- Requirements:
+		- Go, Rust, and Python build and test in a pinned image, from a recipe in `cicd/`, with the toolchains in `cicd/tool-pins.env` and `rust-toolchain.toml`.
+		- Falls back to the host the same way as the C checks. `--no-container` runs them on the host.
+		- A test whose point is the real OS, such as Windows file behavior, stays on the host or a test box.
 
 - CICD reset: container cleanup
 	- ID: 2026102416400020
@@ -699,6 +717,21 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Notes:
 		- shcl 2.0 on Windows could lose the old file when a replace failed. 3.0 fixed it, and Wovenshell still keeps its own restore. The wrapper's own 1.2 write needs the same check.
 		- 2026-10-24, CICD reset: this is the reset's `other hosts and VMs` item, raised to High, per `Other hosts and VMs` in the shared CICD rules. The default run builds and tests on the test boxes: Windows on b29w, with vm925w for timed work, and macOS on b26 or vmKt6m. Each box is held through the shared host lock by `wrap` for the whole time it's used, and a VM is put back the way it was found through the VM state helper. `--no-remote` skips them, a box that isn't there is a `SKIP` that never stops a run, and each box gets a work folder of its own under its temp root. `b29w`, never `b29w-wif`.
+
+- The fuzz's drift guard fails a short run on a busy box
+	- ID: 2026102508080859
+	- Type: Bug
+	- Status: Queued
+	- Severity: Avg
+	- Opened: 2026-10-25 08:08
+	- Opened by: JC
+	- Related IDs: 2026102507474935
+	- Steps to reproduce [Bug]:
+		- At a 1-minute load near 70 on 32 CPUs, `bash cicd/c-checks.bash fuzz 3 WORK shclw-drive-plain --seconds 15`, with the Go and Rust drivers in `WORK/bin`.
+	- Incorrect behavior [Bug]: `fuzz: too few reads found a value; the generator has drifted`, with 0 failed cases, 8 cases and 44 reads.
+	- Expected behavior [Bug]: A run with no failures passes, or says it ran too few cases to judge the generator.
+	- Reproduced [Bug]: 2026-10-25, twice, at 5s and 15s, on the host and with the C drivers. The same run at 45s passed with 184 reads.
+	- Possible cause [Bug]: `cicd/fuzz.py` fails any run with under 50 reads (`gets < 50`), and a loaded box gets fewer in the budget. `--ci --quick` fuzzes for 10s.
 
 - Create-only Write fails on a FAT volume on Windows
 	- ID: 2026102412381602
@@ -1347,6 +1380,33 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Swept: `Upgrade` and `UpgradeFile` in Go `shclw3` and Rust `v3`. The 1.2 and 2.0 adapters convert nothing. A format 3 file passed with `from` 2 that 2.0 has errors on, such as `tags: [a, b]`, is still left alone.
 	- Closed: 20261017-11325800
 	- Acceptance signoff: Self-closed: the 2.0 check is now required in every build, per 2026101613005800, and the test failed before the fix and passes after.
+
+- CICD reset: C falls back to the host
+	- ID: 2026102507474935
+	- Type: Enhancement
+	- Status: Done
+	- Priority: High
+	- Opened: 2026-10-25 07:47
+	- Opened by: JC
+	- Parent ID: 2026102416400010
+	- Related IDs: 2026102508080859
+	- Requirements:
+		- With docker missing or a C image that won't build, the C checks run on the host and say so in one line. A missing docker never fails a run.
+		- `--no-container` runs the C checks on the host on purpose.
+		- What the host lacks a tool for is a `SKIP` line naming the tool, not a failure.
+	- Progress log:
+		- 2026-10-25: `c-checks.bash` runs a C mode on the host when docker is missing or its daemon is down, when the C image won't build, or under `--no-container`, and says which in one `WARNING: C runs on the host:` line. The build's output goes to `cicd/artifacts/c-image-build.log`.
+		- On the host a tool off its pin is a warning, and a check whose tool is missing is skipped by name, with `SKIP` lines for its test IDs. This box has gcc-15, clang-tidy 22, mingw and g++ 14, so its lint skips the analyzers and the clang-format-22 check, and its leak checks skip.
+		- With no gcc-15 the fuzz still runs Go, Rust and Python.
+	- Decisions:
+		- `--no-container` still turns the leak checks off, by flag in the off list, since CodeQL's build, CTU and the soak need clang-22 and heaptrack, which a host seldom has. With docker missing, the leak step runs and skips what the host lacks.
+		- A host run's warning lines make `lint-report.bash` say FLAG, since off-pin tools make its result weaker than the image's.
+	- Branch: round-1025
+	- Test case: dednv, `cicd/c-host-test.bash`, in the tests stage. It runs a copy of `c-checks.bash` with a fake docker that's down, one whose build fails, and one that works, and under `SHCLW_C_HOST=1`.
+	- Verified: dednv failed at its first case on the old `c-checks.bash`, and passes now. On the host under `SHCLW_C_HOST=1`, quick, test (sanitized, and C++ with g++ 14), lint (clang-tidy, gcc-15 strict and mingw), a 45s fuzz with C, and a fuzz with gcc-15 off PATH all passed, and leakcheck skipped deb9f. In the container, lint with every probe, quick, test, leakcheck (CodeQL, CTU and the soak) and a 45s fuzz passed. `--backlog-run-quick cicd c` was CLEAN, and with `--no-container` it ran C on the host and passed, with the tree's status the same before and after. shellcheck passed.
+	- Swept: every `docker` call in cicd is in `c-checks.bash`. Every `/work` and `/artifacts` path and C tool name in `c-in-container.bash` goes through the new variables. cicd.bash's `--no-container` branches and its fuzz branch, and design.md's `Fuzzing` part, were the only places saying C runs only in its container. The 4 language bindings don't read cicd flags.
+	- Acceptance signoff: Self-closed: the fallback has a regression test that failed before the change, and the host and container runs pass. Departs from the wording in one way: `--no-container` leaves the leak checks off, per Decisions.
+	- Closed: 2026-10-25 08:10
 
 - Updates to CICD script flags
 	- ID: 2026101816214270

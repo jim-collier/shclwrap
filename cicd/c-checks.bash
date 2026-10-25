@@ -2,6 +2,11 @@
 # shellcheck disable=1091
 # shellcheck disable=2154  ## cpuJobs is set by cpu-cap.bash.
 
+##	Purpose: Runs one C mode of c-in-container.bash in the pinned C image, or on
+##		the host with SHCLW_C_HOST=1 (cicd.bash --no-container), when docker is
+##		missing, or when the image won't build. The host run says so in one line,
+##		and skips what it has no tool for.
+
 set -Eeuo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -35,8 +40,20 @@ tag="${repo}:${PIN_GCC15_PACKAGE}_${PIN_CLANG_PACKAGE//:/_}"
 
 fImageLayers(){ docker image inspect --format '{{json .RootFS.Layers}}' "$1" 2>/dev/null || true; }
 
+## fOnHost WHY: the same mode, run here. A missing docker never fails a run.
+fOnHost(){
+	echo "WARNING: C runs on the host: $1"
+	exec env SHCLW_C_HOST=1 SHCLW_C_WORK="${work}" SHCLW_C_ARTIFACTS="${artifacts}" \
+		bash "${here}/c-in-container.bash" "${mode}" "${version}" "${@:2}"
+}
+if [[ "${SHCLW_C_HOST:-}" == 1 ]]; then fOnHost "--no-container" "${@:4}"; fi
+if ! command -v docker >/dev/null || ! docker version --format '{{.Server.Version}}' >/dev/null 2>&1; then
+	fOnHost "no docker, or its daemon isn't running" "${@:4}"
+fi
+
 oldId="$(docker image inspect --format '{{.Id}}' "${tag}" 2>/dev/null || true)"
 oldLayers="$(fImageLayers "${tag}")"
+buildLog="${root}/cicd/artifacts/c-image-build.log"
 docker build --quiet --file "${here}/C.Dockerfile" \
 	--build-arg "BASE_IMAGE=${PIN_CTOOLS_IMAGE}" \
 	--build-arg "GCC15_PACKAGE=${PIN_GCC15_PACKAGE}" \
@@ -44,7 +61,8 @@ docker build --quiet --file "${here}/C.Dockerfile" \
 	--build-arg "HEAPTRACK_PACKAGE=${PIN_HEAPTRACK_PACKAGE}" \
 	--build-arg "MINGW_PACKAGE=${PIN_MINGW_PACKAGE}" \
 	--build-arg "MINGW_HEADERS_PACKAGE=${PIN_MINGW_HEADERS_PACKAGE}" \
-	--tag "${tag}" "${here}"
+	--tag "${tag}" "${here}" >"${buildLog}" 2>&1 \
+	|| fOnHost "the C image didn't build; see cicd/artifacts/${buildLog##*/}" "${@:4}"
 newId="$(docker image inspect --format '{{.Id}}' "${tag}")"
 
 ## Drop the image this build replaced and any other pin's, unless a container still uses one.

@@ -456,13 +456,13 @@ An ops script is one op per line, with fields split by tabs. `\t`, `\n`, `\r`, a
 
 - It runs for a wall-clock budget, and a failing seed is saved with its document, script, and each driver's output. If too few reads find a value, the run fails, since a generator that stopped making readable documents would pass forever.
 
-- C's driver is the sanitized build, so a leak or a bad read fails the case. The fuzz runs in the C container, where the C drivers are built. Without the pinned C headers it fuzzes Go against Rust alone.
+- C's driver is the sanitized build, so a leak or a bad read fails the case. The fuzz runs where the C drivers are built, in the C container or on the host. Without the pinned C headers it fuzzes Go against Rust alone.
 
 - Go's own fuzzer runs `Run` on random documents and scripts against every version, looking for panics.
 
 - `cicd/cicd.bash` runs format, lint, tests, the C leak checks, and both fuzzers. `--quick` leaves out the C sanitizers, analyzers, and leak checks, and anything that needs the network, and fuzzes for 10s. `--leakcheck` adds the leak checks to it, and `--no-leakcheck` drops them from any run. `--dry-run` or `--list` shows the stages a mix of flags picks.
 	- 3 runs never sync, rewrite a tracked file, or prompt. Format only checks, and cargo runs `--locked`. `--merge-gate` and `--backlog-run-full` run every check of the default run. `--backlog-run-quick` runs the format check, lint, and the fast tests, and can be held to some of go, rust, python, c and cicd. `--ci` and `--gate` are other names for `--merge-gate` and `--backlog-run-quick`.
-	- `--no-format`, `--no-lint`, `--no-tests`, `--no-fuzz` and `--no-sync` turn one step off. `--no-container` skips C, which runs only in its container. `--keep-temp` keeps the run's scratch folder.
+	- `--no-format`, `--no-lint`, `--no-tests`, `--no-fuzz` and `--no-sync` turn one step off. `--no-container` runs C on the host, and turns the leak checks off. C also runs on the host when docker is missing or its image won't build, and says so in one line. On the host a tool off its pin is a warning, and a check whose tool is missing, such as clang-22 for the analyzers, is a `SKIP` line. `--keep-temp` keeps the run's scratch folder.
 	- The pre-push hook runs `--merge-gate` only on a push to main. A push to main that changes only `*.md` files and `project/` skips it, and so does a push to any other branch or a branch delete.
 	- Each C container is named `shclwrap-<run folder>-<mode>`, with labels `dev.project=shclwrap` and `dev.run=<run folder>`.
 
