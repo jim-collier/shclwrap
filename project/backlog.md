@@ -553,6 +553,8 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Opened: 2026-10-24 16:40
 	- Opened by: JC
 	- Related IDs: 2026102416400060
+	- Prereq IDs: 2026102416400060
+		- 2026-10-25: the Done items name test IDs, which that item gives out.
 	- Requirements:
 		- Per the regression bullet in `Testing` in the shared CICD rules. Most closed items already have a `Test case:` row.
 		- Sweeping override, 2026-10-24: this supersedes any earlier decision on this project that conflicts with it.
