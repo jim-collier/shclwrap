@@ -118,7 +118,7 @@ strict:
 	$(CC15) -std=c17 $(WARN) -I. -I$(SHCL_DIR) -fsyntax-only $(LIB) shclw-drive.c tests/api_test.c
 	$(CC15) -std=c17 $(WARN) -I. -I$(SHCL2_DIR) -fsyntax-only shclw3_v2.c
 
-# Test vGSU9: the Windows build at the same warnings.
+# Test decbj: the Windows build at the same warnings.
 mingw:
 	$(MINGW_CC) -std=c11 $(WARN) -I. -I$(SHCL_DIR) -fsyntax-only $(LIB) shclw-drive.c tests/api_test.c
 	$(MINGW_CC) -std=c11 $(WARN) -I. -I$(SHCL2_DIR) -fsyntax-only shclw3_v2.c

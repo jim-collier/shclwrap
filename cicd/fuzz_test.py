@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-## Purpose: Test vGTig. The fuzz corpus keeps each case doc's bytes, CRLF
+## Purpose: Test dece1. The fuzz corpus keeps each case doc's bytes, CRLF
 ##	included (2026102410113346).
 ## Copyright © 2026 Jim Collier [ID: 2უNაɘ«҂թȹɤξπ๙¿ձϖ]
 ## SPDX-License-Identifier: MIT

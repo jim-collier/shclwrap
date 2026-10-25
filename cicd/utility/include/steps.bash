@@ -12,8 +12,14 @@
 ##			fStep_Pass            closes it with PASS
 ##			fStep_Fail            closes the open step, if any, with FAIL
 ##			fStep_AllPassed       fails unless every step that's on passed
-##			fStep_Abort RC LINE CMD  the ERR trap's line, then FAIL for the open step
+##			fStep_Abort RC LINE CMD  the ERR trap's line, then FAIL for the open test and step
+##			fTest [-q] ID NAME CMD...  runs CMD and prints its test line; -q drops CMD's stdout
+##			fTest_Start ID NAME   opens a test whose checks run inline
+##			fTest_Pass            "PASS ID NAME" for the open test
+##			fTest_Fail            "FAIL ID NAME" for the open test, if any; for traps
+##			fTest_Skip ID NAME WHY  "SKIP ID NAME, WHY"
 ##		Steps turned off aren't counted, so N and M come from the plan.
+##		Test IDs follow the Testing rule in the shared CICD rules (backlog 2026102416400060).
 ##	Copyright © 2026 Jim Collier [ID: 2უNაɘ«҂թȹɤξπ๙¿ձϖ]
 ##	Licensed under The MIT License (MIT). Full text at:
 ##		https://mit-license.org/
@@ -101,9 +107,30 @@ fStep_Fail(){ if [[ -n "${_stepNow}" ]] && ((BASH_SUBSHELL == 0)); then fStep_En
 fStep_Abort(){
 	{
 		printf '\n[ CICD ABORTED (exit %s) at line %s: %s ]\n' "$1" "$2" "$3"
-		if ((BASH_SUBSHELL == 0)); then fStep_Fail; echo; fi
+		if ((BASH_SUBSHELL == 0)); then fTest_Fail; fStep_Fail; echo; fi
 	} >&2
 	exit "$1"
+}
+
+_testId=""; _testName=""
+fTest_Line(){  fEcho_Clean "$1 $2 $3"; }
+fTest_Start(){ _testId="$1"; _testName="$2"; }
+fTest_Pass(){
+	if [[ -z "${_testId}" ]]; then echo "fTest_Pass: no test is open" >&2; return 1; fi
+	fTest_Line PASS "${_testId}" "${_testName}"; _testId=""
+}
+fTest_Fail(){ if [[ -n "${_testId}" ]]; then fTest_Line FAIL "${_testId}" "${_testName}"; _testId=""; fi; return 0; }
+fTest_Skip(){ fTest_Line SKIP "$1" "$2${3:+, $3}"; }
+
+## The command runs on the right of ||, where set -e is off, so a bash function
+## handed in has to return its own failure.
+fTest(){
+	local quiet=0 rc=0
+	if [[ "${1:-}" == -q ]]; then quiet=1; shift; fi
+	fTest_Start "$1" "$2"; shift 2
+	if ((quiet)); then "$@" >/dev/null || rc=$?; else "$@" || rc=$?; fi
+	if ((rc)); then fTest_Fail; return "${rc}"; fi
+	fTest_Pass
 }
 
 fStep_AllPassed(){
@@ -114,3 +141,4 @@ fStep_AllPassed(){
 
 ##	History:
 ##		- 2026-10-25 JC: Created, from cicd.bash's output helpers. Step lines, a 79-wide rule, and the off list.
+##		- 2026-10-25 JC: Test lines, PASS, FAIL or SKIP with the test's ID and name.

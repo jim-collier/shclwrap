@@ -9,6 +9,10 @@ root="$(cd "${here}/.." && pwd)"
 source "${here}/../source/c/shcl-pins.env"
 source "${here}/../source/python/shcl-pins.env"
 source "${here}/tool-pins.env"
+source "${here}/utility/include/steps.bash"
+source "${here}/utility/include/c-tests.bash"
+## A probe that exits 1 still gets its FAIL line.
+trap fTest_Fail EXIT
 
 if (($# < 2)); then
 	echo "usage: c-in-container.bash MODE VERSION [FUZZ ARGS...]" >&2
@@ -45,7 +49,8 @@ make_c(){
 
 case "${mode}" in
 	lint)
-		## Test vFKcU: the analyze-shcl rules must see a double free planted in a stand-in shcl.h.
+		## The analyze-shcl rules must see a double free planted in a stand-in shcl.h.
+		fCTest_Start de7zp
 		probe_dir="/work/shcl-analyze-probe"
 		mkdir -p "${probe_dir}/inc"
 		cat > "${probe_dir}/inc/shcl.h" <<'EOF'
@@ -60,7 +65,9 @@ EOF
 		for log in shcl3.gcc shcl3.clang shcl2.gcc shcl2.clang; do
 			grep -qE '/shcl\.h:4:[0-9]+: warning: .*\[(-Wanalyzer-double-free|unix\.Malloc)\]' "${probe_dir}/out/${log}.txt" || { echo "analyze-shcl missed the planted double free (${log})" >&2; exit 1; }
 		done
-		## Test vGAuM: the known list must fail on the planted finding, pass once it's listed, and fail once it's gone.
+		fTest_Pass
+		## The known list must fail on the planted finding, pass once it's listed, and fail once it's gone.
+		fCTest_Start deb8c
 		python3 "${here}/shcl_known.py" list gcc "${probe_dir}/out/shcl3.gcc.txt" > "${probe_dir}/known.txt"
 		python3 "${here}/shcl_known.py" list clang "${probe_dir}/out/shcl3.clang.txt" >> "${probe_dir}/known.txt"
 		make_c analyze-shcl SHCL_DIR="${probe_dir}/inc" SHCL2_DIR="${probe_dir}/inc" SHCL_REPORT="${probe_dir}/out" SHCL_KNOWN="${probe_dir}/known.txt" SHCL2_KNOWN="${probe_dir}/known.txt" >/dev/null
@@ -68,7 +75,9 @@ EOF
 		if make_c analyze-shcl SHCL_DIR="${probe_dir}/inc" SHCL2_DIR="${probe_dir}/inc" SHCL_REPORT="${probe_dir}/out" SHCL_KNOWN="${probe_dir}/none.txt" SHCL2_KNOWN="${probe_dir}/known.txt" >/dev/null 2>&1; then echo "analyze-shcl passed a finding not in its list" >&2; exit 1; fi
 		printf 'clang\tshcl.h:99:1\tcore.NullDereference\n' >> "${probe_dir}/known.txt"
 		if make_c analyze-shcl SHCL_DIR="${probe_dir}/inc" SHCL2_DIR="${probe_dir}/inc" SHCL_REPORT="${probe_dir}/out" SHCL_KNOWN="${probe_dir}/known.txt" SHCL2_KNOWN="${probe_dir}/known.txt" >/dev/null 2>&1; then echo "analyze-shcl passed a listed finding that's gone" >&2; exit 1; fi
-		## Test vGBqv: make analyze's gcc pass must see a leak that -O1 optimizes away.
+		fTest_Pass
+		## make analyze's gcc pass must see a leak that -O1 optimizes away.
+		fCTest_Start deba8
 		cat > "${probe_dir}/leak.c" <<'EOF'
 #include <stdlib.h>
 #include <string.h>
@@ -77,11 +86,15 @@ int shclw_probe_leak(int flag) { char *p = malloc(64); if (!p) return -1; if (fl
 EOF
 		if make_c analyze ANALYZE_C="${probe_dir}/leak.c" >"${probe_dir}/leak.out" 2>&1; then echo "make analyze passed a planted leak" >&2; exit 1; fi
 		grep -q 'analyzer-malloc-leak' "${probe_dir}/leak.out" || { cat "${probe_dir}/leak.out" >&2; echo "gcc's analyzer missed the planted leak" >&2; exit 1; }
-		## Test vGS64: a clang analyzer finding alone must fail make analyze. gcc is switched off.
+		fTest_Pass
+		## A clang analyzer finding alone must fail make analyze. gcc is switched off.
+		fCTest_Start decas
 		if make_c analyze ANALYZE_C="${probe_dir}/leak.c" CC15=true >"${probe_dir}/leak-clang.out" 2>&1; then echo "make analyze passed a clang analyzer finding" >&2; exit 1; fi
 		grep -q 'unix\.Malloc' "${probe_dir}/leak-clang.out" || { cat "${probe_dir}/leak-clang.out" >&2; echo "clang's analyzer missed the planted leak" >&2; exit 1; }
+		fTest_Pass
 		make_c -j "${jobs}" analyze-shcl SHCL_REPORT=/artifacts/c-analyze-shcl
-		make_c lint strict mingw analyze format-check
+		make_c lint strict analyze format-check
+		fCTest_Start decbj; make_c mingw; fTest_Pass
 		;;
 	test)
 		make_c -j "${jobs}" test drive
@@ -92,7 +105,8 @@ EOF
 		;;
 	quick)
 		## No sanitizers and no analyzers, which are most of the time.
-		make_c -j "${jobs}" strict mingw drive-plain "/work/c${version}/api-test-plain"
+		fCTest_Start decbj; make_c -j "${jobs}" mingw; fTest_Pass
+		make_c -j "${jobs}" strict drive-plain "/work/c${version}/api-test-plain"
 		"/work/c${version}/api-test-plain"
 		python3 "${here}/c_cases.py" --drive "/work/c${version}/shclw-drive-plain" \
 			--version "${version}" --cases "${root}/tests/cases"
@@ -173,8 +187,9 @@ EOF
 		openQuery='[.runs[].results[]? | select(([.suppressions[]?.kind] | index("inSource")) == null) | select((.locations[0].physicalLocation.artifactLocation.uri // "" | startswith("cicd/cache/")) == $shcl)] | length'
 		python3 "${here}/shcl_known.py" codeql "${root}/source/c/shcl-known" "${artifact_dir}/codeql.sarif" "${SHCL3_REV}" "${SHCL2_REV}" || { echo "CodeQL findings in shcl differ from the known lists; see ${artifact_dir}/codeql.sarif" >&2; exit 1; }
 		[[ "$(jq --argjson shcl false "${openQuery}" "${artifact_dir}/codeql.sarif")" == 0 ]] || { echo "CodeQL findings; see ${artifact_dir}/codeql.sarif" >&2; exit 1; }
-		## Test vGBSI: a null dereference in a stand-in shcl.h, reached only through a call from
+		## A null dereference in a stand-in shcl.h, reached only through a call from
 		## our side, must show in the CTU pass, and the check must hold it to the list.
+		fCTest_Start deb9f
 		probe_dir="/work/ctu-probe"
 		probe_inc="${probe_dir}/cicd/cache/shcl-c/probe"
 		mkdir -p "${probe_inc}" "${probe_dir}/known" "${probe_dir}/ast"
@@ -202,6 +217,7 @@ EOF
 		python3 "${here}/shcl_known.py" ctu "${probe_dir}/known" --rev probe "${probe_dir}/ours.log" >/dev/null
 		printf '%s/ours.c:2:1: warning: planted [core.NullDereference]\n' "${probe_dir}" >> "${probe_dir}/ours.log"
 		if python3 "${here}/shcl_known.py" ctu "${probe_dir}/known" --rev probe "${probe_dir}/ours.log" >/dev/null 2>&1; then echo "CTU check passed a finding of ours" >&2; exit 1; fi
+		fTest_Pass
 		ctu_dir="/work/ctu/v3"
 		mkdir -p "${ctu_dir}/ast"
 		: > "${ctu_dir}/externalDefMap.txt"

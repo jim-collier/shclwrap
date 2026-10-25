@@ -66,6 +66,7 @@ source "${here}/utility/include/gfs-rotate.bash"
 source "${here}/utility/include/run-lock.bash"
 source "${here}/utility/include/cpu-cap.bash"
 source "${here}/utility/include/steps.bash"
+source "${here}/utility/include/c-tests.bash"
 fLowPriority
 stamp="$(date +%Y%m%d-%H%M%S)"
 
@@ -114,7 +115,7 @@ goFuzzSecs="${SHCLW_GOFUZZ_SECONDS:-$( ((doQuick)) && echo 0 || echo 30)}"
 fCpuNote(){ printf '%s of %s CPUs, load %s%s' "${cpuJobs}" "${cpuCount}" "${cpuLoad}" "$( ((cpuBusy)) && echo ' (busy)')"; }
 ## fStep NAME [hard]: opens the step, with the CPU cap checked again for it.
 fStep(){ fStep_Start "$1"; fCpuCap "${2:-}"; fEcho_Clean "Jobs: $(fCpuNote)"; }
-fDie(){ { fEcho_Force "FAILED: $*"; fStep_Fail; echo; } >&2; exit 1; }
+fDie(){ { fEcho_Force "FAILED: $*"; fTest_Fail; fStep_Fail; echo; } >&2; exit 1; }
 trap 'fStep_Abort "$?" "${LINENO}" "${BASH_COMMAND}"' ERR
 
 ## Warns when a tool on this box isn't the pinned version.
@@ -312,19 +313,24 @@ pyPath="${root}/cicd/cache/shcl-py/${SHCL3_PY_REV}"
 if ((doC && ! doQuick)); then
 	bash "${here}/c-checks.bash" lint 3 "${work}"
 	fEcho "OK: clang-tidy, gcc-15 at C17, and static analyzers (C over shcl 3; shcl's own held to source/c/shcl-known/)"
+elif ((doC)); then
+	fCTest_Skip "--quick" "${cTestsAnalyze[@]}"
+else
+	fCTest_Skip "no shcl.h" "${cTestsLint[@]}"
 fi
 mapfile -t shellFiles < <(find "${root}/cicd" -type f \( -name '*.bash' -o -path '*/hooks/*' \) | sort)
 ((${#shellFiles[@]})) || fDie "shellcheck found no files"
 shellcheck "${shellFiles[@]}"
 fEcho "OK: shellcheck (${#shellFiles[@]} files)"
-## Test vGBt9: a .PHONY name with no rule makes make say "nothing to be done" and pass.
+## A .PHONY name with no rule makes make say "nothing to be done" and pass.
+fTest_Start debab "C Makefile .PHONY names have rules"
 read -ra phonyTargets < <(sed -n 's/^\.PHONY:[[:space:]]*//p' "${root}/source/c/Makefile") || true
 ((${#phonyTargets[@]})) || fDie "no .PHONY line in source/c/Makefile"
 makeRules="$(grep -oE '^[A-Za-z0-9_-]+:' "${root}/source/c/Makefile")"
 for target in "${phonyTargets[@]}"; do
 	grep -qxF -- "${target}:" <<<"${makeRules}" || fDie "source/c/Makefile: .PHONY names ${target}, which has no rule"
 done
-fEcho "OK: C Makefile targets (${#phonyTargets[@]})"
+fTest_Pass
 ruff check --quiet "${root}/cicd" "${root}/source/python"
 ruff format --check --quiet "${root}/cicd" "${root}/source/python"
 fEcho "OK: ruff"
@@ -337,28 +343,24 @@ fEcho "OK: Go tests"
 (cd "${root}/source/rust" && TMPDIR="${work}" cargo test --quiet -j "${cpuJobs}" --all-features)
 fEcho "OK: Rust tests"
 if ((doPy)); then
-	## Test vGTH7: a text read or write left to the locale's encoding fails here, not first on Windows.
+	## A text read or write left to the locale's encoding fails here, not first on Windows.
+	fTest_Start decd4 "Python tests and shared cases, encoding warnings as errors"
 	export PYTHONWARNDEFAULTENCODING=1 PYTHONWARNINGS=error::EncodingWarning
 	(cd "${root}/source/python" && TMPDIR="${work}" PYTHONPATH="${pyPath}" PYTHONPYCACHEPREFIX="${work}/pycache" python3 -m unittest discover -q -s tests)
 	PYTHONPATH="${pyPath}" PYTHONPYCACHEPREFIX="${work}/pycache" python3 "${here}/c_cases.py" --lang Python --version 3 --cases "${root}/tests/cases" \
 		--drive python3 "${root}/source/python/shclw_drive.py"
 	unset PYTHONWARNDEFAULTENCODING PYTHONWARNINGS
-	fEcho "OK: Python tests and shared cases"
+	fTest_Pass
+else
+	fTest_Skip decd4 "Python tests and shared cases, encoding warnings as errors" "no shcl.py"
 fi
-bash "${here}/flags-test.bash" >/dev/null
-fEcho "OK: cicd flag mixes"
-PYTHONPYCACHEPREFIX="${work}/pycache" PYTHONWARNDEFAULTENCODING=1 PYTHONWARNINGS=error::EncodingWarning python3 "${here}/fuzz_test.py" -q
-fEcho "OK: fuzz corpus keeps its bytes"
-TMPDIR="${work}" bash "${here}/lock-test.bash" >/dev/null
-fEcho "OK: one run per tree at a time"
-TMPDIR="${work}" bash "${here}/log-name-test.bash" >/dev/null
-fEcho "OK: one log per run"
-TMPDIR="${work}" bash "${here}/eol-test.bash" >/dev/null
-fEcho "OK: line ends under core.autocrlf=true"
-bash "${here}/cpu-cap-test.bash" >/dev/null
-fEcho "OK: CPU caps and low priority"
-bash "${here}/steps-test.bash" >/dev/null
-fEcho "OK: step lines"
+fTest -q de7yv "cicd flag mixes" bash "${here}/flags-test.bash"
+fTest dece1 "fuzz corpus keeps its bytes" env PYTHONPYCACHEPREFIX="${work}/pycache" PYTHONWARNDEFAULTENCODING=1 PYTHONWARNINGS=error::EncodingWarning python3 "${here}/fuzz_test.py" -q
+fTest -q decc9 "one cicd run per tree at a time" env TMPDIR="${work}" bash "${here}/lock-test.bash"
+fTest -q decdx "runs started in the same second get their own logs" env TMPDIR="${work}" bash "${here}/log-name-test.bash"
+fTest -q decb9 "line ends under core.autocrlf=true" env TMPDIR="${work}" bash "${here}/eol-test.bash"
+fTest -q dedkv "CPU caps and low priority" bash "${here}/cpu-cap-test.bash"
+fTest -q dedm7 "step and test lines" bash "${here}/steps-test.bash"
 if ((doC && doQuick)); then
 	bash "${here}/c-checks.bash" quick 3 "${work}"
 	fEcho "OK: gcc-15 at C17, C API tests, and shared cases over shcl 3, plain build"
@@ -374,6 +376,8 @@ if fStep_On "C leak checks"; then
 	bash "${here}/c-checks.bash" leakcheck 3 "${work}"
 	fEcho "OK: CodeQL, clang CTU, and heaptrack soak"
 	fStep_Pass
+else
+	fCTest_Skip "${leakOffBy}" "${cTestsLeak[@]}"
 fi
 
 #•••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••

@@ -391,6 +391,26 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Verified: dedm7 failed 8 checks against the old cicd.bash and passes now. It also failed with the rule at 78, with steps turned off counted, with the time to the thousandth, with FAIL printed twice from a subshell, with an extra blank line, and with the end check off. `cicd/cicd.bash --ci --quick -y` passed, with Step 1 to 3 of 3 and the off list, and `lint-report.bash` gave CLEAN. Real runs with a failing `gofmt`, a `gofmt` that lists a file, and a failing `staticcheck` inside a subshell each closed their step with one FAIL line and one blank line. shellcheck and vFKCk passed.
 	- Swept: cicd.bash is the only script with sections or step lines. c-checks.bash, c-in-container.bash and the other cicd scripts print no rule. lint-report.bash keys on the done, `FAILED` and `CICD ABORTED` lines, which stay, and vFKCk's `(skipped)` preflight lines stay too. No doc describes the output.
 
+- Test IDs: cicd's own checks
+	- ID: 2026102507142900
+	- Type: Enhancement
+	- Status: Waiting on automated testing
+	- Needs local test suite run?: `bash cicd/c-checks.bash leakcheck 3 WORK`, or a `--leakcheck` run, for deb9f's PASS line from the CTU probe. Lint and quick modes are done.
+	- Priority: High
+	- Opened: 2026-10-25 07:14
+	- Opened by: JC
+	- Parent ID: 2026102416400060
+	- Requirements:
+		- The 13 checks with old base 62 IDs convert once to the shared scheme, from the time each ID gives.
+		- One helper prints `PASS`, `FAIL` or `SKIP`, the ID and the name. cicd's own checks print through it.
+	- Progress log:
+		- 2026-10-25: Old to new: vFKCk de7yv, vFKcU de7zp, vGAuM deb8c, vGBSI deb9f, vGBqv deba8, vGBt9 debab, vGS64 decas, vGSLJ decb9, vGSU9 decbj, vGSqu decc9, vGTH7 decd4, vGTf8 decdx, vGTig dece1. dedkv and dedm7 were already new.
+		- `fTest` and friends in `steps.bash` print the lines. cicd.bash and the C container print one per check, and a check that doesn't run prints `SKIP` with the flag or the missing piece. The container checks' names are in `c-tests.bash`, so both sides name them alike. `make mingw` runs on its own now, to get its own line.
+		- `lint-report.bash` no longer reads a test's `PASS` or `SKIP` line as a warning, since two test names say "warnings".
+		- Verified: `cicd.bash --ci --quick -y` passed with every line printed, and `lint-report.bash` says CLEAN. `c-checks.bash lint 3` passed with a PASS line for each of its 5 checks. Each cicd test script passed on its own. dedm7 failed with the ERR trap's test FAIL taken out, with fTest's own FAIL taken out, and with one ID given two names.
+		- Swept: every old ID in the repo outside the backlog, and every `OK:` line the tests stage printed for a test. Go, Rust, Python and C tests, the shared cases and the fuzz are the other children's.
+	- Test case: dedm7, `cicd/steps-test.bash`, now covers the test lines and one name per ID.
+
 - Create-only Write
 	- ID: 2026101513330015
 	- Type: Feature
@@ -574,6 +594,46 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- Overrides the private notes' rule that test IDs count seconds since 2000.
 		- Every CI test gets an ID in the shared scheme, the Go, Rust, Python and C tests and the shared cases included. The existing ones convert once, from the time each gives. An ID never changes after that.
 		- The run prints one line per regression and fuzz test: `PASS`, `FAIL` or `SKIP`, then the ID and the name.
+	- Progress log:
+		- 2026-10-25: Too big for one go, so split into 2026102507142900 (cicd's own checks), 2026102507142902 (shared cases), 2026102507142905 (Go, Rust, Python and C tests) and 2026102507142907 (fuzz). Closes with the last of them.
+
+- Test IDs: shared cases
+	- ID: 2026102507142902
+	- Type: Enhancement
+	- Status: Queued
+	- Priority: High
+	- Opened: 2026-10-25 07:14
+	- Opened by: JC
+	- Parent ID: 2026102416400060
+	- Prereq IDs: 2026102507142900
+	- Requirements:
+		- Each case under `tests/cases/` gets an ID from its first commit, kept with the case.
+		- The Go, Rust, Python and C case runs print one line per case, with the language in the name.
+
+- Test IDs: Go, Rust, Python and C tests
+	- ID: 2026102507142905
+	- Type: Enhancement
+	- Status: Queued
+	- Priority: High
+	- Opened: 2026-10-25 07:14
+	- Opened by: JC
+	- Parent ID: 2026102416400060
+	- Prereq IDs: 2026102507142900
+	- Requirements:
+		- Each test function gets an ID from its first commit, about 100 across the 4 languages. Split per language if it won't fit.
+		- The run prints one line per test, skips included.
+
+- Test IDs: fuzz
+	- ID: 2026102507142907
+	- Type: Enhancement
+	- Status: Queued
+	- Priority: High
+	- Opened: 2026-10-25 07:14
+	- Opened by: JC
+	- Parent ID: 2026102416400060
+	- Prereq IDs: 2026102507142900
+	- Requirements:
+		- The generated fuzz in `fuzz.py`, each language against Go, and Go's own fuzzer each get an ID and print one line per run.
 
 - cicd flags for a full run that changes nothing in the tree
 	- ID: 2026102319573100

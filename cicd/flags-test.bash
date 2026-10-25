@@ -2,7 +2,7 @@
 
 #  shellcheck disable=2086  ## FLAGS is split into words on purpose.
 
-##	Purpose: Test vFKCk. Checks which stages each mix of cicd.bash flags turns on,
+##	Purpose: Test de7yv. Checks which stages each mix of cicd.bash flags turns on,
 ##		through --dry-run, so nothing is built.
 ##	Copyright © 2026 Jim Collier [ID: 2უNაɘ«҂թȹɤξπ๙¿ձϖ]
 ##	SPDX-License-Identifier: MIT
@@ -40,5 +40,5 @@ fExpect "--leakcheck --no-leakcheck"    on  off on
 fExpect "--no-leakcheck --leakcheck"    on  on  on
 fExpect "--no-sync --no-fuzz"           off on  off
 
-if ((fails)); then echo "vFKCk: ${fails} flag mix(es) wrong" >&2; exit 1; fi
-echo "OK: cicd flag mixes (vFKCk)"
+if ((fails)); then echo "de7yv: ${fails} flag mix(es) wrong" >&2; exit 1; fi
+echo "PASS de7yv cicd flag mixes"
