@@ -87,6 +87,7 @@ source "${here}/utility/include/run-lock.bash"
 source "${here}/utility/include/cpu-cap.bash"
 source "${here}/utility/include/steps.bash"
 source "${here}/utility/include/c-tests.bash"
+source "${here}/utility/include/docker-tidy.bash"
 fLowPriority
 stamp="$(date +%Y%m%d-%H%M%S)"
 
@@ -145,6 +146,8 @@ fi
 if ((doLeakcheck && ! doContainer)); then doLeakcheck=0; leakOffBy="--no-container"; fi
 ## c-checks.bash and lang-checks.bash run on the host with these.
 if ((! doContainer)); then export SHCLW_C_HOST=1 SHCLW_LANG_HOST=1; fi
+## c-checks.bash and lang-checks.bash leave off --rm with this.
+if ((keepTemp)); then export SHCLW_KEEP_TEMP=1; fi
 ## Cargo.lock is tracked, so a run that rewrites nothing leaves it as it is.
 export SHCLW_CARGO_LOCKED="${checkOnly}" SHCLW_AREAS="${areas[*]}"
 ## fArea NAME...: true when any NAME is one of the areas asked for, or none were.
@@ -281,19 +284,39 @@ fDockerLabels(){
 ## The run's scratch folder, with a marker so cleanup only ever removes its own.
 fScratchName(){ work="${TMPDIR:-/tmp}/test_shclw_${stamp}$(printf '%02d' $((RANDOM % 100)))"; }
 fScratchName
+runPassed=0; consoleFd=""
+## The run's end, on failure and Ctrl+C too: its containers, stale images, and its scratch folder,
+## in one line. Ctrl+C has already taken tee down, so the line goes to the console instead.
 fCleanup(){
+	local line="" size=""
+	trap '' PIPE INT
 	if [[ ! -f "${work}/.shclw-cicd-owned" ]]; then return 0; fi
-	if ((keepTemp)); then fEcho_Clean "Kept the scratch folder: ${work}"; fEcho_Clean; return 0; fi
-	rm -rf -- "${work}"
+	fDocker_Tidy "${work}" "${runPassed}" "${keepTemp}" || true
+	if ((keepTemp)); then
+		line="kept the scratch folder ${work}"
+	else
+		size="$(du -sk "${work}" 2>/dev/null | cut -f1 || true)"
+		rm -rf -- "${work}"
+		line="removed the scratch folder${size:+ ($(fBytes $((size * 1000))))}"
+	fi
+	if [[ -n "${dockerNote}" ]]; then line+=", ${dockerNote}"; fi
+	line="Cleanup: ${line}."
+	## Plain echo, since fEcho_Clean returns 0 even when its write fails.
+	if { echo "${line}"; } 2>/dev/null; then fEcho_ResetBlankCounter; fEcho_Clean 2>/dev/null || true
+	elif [[ -n "${consoleFd}" ]]; then { echo "${line}" >&"${consoleFd}"; } 2>/dev/null || true
+	fi
 	return 0
 }
 trap fCleanup EXIT
+## Ctrl+C takes tee down too, and a write to it would kill this shell before the cleanup runs.
+trap 'trap "" PIPE; exit 130' INT
 
 if ((dryRun)); then fPreflight; fEcho_Clean; exit 0; fi
 
 ## Tee the whole run to a rotated log, for cicd/utility/lint-report.bash.
 fRunLog "${root}/cicd/artifacts/lint" stamp logFd
 fScratchName
+exec {consoleFd}>&1
 exec > >(tee -a "/dev/fd/${logFd}") 2>&1
 exec {logFd}>&-
 
@@ -431,6 +454,7 @@ if fStep_On "Tests"; then
 		fTest dedn5 "C containers carry the run's name and labels" fDockerLabels
 		fTest -q dednv "C runs on the host without docker or its image" env TMPDIR="${work}" bash "${here}/c-host-test.bash"
 		fTest -q dedpt "Go, Rust and Python run on the host without docker or their image" env TMPDIR="${work}" bash "${here}/lang-host-test.bash"
+		fTest -q dedqv "a run's end removes its containers and stale images, and nothing else" env TMPDIR="${work}" bash "${here}/docker-tidy-test.bash"
 	fi
 	if ! fArea c || ((! doC)); then
 		:
@@ -482,6 +506,7 @@ if fStep_On "Fuzz"; then
 fi
 
 fStep_AllPassed
+runPassed=1
 fSection "shclwrap CI/CD: done."
 fEcho_Clean
 
@@ -503,3 +528,4 @@ fEcho_Clean
 ##		- 2026-10-25 JC: The standard flags: --backlog-run-quick with areas, --backlog-run-full and --merge-gate rewrite nothing, and --ci and --gate are other names. --no-format, --no-lint, --no-tests, --no-container, --no-remote, --keep-temp, --list, --long. The C container is named and labeled by run.
 ##		- 2026-10-25 JC: C runs on the host under --no-container, or when docker is missing or the C image won't build.
 ##		- 2026-10-25 JC: Go, Rust and Python run in their own pinned image through lang-checks.bash, with the same host fallback.
+##		- 2026-10-25 JC: The run's end stops and removes its containers by label, drops stale images and week-old build cache, and says what went in one line.

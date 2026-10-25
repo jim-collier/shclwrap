@@ -105,6 +105,43 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Test case: vGBSI, in `cicd/c-in-container.bash` leak mode: a planted null dereference in a stand-in `shcl.h`, reached only through our call, must show, fail unlisted, pass listed, and fail on a finding of ours.
 	- Acceptance signoff: waits on JC, after the leak run, for the use after free in `migrate_text` judged false. It's a memory safety call.
 
+- CICD reset: container cleanup
+	- ID: 2026102416400020
+	- Type: Enhancement
+	- Status: Waiting on UAT
+	- Priority: High
+	- Opened: 2026-10-24 16:40
+	- Opened by: JC
+	- Related IDs: 2026101916500100, 2026102319573100
+	- Notes:
+		- 2026-10-25: `--keep-temp` is in since `533c1df` (2026102319573100).
+	- Requirements:
+		- Per the container bullets in `Cleanup after a run` in the shared CICD rules. The C container already runs with `--rm` and an init, and an older C image no container uses is removed.
+		- Sweeping override, 2026-10-24: this supersedes any earlier decision on this project that conflicts with it.
+		- Overrides 2026101916500100's unfiltered `docker builder prune` after a rebuild, which design.md's `Fuzzing` part also gives.
+		- `dev.project=shclwrap` and `dev.run=<run folder>` labels on every container, image and volume, and containers named `shclwrap-<run folder>-<step>`.
+		- `--rm` unless `--keep-temp` was given.
+		- At the end of a run, on failure and Ctrl+C too, the run's containers are stopped and removed by `dev.run`.
+		- The current C image tag and the one before it stay. Today only the current one does.
+		- `docker builder prune -f --filter until=168h` in place of the unfiltered prune.
+		- Cache volumes follow the 2 GB rule.
+		- One line at the end says what went and about what it freed, from `docker system df` before and after.
+	- Progress log:
+		- 2026-10-25: The C and the Go, Rust and Python images are built with the `dev.project` and `dev.run` labels, and their containers run with `--rm` unless `--keep-temp`. The runs use bind mounts, so there are no volumes to label.
+		- At the end of a cicd.bash run, failed or stopped by Ctrl+C too, `cicd/utility/include/docker-tidy.bash` stops and removes the run's containers by `dev.run`. It removes shclwrap's dangling images and the image the run's first build replaced, and after a pass any tag older than the one before the current, for both images. An image a container uses stays. `docker builder prune -f --filter until=168h` runs after a real rebuild.
+		- `cicd/cache/c-home/` and `cicd/cache/lang-home/` are emptied whole when over 2 GB, or when the `.shclwrap-stamp` inside names another toolchain: the CodeQL pin for c-home, the image tag for lang-home.
+		- The run ends with one `Cleanup:` line naming what went and about what docker freed, from `docker system df` before and after. `lint-report.bash` reads past it to the done line.
+		- Ctrl+C took tee down, and the next write killed cicd.bash by SIGPIPE before its cleanup ran. An INT trap now ignores SIGPIPE and exits, so the cleanup runs, and its line goes to the console.
+	- Decisions:
+		- The cache check runs where an image mounts the folder, before it's used, not at the end of the run. At the end, a toolchain change would empty what the run just filled, and the next run would start cold too.
+		- `--keep-temp` keeps the run's containers, stopped, and the line names their `dev.run` label.
+		- The Go, Rust and Python image follows the C image's keep-2 rule.
+	- Branch: round-1025
+	- Test case: dedqv, `cicd/docker-tidy-test.bash`, in the tests stage, with a fake docker. dednv and dedpt now also check the image labels, and `--rm` under `--keep-temp`.
+	- Verified: dedqv failed with the prune unfiltered, with only the current tag kept, with the in-use check taken out, with an unlabeled build, with `--rm` hard-coded, and with the rebuild check reading the bare tag, a bug real runs showed; and passes. dednv failed with `--rm` hard-coded. `--backlog-run-quick cicd go c` passed, CLEAN, and left no container, no dangling image, and one image per name. Ctrl+C during the C container left no container and no scratch folder, and printed the `Cleanup:` line. `--keep-temp` kept the stopped container with its label. shellcheck passed.
+	- Swept: every `docker build`, `docker run` and prune in cicd is in `c-checks.bash`, `lang-checks.bash` and `docker-tidy.bash`, and dedqv checks them by text. No `rmi -f` or `system prune` anywhere. design.md's `Fuzzing` part was the only doc on the cleanup. The 4 language bindings don't read cicd flags.
+	- Acceptance signoff: the `Cleanup:` line's wording, and the departures under Decisions.
+
 - Layered loading
 	- ID: 2026101512024156
 	- Type: Feature
@@ -611,28 +648,6 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Progress log:
 		- 2026-10-25: Split into 2026102507474935 (C falls back to the host) and 2026102507474940 (Go, Rust and Python in a pinned image).
 		- 2026-10-25: 2026102507474935 is Done. C runs on the host with docker missing, a C image that won't build, or `--no-container`.
-
-- CICD reset: container cleanup
-	- ID: 2026102416400020
-	- Type: Enhancement
-	- Status: Queued
-	- Priority: High
-	- Opened: 2026-10-24 16:40
-	- Opened by: JC
-	- Related IDs: 2026101916500100, 2026102319573100
-	- Notes:
-		- 2026-10-25: `--keep-temp` is in since `533c1df` (2026102319573100).
-	- Requirements:
-		- Per the container bullets in `Cleanup after a run` in the shared CICD rules. The C container already runs with `--rm` and an init, and an older C image no container uses is removed.
-		- Sweeping override, 2026-10-24: this supersedes any earlier decision on this project that conflicts with it.
-		- Overrides 2026101916500100's unfiltered `docker builder prune` after a rebuild, which design.md's `Fuzzing` part also gives.
-		- `dev.project=shclwrap` and `dev.run=<run folder>` labels on every container, image and volume, and containers named `shclwrap-<run folder>-<step>`.
-		- `--rm` unless `--keep-temp` was given.
-		- At the end of a run, on failure and Ctrl+C too, the run's containers are stopped and removed by `dev.run`.
-		- The current C image tag and the one before it stay. Today only the current one does.
-		- `docker builder prune -f --filter until=168h` in place of the unfiltered prune.
-		- Cache volumes follow the 2 GB rule.
-		- One line at the end says what went and about what it freed, from `docker system df` before and after.
 
 - CICD reset: a test for every Done item
 	- ID: 2026102416400050

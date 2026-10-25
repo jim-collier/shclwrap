@@ -97,8 +97,8 @@ fi
 ##	The last line, not any line: a publish echoes the pre-push gate's nested run,
 ##	done line and all. An unfinished log never gets the marker, since a look taken
 ##	mid-run used to mark it seen and the warnings and abort that followed were
-##	never shown.
-lastLine="$(grep -v '^[[:space:]]*$' "$log" 2>/dev/null | tail -n 1 || true)"
+##	never shown. The run's own cleanup line comes after the done line.
+lastLine="$(grep -v -e '^[[:space:]]*$' -e '^Cleanup: ' "$log" 2>/dev/null | tail -n 1 || true)"
 finished=0
 if [[ "$lastLine" == *"CI/CD: done."* ]] || grep -qE '^\[ FAILED: |CICD ABORTED' "$log" 2>/dev/null; then finished=1; fi
 
@@ -158,3 +158,4 @@ fi
 ##		- 20260919: `[ FAILED: ... ]` counts as a failure. A log with no done or
 ##		  abort line is INCOMPLETE and never marked seen.
 ##		- 20261025: A test's PASS or SKIP line isn't a warning.
+##		- 20261025: The Cleanup line after the done line doesn't hide it.

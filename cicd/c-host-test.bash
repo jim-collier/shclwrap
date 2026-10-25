@@ -24,7 +24,7 @@ fFail(){ echo "dednv: $*" >&2; exit 1; }
 tree="${scratch}/tree"
 mkdir -p "${tree}/cicd/utility/include" "${scratch}/bin" "${scratch}/work"
 cp "${here}/c-checks.bash" "${here}/tool-pins.env" "${tree}/cicd/"
-cp "${here}/utility/include/run-lock.bash" "${here}/utility/include/cpu-cap.bash" "${tree}/cicd/utility/include/"
+cp "${here}/utility/include/run-lock.bash" "${here}/utility/include/cpu-cap.bash" "${here}/utility/include/docker-tidy.bash" "${tree}/cicd/utility/include/"
 cat > "${tree}/cicd/c-in-container.bash" <<'EOF'
 echo "ran host=${SHCLW_C_HOST:-0} work=${SHCLW_C_WORK:-} args=$*"
 EOF
@@ -73,6 +73,11 @@ fHostOnce "--no-container" "--no-container"
 fRun ok
 if grep -q 'C runs on the host\|^ran host' "${scratch}/out"; then fFail "a working docker ran on the host: $(cat "${scratch}/out")"; fi
 grep -qx 'ran in a container' "${scratch}/out" || fFail "a working docker didn't start the container: $(cat "${scratch}/out")"
+## The run's labels on the image and container, and --rm unless cicd.bash --keep-temp (2026102416400020).
+grep -q '^build .*--label dev.project=shclwrap --label dev.run=work ' "${scratch}/docker.log" || fFail "the image isn't labeled: $(grep '^build ' "${scratch}/docker.log")"
+[[ "$(grep '^run ' "${scratch}/docker.log")" == "run --rm --init "*"--label dev.project=shclwrap --label dev.run=work "* ]] || fFail "the container isn't --rm and labeled: $(grep '^run ' "${scratch}/docker.log")"
+fRun ok SHCLW_KEEP_TEMP=1
+if grep -q '^run --rm ' "${scratch}/docker.log"; then fFail "--keep-temp still ran the container with --rm"; fi
 
 echo "PASS dednv C runs on the host without docker or its image"
 

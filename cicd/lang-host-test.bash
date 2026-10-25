@@ -26,7 +26,7 @@ tree="${scratch}/tree"
 mkdir -p "${tree}/cicd/utility/include" "${tree}/source/rust" "${scratch}/bin" "${scratch}/work"
 cp "${here}/lang-checks.bash" "${here}/tool-pins.env" "${tree}/cicd/"
 cp "${here}/../source/rust/rust-toolchain.toml" "${tree}/source/rust/"
-cp "${here}/utility/include/run-lock.bash" "${here}/utility/include/cpu-cap.bash" "${tree}/cicd/utility/include/"
+cp "${here}/utility/include/run-lock.bash" "${here}/utility/include/cpu-cap.bash" "${here}/utility/include/docker-tidy.bash" "${tree}/cicd/utility/include/"
 cat > "${tree}/cicd/lang-in-container.bash" <<'EOF'
 echo "ran host=${SHCLW_LANG_HOST:-0} work=${SHCLW_LANG_WORK:-} args=$*"
 EOF
@@ -79,6 +79,11 @@ runLine="$(grep '^run ' "${scratch}/docker.log")"
 [[ "${runLine}" == *"dst=/src,readonly "* ]] || fFail "fuzz mounted the tree writable: ${runLine}"
 [[ "${runLine}" == *"--env SHCLW_AREAS=go rust "* ]] || fFail "the areas didn't reach the container: ${runLine}"
 [[ "${runLine}" == *"/cicd/lang-in-container.bash fuzz --seconds 5" ]] || fFail "the container didn't get the mode and args: ${runLine}"
+## The run's labels on the image and container, and --rm unless cicd.bash --keep-temp (2026102416400020).
+grep -q '^build .*--label dev.project=shclwrap --label dev.run=work ' "${scratch}/docker.log" || fFail "the image isn't labeled: $(grep '^build ' "${scratch}/docker.log")"
+[[ "$(grep '^run ' "${scratch}/docker.log")" == "run --rm --init "*"--label dev.project=shclwrap --label dev.run=work "* ]] || fFail "the container isn't --rm and labeled: $(grep '^run ' "${scratch}/docker.log")"
+fRun ok fuzz SHCLW_KEEP_TEMP=1
+if grep -q '^run --rm ' "${scratch}/docker.log"; then fFail "--keep-temp still ran the container with --rm"; fi
 
 fRun ok format
 runLine="$(grep '^run ' "${scratch}/docker.log")"
