@@ -17,7 +17,7 @@ use crate::{
 };
 
 /// The shcl release this module wraps.
-pub const SHCL_VERSION: &str = "3.0.0-dev+ea0998fa";
+pub const SHCL_VERSION: &str = "3.0.0-dev+a65eceb8";
 
 /// The newest file format this shcl reads.
 pub const FORMAT_MAJOR: u32 = shcl::FORMAT_MAJOR;
@@ -136,7 +136,7 @@ pub struct Version;
 
 impl crate::Lib for Version {
 	type Doc = Doc;
-	const NAME: &'static str = "shcl 3.0.0-dev+ea0998fa";
+	const NAME: &'static str = "shcl 3.0.0-dev+a65eceb8";
 	const FORMAT_MAJOR: u32 = FORMAT_MAJOR;
 	fn parse(text: &str) -> Doc {
 		parse(text)
@@ -326,6 +326,7 @@ pub fn upgrade(text: &str, from: u32) -> Result<Upgraded, Error> {
 	// Only a file taken as 2.x is read the 2.x way.
 	let old = !u.current || (from_v2 && u.format < FORMAT_MAJOR);
 	let ambiguous = u.ambiguous;
+	let left = u.errors_left.clone();
 	let mut out = upgraded(u);
 	if taken_as_current {
 		out.from = FORMAT_MAJOR;
@@ -350,6 +351,13 @@ pub fn upgrade(text: &str, from: u32) -> Result<Upgraded, Error> {
 	}
 	if let Some(e) = errors {
 		return Err(e);
+	}
+	// shcl gives the input back then, and this would read it the 2.x way.
+	if !left.is_empty() {
+		return Err(Error::new(ErrKind::Refused).msg(format!(
+			"{} lines would still have an error once converted; fix them and upgrade again",
+			left.len()
+		)));
 	}
 	let (fixed, lost) = carry_reads(&old, &out.text, format_of(text) == 1)?;
 	out.lost = lost;
@@ -402,9 +410,10 @@ fn keep_original(path: &str, text: &str, from: u32) -> Result<String, Error> {
 	shcl::write_backup(path, text, from).map_err(|e| {
 		let kind = match &e {
 			shcl::UpgradeError::BackupTaken(_) => ErrKind::BackupTaken,
-			shcl::UpgradeError::NotFound(_) | shcl::UpgradeError::Ambiguous { .. } | shcl::UpgradeError::Io(_) => {
-				ErrKind::Io
-			}
+			shcl::UpgradeError::NotFound(_)
+			| shcl::UpgradeError::Ambiguous { .. }
+			| shcl::UpgradeError::Io(_)
+			| shcl::UpgradeError::ErrorsLeft { .. } => ErrKind::Io,
 		};
 		Error::new(kind).path(path).msg(e.to_string())
 	})

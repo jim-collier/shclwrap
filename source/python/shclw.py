@@ -1763,6 +1763,12 @@ def upgrade(text: str, from_: int = 0) -> Upgraded:
 		raise Error(ErrKind.Ambiguous, msg=f"{u.ambiguous} lines read two ways")
 	if old_err is not None:
 		raise old_err
+	# shcl gives the input back then, and this would read it the 2.x way.
+	if u.errors_left:
+		raise Error(
+			ErrKind.Refused,
+			msg=f"{len(u.errors_left)} lines would still have an error once converted; fix them and upgrade again",
+		)
 	fixed, out.lost = _carry_reads(old, out.text, format_of(text) == 1)
 	if banner:
 		fixed = _place_block(_same_ends(text, fixed), src != text)

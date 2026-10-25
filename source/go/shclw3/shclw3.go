@@ -24,7 +24,7 @@ import (
 )
 
 // ShclVersion is the shcl release this package wraps.
-const ShclVersion = "3.0.0-dev+ea0998fa"
+const ShclVersion = "3.0.0-dev+a65eceb8"
 
 // FormatMajor is the newest file format this shcl reads.
 const FormatMajor = shcl.FormatMajor
@@ -323,6 +323,11 @@ func Upgrade(text string, from int) (Upgraded, error) {
 	}
 	if err := oldErrors(old); err != nil {
 		return Upgraded{Text: text, From: u.Format}, err
+	}
+	// shcl gives the input back then, and this would read it the 2.x way.
+	if len(u.ErrorsLeft) > 0 {
+		return Upgraded{Text: text, From: u.Format}, &shclw.Error{Kind: shclw.ErrRefused,
+			Msg: fmt.Sprintf("%d lines would still have an error once converted; fix them and upgrade again", len(u.ErrorsLeft))}
 	}
 	fixed, lost, err := carryReads(old, out.Text, FormatOf(text) == 1)
 	if err != nil {

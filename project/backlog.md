@@ -84,6 +84,7 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- The tag is spelled with no dot, per shcl's own backlog.
 		- shcl's Go module path is still `.../v2`, and Go won't take a v3 tag on it. Go stays on a commit until that changes.
 		- Quillroute plans to have its release refuse a commit pin. The same check would fit here.
+		- 2026-10-25: Until the beta, the pin follows shcl's newest dev commit, not an old one. `cicd/bump-shcl.bash` moves every 3.0 pin at once. Moved from `ea0998fa` to `a65eceb8`.
 
 - CICD reset: containers
 	- ID: 2026102416400010

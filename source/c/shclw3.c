@@ -1729,7 +1729,7 @@ static shclw_kind upgrade(const char *text, size_t len, int64_t from, const char
 		char *fixed = NULL;
 		size_t fixed_len = 0;
 		lost_list lost = {NULL, NULL, 0, 0, false};
-		if (!l.oom && !l.n && !u.ambiguous) {
+		if (!l.oom && !l.n && !u.ambiguous && !u.errors_left_n) {
 			k = carry_reads(old, u.text, u.len, named == 1, &l, &lost, &fixed, &fixed_len);
 			checked = true;
 		}
@@ -1753,6 +1753,13 @@ static shclw_kind upgrade(const char *text, size_t len, int64_t from, const char
 				(void)snprintf(why, sizeof why, "shcl 2.0 reports errors on %zu lines; fix them and upgrade again",
 				               lines_in(&l));
 			}
+			k = shclw_i_fail(err, SHCLW_ERR_REFUSED, path, why, 0);
+		} else if (u.errors_left_n) {
+			// shcl gives the input back then, and this would read it the 2.x way.
+			*out = shclw_i_upgraded(text, len, u.format, false, 0, NULL, NULL, 0);
+			char why[96];
+			(void)snprintf(why, sizeof why, "%zu lines would still have an error once converted; fix them and upgrade again",
+			               u.errors_left_n);
 			k = shclw_i_fail(err, SHCLW_ERR_REFUSED, path, why, 0);
 		} else if (banner || (!u.current && !fixed)) {
 			*out = upgraded_ends(text, len, fixed ? fixed : u.text, fixed ? fixed_len : u.len, banner, marked != NULL,
