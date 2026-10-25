@@ -65,6 +65,7 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- Added: dropping cached headers no pin names, keeping the newest 10 fuzz failure sets, clearing the leak reports when a fresh leak run starts, and removing an older C image no container uses. `docker builder prune` runs only after a real rebuild. Every build gets a new image ID, even a fully cached one, so it compares layers.
 		- 2026-10-21: The full run at `15509b0` passed lint and the sanitized tests under the init, and the leak mode started under it and cleared the old leak reports. It stopped at CodeQL findings from 2 other items, so CTU and the heaptrack soak weren't reached. After it and a second run without the leak checks: no scratch folder, no container, one C image, only the 2 pinned headers, and only the fresh `codeql.sarif` in the leak reports.
 		- 2026-10-23: The full run at `7b2b21e` passed the leak mode under the init, CTU and the heaptrack soak included. After it: no container, one C image, only the 2 pinned headers, and no scratch folder. Older `test_shclw*` and `test_shclwrap_*` folders from 2026-10-15 to 2026-10-21 are still under the temp root, and the root-owned one in `/tmp`.
+		- 2026-10-24, CICD reset: 2026102416400020 and 2026102416400070 supersede this item where they differ, such as the unfiltered `docker builder prune` after a rebuild.
 	- Acceptance signoff: no regression test, so it waits on JC.
 	- Decisions:
 		- Kept, since the next run reuses them: `cicd/cache/c-home` with CodeQL's compiled queries, the pinned headers, the C image, Go's and cargo's caches, and the rotated run logs.
@@ -446,6 +447,136 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Progress log:
 		- 2026-10-23: Split into 2026102321270143 (the triage), 2026102321270148 (the lists made fatal), 2026102321270154 (CTU into shcl), and 2026102321270159 (gcc at `-O0`).
 
+- CICD reset: containers
+	- ID: 2026102416400010
+	- Type: Enhancement
+	- Status: Queued
+	- Priority: High
+	- Opened: 2026-10-24 16:40
+	- Opened by: JC
+	- Requirements:
+		- Per `Containers` in the shared CICD rules. The C checks already run in a pinned image.
+		- Sweeping override, 2026-10-24: this supersedes any earlier decision on this project that conflicts with it.
+		- Go, Rust, and Python build and test in a pinned image too, from a recipe in `cicd/`.
+		- With docker missing or an image that won't build, the run falls back to the host and says so in one line. Today a missing docker fails the C checks.
+		- `--no-container` runs on the host on purpose.
+		- A test whose point is the real OS, such as Windows file behavior, stays on the host or a test box.
+
+- CICD reset: container cleanup
+	- ID: 2026102416400020
+	- Type: Enhancement
+	- Status: Queued
+	- Priority: High
+	- Opened: 2026-10-24 16:40
+	- Opened by: JC
+	- Related IDs: 2026101916500100, 2026102319573100
+	- Requirements:
+		- Per the container bullets in `Cleanup after a run` in the shared CICD rules. The C container already runs with `--rm` and an init, and an older C image no container uses is removed.
+		- Sweeping override, 2026-10-24: this supersedes any earlier decision on this project that conflicts with it.
+		- Overrides 2026101916500100's unfiltered `docker builder prune` after a rebuild, which design.md's `Fuzzing` part also gives.
+		- `dev.project=shclwrap` and `dev.run=<run folder>` labels on every container, image and volume, and containers named `shclwrap-<run folder>-<step>`.
+		- `--rm` unless `--keep-temp` was given.
+		- At the end of a run, on failure and Ctrl+C too, the run's containers are stopped and removed by `dev.run`.
+		- The current C image tag and the one before it stay. Today only the current one does.
+		- `docker builder prune -f --filter until=168h` in place of the unfiltered prune.
+		- Cache volumes follow the 2 GB rule.
+		- One line at the end says what went and about what it freed, from `docker system df` before and after.
+
+- CICD reset: CPU and priority
+	- ID: 2026102416400030
+	- Type: Enhancement
+	- Status: Queued
+	- Priority: High
+	- Opened: 2026-10-24 16:40
+	- Opened by: JC
+	- Requirements:
+		- Per `Machine use` in the shared CICD rules. Half the cores is worked out once already, and cargo and `go test` get it.
+		- Sweeping override, 2026-10-24: this supersedes any earlier decision on this project that conflicts with it.
+		- Every tool that runs in parallel gets the count from that one place, `go vet`, staticcheck, ruff, `make -j` and the C container's own count included.
+		- A busy check at the start and before each step: with the 1-minute load over half the CPU count, the cap drops to a quarter.
+		- A quarter, busy or not, for the hard steps: the leak checks, the sanitized builds, the soak and the fuzz.
+		- `nice -n 19`, plus `ionice -c 3`, over the whole run.
+		- `--cpus` and `--cpu-shares 256` on each `docker run`, and `nice` inside the container too.
+		- The same rules on other hosts, with that host's CPU count and load.
+
+- CICD reset: step output
+	- ID: 2026102416400040
+	- Type: Enhancement
+	- Status: Queued
+	- Priority: High
+	- Opened: 2026-10-24 16:40
+	- Opened by: JC
+	- Requirements:
+		- Per the step lines in `CICD style guide` in the shared CICD rules. Each stage already opens with a rule and a `N/5  Name` header.
+		- Sweeping override, 2026-10-24: this supersedes any earlier decision on this project that conflicts with it.
+		- Each step opens with a `Starting` line and closes with a `PASS` or `FAIL` line, both as `Step N of M` with a local timestamp to the hundredth of a second.
+		- The rule is 79 characters wide. Today it's 74.
+		- A step that's turned off isn't counted in the total, and the first section lists those with the flag or reason for each.
+		- One blank line between sections, and one at the end.
+
+- CICD reset: a test for every Done item
+	- ID: 2026102416400050
+	- Type: Enhancement
+	- Status: Queued
+	- Priority: High
+	- Opened: 2026-10-24 16:40
+	- Opened by: JC
+	- Related IDs: 2026102416400060
+	- Requirements:
+		- Per the regression bullet in `Testing` in the shared CICD rules. Most closed items already have a `Test case:` row.
+		- Sweeping override, 2026-10-24: this supersedes any earlier decision on this project that conflicts with it.
+		- Each Done feature and bug names its test's ID, or says in a few words why it has none. Many rows name a file or shared case only.
+		- A Done item with no test where one could exist and would make sense gets one.
+
+- CICD reset: test IDs
+	- ID: 2026102416400060
+	- Type: Enhancement
+	- Status: Queued
+	- Priority: High
+	- Opened: 2026-10-24 16:40
+	- Opened by: JC
+	- Requirements:
+		- Per the ID and per-test line bullets in `Testing` in the shared CICD rules. Some cicd checks already have IDs.
+		- Sweeping override, 2026-10-24: this supersedes any earlier decision on this project that conflicts with it.
+		- Overrides the private notes' rule that test IDs count seconds since 2000.
+		- Every CI test gets an ID in the shared scheme, the Go, Rust, Python and C tests and the shared cases included. The existing ones convert once, from the time each gives. An ID never changes after that.
+		- The run prints one line per regression and fuzz test: `PASS`, `FAIL` or `SKIP`, then the ID and the name.
+
+- cicd flags for a full run that changes nothing in the tree
+	- ID: 2026102319573100
+	- Type: Enhancement
+	- Status: Queued
+	- Priority: High
+	- Opened: 2026-10-23
+	- Opened by: JC
+	- Requirements:
+		- One command line runs every check without rewriting a tracked file.
+		- A flag to turn off each stage that has none today: format, lint, and tests.
+		- Fuzz can run with `--ci`, which today turns it off with no way back on.
+		- Give the C container a name or label, so a run's container can be found.
+		- Sweeping override, 2026-10-24: this supersedes any earlier decision on this project that conflicts with it.
+		- Overrides JC's `--fuzz` decision below, design.md's `Fuzzing` part where `--ci` is the pre-push hook, and the private notes' line that the hook runs `--ci` on every push.
+	- Notes:
+		- Without `--ci`, the format stage rewrites tracked files with `gofmt -w`, `cargo fmt`, and `clang-format -i`.
+		- Until then a full test run goes in 2 steps, `--ci --leakcheck --no-sync -y` and then the fuzz by hand.
+		- 2026-10-24, CICD reset: this is the reset's `standard flags` item, raised to High, per the flags in `CICD style guide` and per `Merge gate` in the shared CICD rules. The default run fits in about an hour, beside `--quick`, `--long` with `--slow` as another name, `--leakcheck`, `--no-leakcheck`, `--backlog-run-quick [<area>...]`, `--backlog-run-full`, `--merge-gate`, `--no-container`, `--no-remote`, `--no-sync`, `--keep-temp`, `--list`, `--help` and `--quiet`. `--gate` and `--ci` stay as other names for `--backlog-run-quick` and `--merge-gate`, and say so in one line. `--backlog-run-full` is the one full line that rewrites nothing, in place of `--fuzz`. None of the 3 dogfood, publish, commit, push, install, sync, rewrite a tracked file or prompt. The pre-push hook runs `--merge-gate` only on a push to main, and skips one that changes only docs and `project/`. A push to dev runs no gate.
+	- Decisions:
+		- JC, 2026-10-24: a `--fuzz` flag turns fuzz back on under `--ci`, so `--ci --leakcheck --fuzz --no-sync -y` is the one full line.
+
+- Run the tests on Windows and macOS
+	- ID: 2026101512024174
+	- Type: Task
+	- Status: Queued
+	- Priority: High
+	- Opened: 2026-10-15
+	- Opened by: JC
+	- Requirements:
+		- The shared cases on Windows and macOS, mostly for the atomic write.
+		- Sweeping override, 2026-10-24: this supersedes any earlier decision on this project that conflicts with it.
+	- Notes:
+		- shcl 2.0 on Windows could lose the old file when a replace failed. 3.0 fixed it, and Wovenshell still keeps its own restore. The wrapper's own 1.2 write needs the same check.
+		- 2026-10-24, CICD reset: this is the reset's `other hosts and VMs` item, raised to High, per `Other hosts and VMs` in the shared CICD rules. The default run builds and tests on the test boxes: Windows on b29w, with vm925w for timed work, and macOS on b26 or vmKt6m. Each box is held through the shared host lock by `wrap` for the whole time it's used, and a VM is put back the way it was found through the VM state helper. `--no-remote` skips them, a box that isn't there is a `SKIP` that never stops a run, and each box gets a work folder of its own under its temp root. `b29w`, never `b29w-wif`.
+
 - Create-only Write fails on a FAT volume on Windows
 	- ID: 2026102412381602
 	- Type: Bug
@@ -464,6 +595,34 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Reproduced [Bug]: 2026-10-24, on vm925w, Windows 11, on a FAT32 volume, at `b9a392c`. The in-place races pass there, so only the fallback check misses.
 	- Possible cause [Bug]: `CreateHardLink` on FAT gives `ERROR_INVALID_FUNCTION` (1). Go's `ErrUnsupported` takes only `ERROR_NOT_SUPPORTED`, `ERROR_CALL_NOT_IMPLEMENTED` and a few errnos, and Rust doesn't call it `Unsupported` either. Python sees errno 22 with winerror 1. exFAT and network shares may give other codes, not tried.
 	- Test case: none yet. CI has no FAT volume. On vm925w `win-go-fat.ps1` makes one and runs the 3 languages' race tests and shared cases on it.
+
+- CICD reset: temp files and safe removal
+	- ID: 2026102416400070
+	- Type: Enhancement
+	- Status: Queued
+	- Priority: Avg
+	- Opened: 2026-10-24 16:40
+	- Opened by: JC
+	- Related IDs: 2026101916500100
+	- Requirements:
+		- Per `Temp files` and `Safe removal` in the shared CICD rules. Each run already makes a scratch folder of its own with an ownership mark, and removes it at exit.
+		- Sweeping override, 2026-10-24: this supersedes any earlier decision on this project that conflicts with it.
+		- The run's folder is `${HOST_TEMP}/shclwrap/<YYYYmmDD-HHMMSS>_<NNN>/`, made with a plain `mkdir`, and `TMPDIR`, `TEMP` and `TMP` point there for the whole run. Today only some tools get `TMPDIR`.
+		- `--keep-temp` keeps it and prints its path.
+		- Each run removes the project's own run folders older than 2 days whose `run.pid` names no live process. Older scratch folders are still under the temp root.
+		- A copy of the shared safe removal guard in the repo, for every recursive removal in the cicd scripts and the Makefile's `clean`. File list in the private notes.
+
+- CICD reset: CICD process gaps
+	- ID: 2026102416400080
+	- Type: Enhancement
+	- Status: Queued
+	- Priority: Avg
+	- Opened: 2026-10-24 16:40
+	- Opened by: JC
+	- Requirements:
+		- What else in the shared CICD rules' `CICD process` shclwrap doesn't do yet. The Go, Rust and Python leak checks are 2026101711245585, and the commit and publish stage is 2026101512024171.
+		- Sweeping override, 2026-10-24: this supersedes any earlier decision on this project that conflicts with it.
+		- A profiling step that `--quick` skips, with flamegraphs under `cicd/artifacts/profiling/` and `flame-report.py`.
 
 - Comment doesn't stack, and leaves the user's own notes
 	- ID: 2026101513330022
@@ -719,29 +878,13 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Requirements:
 		- Run cicd on GitHub's free arm64 macOS runners.
 		- Build, run the tests, and smoke-test the CLI on the built binary.
+		- Sweeping override, 2026-10-24: this supersedes any earlier decision on this project that conflicts with it.
 	- Notes:
 		- The repo has no GitHub Actions workflow yet.
 		- There's no CLI of its own here. The nearest thing is the ops runners the shared cases drive.
 		- Both local Macs are Intel, so this is the only Apple Silicon run.
 		- 2026-10-24: JC wants a hosted workflow for this.
-
-- cicd flags for a full run that changes nothing in the tree
-	- ID: 2026102319573100
-	- Type: Enhancement
-	- Status: Queued
-	- Priority: Avg
-	- Opened: 2026-10-23
-	- Opened by: JC
-	- Requirements:
-		- One command line runs every check without rewriting a tracked file.
-		- A flag to turn off each stage that has none today: format, lint, and tests.
-		- Fuzz can run with `--ci`, which today turns it off with no way back on.
-		- Give the C container a name or label, so a run's container can be found.
-	- Notes:
-		- Without `--ci`, the format stage rewrites tracked files with `gofmt -w`, `cargo fmt`, and `clang-format -i`.
-		- Until then a full test run goes in 2 steps, `--ci --leakcheck --no-sync -y` and then the fuzz by hand.
-	- Decisions:
-		- JC, 2026-10-24: a `--fuzz` flag turns fuzz back on under `--ci`, so `--ci --leakcheck --fuzz --no-sync -y` is the one full line.
+		- 2026-10-24, CICD reset: per `macOS builds on GitHub` and `Merge gate` in the shared CICD rules. One small workflow on push and PR against main, plus `workflow_dispatch`, runs `--merge-gate` as far as the runner can, with the arm64 macOS job beside it. cicd.bash flags picked by how long the job takes start it. It's free while the repo is public.
 
 - The docs check flags the backlog template and a quoted clang message
 	- ID: 2026102411444751
@@ -779,18 +922,6 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Requirements:
 		- `-m` and the usual commit, backup, and publish stage, as the other projects have.
 		- The pre-push hook runs the whole gate for a push that only deletes a branch. It should skip that.
-
-- Run the tests on Windows and macOS
-	- ID: 2026101512024174
-	- Type: Task
-	- Status: Queued
-	- Priority: Low
-	- Opened: 2026-10-15
-	- Opened by: JC
-	- Requirements:
-		- The shared cases on Windows and macOS, mostly for the atomic write.
-	- Notes:
-		- shcl 2.0 on Windows could lose the old file when a replace failed. 3.0 fixed it, and Wovenshell still keeps its own restore. The wrapper's own 1.2 write needs the same check.
 
 - Comment out a setting in place
 	- ID: 2026101513330033
