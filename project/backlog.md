@@ -718,21 +718,6 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- shcl 2.0 on Windows could lose the old file when a replace failed. 3.0 fixed it, and Wovenshell still keeps its own restore. The wrapper's own 1.2 write needs the same check.
 		- 2026-10-24, CICD reset: this is the reset's `other hosts and VMs` item, raised to High, per `Other hosts and VMs` in the shared CICD rules. The default run builds and tests on the test boxes: Windows on b29w, with vm925w for timed work, and macOS on b26 or vmKt6m. Each box is held through the shared host lock by `wrap` for the whole time it's used, and a VM is put back the way it was found through the VM state helper. `--no-remote` skips them, a box that isn't there is a `SKIP` that never stops a run, and each box gets a work folder of its own under its temp root. `b29w`, never `b29w-wif`.
 
-- The fuzz's drift guard fails a short run on a busy box
-	- ID: 2026102508080859
-	- Type: Bug
-	- Status: Queued
-	- Severity: Avg
-	- Opened: 2026-10-25 08:08
-	- Opened by: JC
-	- Related IDs: 2026102507474935
-	- Steps to reproduce [Bug]:
-		- At a 1-minute load near 70 on 32 CPUs, `bash cicd/c-checks.bash fuzz 3 WORK shclw-drive-plain --seconds 15`, with the Go and Rust drivers in `WORK/bin`.
-	- Incorrect behavior [Bug]: `fuzz: too few reads found a value; the generator has drifted`, with 0 failed cases, 8 cases and 44 reads.
-	- Expected behavior [Bug]: A run with no failures passes, or says it ran too few cases to judge the generator.
-	- Reproduced [Bug]: 2026-10-25, twice, at 5s and 15s, on the host and with the C drivers. The same run at 45s passed with 184 reads.
-	- Possible cause [Bug]: `cicd/fuzz.py` fails any run with under 50 reads (`gets < 50`), and a loaded box gets fewer in the budget. `--ci --quick` fuzzes for 10s.
-
 - Create-only Write fails on a FAT volume on Windows
 	- ID: 2026102412381602
 	- Type: Bug
@@ -1878,6 +1863,30 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Swept: every row of design.md's "evens out" table has a case or an API test that runs on C 1.2 and 2.0, but the 2.x upgrade refusal, which is 3.0's alone. Every call `shclw3.c` defines is in `shclw1.c` and `shclw2.c`, which each link checks. The notes in `shclw.h` and design.md that hold only on 3.0 now say so.
 	- Closed: 20261017-11325800
 	- Acceptance signoff: Self-closed: every shared case passes on all 3 versions. The memory growth goes away with 1.2 and 2.0, in 2026101613005800.
+
+- The fuzz's drift guard fails a short run on a busy box
+	- ID: 2026102508080859
+	- Type: Bug
+	- Status: Done
+	- Severity: Avg
+	- Opened: 2026-10-25 08:08
+	- Opened by: JC
+	- Related IDs: 2026102507474935
+	- Steps to reproduce [Bug]:
+		- At a 1-minute load near 70 on 32 CPUs, `bash cicd/c-checks.bash fuzz 3 WORK shclw-drive-plain --seconds 15`, with the Go and Rust drivers in `WORK/bin`.
+	- Incorrect behavior [Bug]: `fuzz: too few reads found a value; the generator has drifted`, with 0 failed cases, 8 cases and 44 reads.
+	- Expected behavior [Bug]: A run with no failures passes, or says it ran too few cases to judge the generator.
+	- Reproduced [Bug]: 2026-10-25, twice, at 5s and 15s, on the host and with the C drivers. The same run at 45s passed with 184 reads.
+	- Possible cause [Bug]: `cicd/fuzz.py` fails any run with under 50 reads (`gets < 50`), and a loaded box gets fewer in the budget. `--ci --quick` fuzzes for 10s.
+	- Actual cause [Bug]: The guard wanted 50 reads from any run, however few cases it made. A case makes about 5.6 reads, so a run of under about 9 cases mostly failed.
+	- Actual fix [Bug]: `fuzz.py` judges the generator only from 30 cases on, and a shorter run says it ran too few cases to judge. From 30 on it wants 2 reads a case and 10% of reads with a value. Over 600 seeds every 30 cases in a row made at least 122 reads and 14% values. design.md, Fuzzing, says so.
+	- Progress log:
+		- Verified: test dedph failed on the old `fuzz.py` with the bug's message for an 8-case run of 44 reads, and passes now. It also checks that a short run still fails on a crash, and a 30-case run fails with too few reads or values. A real 8-case Go and Rust run passed with the note, and 1s and 30s runs passed. `--backlog-run-quick cicd python` was CLEAN, and ruff and shellcheck passed.
+		- Swept: `fuzz.py` is the only drift guard. `c-in-container.bash` and `cicd.bash` call it with a time budget and pass nothing about the guard. Go's fuzzer has no such guard. The 4 bindings aren't touched.
+	- Branch: round-1025
+	- Test case: dedph, the `Judge` class in `cicd/fuzz_test.py`, in the tests stage, with stand-in drivers. dece1 now runs only `LoadCorpus` from the same file.
+	- Acceptance signoff: Self-closed: build tooling only, with a test watched to fail.
+	- Closed: 2026-10-25 08:16
 
 - Shared cases fail on a Windows clone with Git's default line ends
 	- ID: 2026102323122721

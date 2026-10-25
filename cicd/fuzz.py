@@ -30,6 +30,12 @@ NAMES = ("a", "b", "port", "name", "Server", "host", "tags", "x-y", "n_1", "list
 WORDS = ("alpha", "beta", "two words", "café", "x#y", "a # b", "a, b", "'q'", '"dq"', "C:\\temp", "", " pad ")
 TYPES = ("int", "float", "bool", "str", "strs", "ints", "floats", "raw")
 TITLE = "This config file format is SHCL."
+# A generator that stops making readable documents would pass forever, so a run
+# fails when it read too little. A short run on a busy box can make only a few
+# cases, too few to tell, so the generator is judged from this many cases on.
+# A case makes about 5.6 reads and 1.2 values, and 30 in a row made at least
+# 122 reads and 14% values, over 600 seeds.
+JUDGE_CASES = 30
 # The info block's spellings over time, 2.x's first. {n} is a format.
 INFO_BLOCKS = (
 	("#", "", "jim-collier", "main", ""),
@@ -547,8 +553,9 @@ def main() -> int:
 	if ran == 0:
 		print("fuzz: no cases ran", file=sys.stderr)
 		return 1
-	# A generator that stops making readable documents would pass forever.
-	if gets < 50 or good_gets * 10 < gets:
+	if ran < JUDGE_CASES:
+		print(f"fuzz: {ran} cases are too few to judge the generator, which needs {JUDGE_CASES}")
+	elif gets < 2 * ran or good_gets * 10 < gets:
 		print("fuzz: too few reads found a value; the generator has drifted", file=sys.stderr)
 		return 1
 	return 1 if failures else 0

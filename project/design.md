@@ -454,7 +454,7 @@ An ops script is one op per line, with fields split by tabs. `\t`, `\n`, `\r`, a
 
 - Each case runs through the Go, Rust, C, and Python drivers on the same shcl version. Rust's, C's, and Python's outputs must match Go's byte for byte, apart from the time 3.0 stamps on a line it comments out. None may crash, and a put that says ok must read back the same. A float read that says `Good` must not give infinity or NaN. A `first` or `last` read must not say `Multiple`, and has to be on the first or last line `lines` gave for that path. An edit that says ok must have found one instance at every step of its path that exists, counted just before it. The text right after an `info on` that says ok ends with the block naming the version's format, holds one block where the document had no block text in a raw body, and a second `info on` doesn't change it.
 
-- It runs for a wall-clock budget, and a failing seed is saved with its document, script, and each driver's output. If too few reads find a value, the run fails, since a generator that stopped making readable documents would pass forever.
+- It runs for a wall-clock budget, and a failing seed is saved with its document, script, and each driver's output. If too few reads find a value, the run fails, since a generator that stopped making readable documents would pass forever. A run of under 30 cases, such as a short one on a busy box, is too few to judge that, and says so instead.
 
 - C's driver is the sanitized build, so a leak or a bad read fails the case. The fuzz runs where the C drivers are built, in the C container or on the host. Without the pinned C headers it fuzzes Go against Rust alone.
 
