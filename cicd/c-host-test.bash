@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 
+#  shellcheck disable=1091  ## 'Not following.' The include is found at run time.
+
 ##	Purpose: Test dednv. c-checks.bash runs C on the host, and says so in one
 ##		line, when docker is missing or down, when the C image won't build, and
 ##		under SHCLW_C_HOST=1 (cicd.bash --no-container), which never calls
@@ -12,10 +14,11 @@
 set -Eeuo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${here}/utility/include/safe-rm.bash"
 scratch="$(mktemp -d "${TMPDIR:-/tmp}/test_shclw_chost_XXXXXX")"
 touch "${scratch}/.shclw-chost-owned"
 fCleanup(){
-	if [[ -f "${scratch}/.shclw-chost-owned" ]]; then rm -rf -- "${scratch}"; fi
+	if [[ -f "${scratch}/.shclw-chost-owned" ]]; then fSafeRm "${scratch}" >/dev/null; fi
 	return 0
 }
 trap fCleanup EXIT
@@ -24,7 +27,7 @@ fFail(){ echo "dednv: $*" >&2; exit 1; }
 tree="${scratch}/tree"
 mkdir -p "${tree}/cicd/utility/include" "${scratch}/bin" "${scratch}/work"
 cp "${here}/c-checks.bash" "${here}/tool-pins.env" "${tree}/cicd/"
-cp "${here}/utility/include/run-lock.bash" "${here}/utility/include/cpu-cap.bash" "${here}/utility/include/docker-tidy.bash" "${tree}/cicd/utility/include/"
+cp "${here}/utility/include/run-lock.bash" "${here}/utility/include/cpu-cap.bash" "${here}/utility/include/docker-tidy.bash" "${here}/utility/include/safe-rm.bash" "${tree}/cicd/utility/include/"
 cat > "${tree}/cicd/c-in-container.bash" <<'EOF'
 echo "ran host=${SHCLW_C_HOST:-0} work=${SHCLW_C_WORK:-} args=$*"
 EOF
@@ -46,7 +49,7 @@ chmod +x "${scratch}/bin/docker"
 fRun(){   ## fRun SHIM [VAR=VALUE...]: runs quick mode with fuzz-like extra args.
 	local shim="$1"; shift
 	: > "${scratch}/docker.log"
-	env -u SHCLW_CICD_LOCK -u SHCLW_C_HOST PATH="${scratch}/bin:${PATH}" DOCKER_SHIM="${shim}" DOCKER_LOG="${scratch}/docker.log" "$@" \
+	env -u SHCLW_CICD_LOCK -u SHCLW_C_HOST -u SHCLW_KEEP_TEMP PATH="${scratch}/bin:${PATH}" DOCKER_SHIM="${shim}" DOCKER_LOG="${scratch}/docker.log" "$@" \
 		bash "${tree}/cicd/c-checks.bash" quick 3 "${scratch}/work" drv --seconds 5 > "${scratch}/out" 2>&1 \
 		|| fFail "${shim}: c-checks.bash failed: $(cat "${scratch}/out")"
 }

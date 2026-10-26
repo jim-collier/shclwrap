@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 
+#  shellcheck disable=1091  ## 'Not following.' The include is found at run time.
+
 ##	Purpose: Test dee8b. lint-report.bash doesn't read a path or file name as a
 ##		warning, such as CodeQL's ExtractionWarnings.ql, and still flags a real
 ##		warning on a line that names a file (2026102509580000).
@@ -9,10 +11,11 @@
 set -Eeuo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${here}/utility/include/safe-rm.bash"
 scratch="$(mktemp -d "${TMPDIR:-/tmp}/test_shclw_lintreport_XXXXXX")"
 touch "${scratch}/.shclw-lintreport-owned"
 fCleanup(){
-	if [[ -f "${scratch}/.shclw-lintreport-owned" ]]; then rm -rf -- "${scratch}"; fi
+	if [[ -f "${scratch}/.shclw-lintreport-owned" ]]; then fSafeRm "${scratch}" >/dev/null; fi
 	return 0
 }
 trap fCleanup EXIT

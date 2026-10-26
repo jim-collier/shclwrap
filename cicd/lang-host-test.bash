@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 
+#  shellcheck disable=1091  ## 'Not following.' The include is found at run time.
+
 ##	Purpose: Test dedpt. lang-checks.bash runs Go, Rust and Python on the host,
 ##		and says so in one line, when docker is missing or down, when the image
 ##		won't build, and under SHCLW_LANG_HOST=1 (cicd.bash --no-container),
@@ -13,10 +15,11 @@
 set -Eeuo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${here}/utility/include/safe-rm.bash"
 scratch="$(mktemp -d "${TMPDIR:-/tmp}/test_shclw_langhost_XXXXXX")"
 touch "${scratch}/.shclw-langhost-owned"
 fCleanup(){
-	if [[ -f "${scratch}/.shclw-langhost-owned" ]]; then rm -rf -- "${scratch}"; fi
+	if [[ -f "${scratch}/.shclw-langhost-owned" ]]; then fSafeRm "${scratch}" >/dev/null; fi
 	return 0
 }
 trap fCleanup EXIT
@@ -26,7 +29,7 @@ tree="${scratch}/tree"
 mkdir -p "${tree}/cicd/utility/include" "${tree}/source/rust" "${scratch}/bin" "${scratch}/work"
 cp "${here}/lang-checks.bash" "${here}/tool-pins.env" "${tree}/cicd/"
 cp "${here}/../source/rust/rust-toolchain.toml" "${tree}/source/rust/"
-cp "${here}/utility/include/run-lock.bash" "${here}/utility/include/cpu-cap.bash" "${here}/utility/include/docker-tidy.bash" "${tree}/cicd/utility/include/"
+cp "${here}/utility/include/run-lock.bash" "${here}/utility/include/cpu-cap.bash" "${here}/utility/include/docker-tidy.bash" "${here}/utility/include/safe-rm.bash" "${tree}/cicd/utility/include/"
 cat > "${tree}/cicd/lang-in-container.bash" <<'EOF'
 echo "ran host=${SHCLW_LANG_HOST:-0} work=${SHCLW_LANG_WORK:-} args=$*"
 EOF
@@ -48,7 +51,7 @@ chmod +x "${scratch}/bin/docker"
 fRun(){   ## fRun SHIM MODE [VAR=VALUE...]: runs MODE with fuzz-like extra args.
 	local shim="$1" mode="$2"; shift 2
 	: > "${scratch}/docker.log"
-	env -u SHCLW_CICD_LOCK -u SHCLW_LANG_HOST PATH="${scratch}/bin:${PATH}" DOCKER_SHIM="${shim}" DOCKER_LOG="${scratch}/docker.log" "$@" \
+	env -u SHCLW_CICD_LOCK -u SHCLW_LANG_HOST -u SHCLW_KEEP_TEMP PATH="${scratch}/bin:${PATH}" DOCKER_SHIM="${shim}" DOCKER_LOG="${scratch}/docker.log" "$@" \
 		bash "${tree}/cicd/lang-checks.bash" "${mode}" "${scratch}/work" --seconds 5 > "${scratch}/out" 2>&1 \
 		|| fFail "${shim}: lang-checks.bash failed: $(cat "${scratch}/out")"
 }

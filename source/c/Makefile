@@ -175,5 +175,7 @@ format:
 format-check:
 	$(CLANG_FORMAT) --dry-run -Werror $(FORMATTED)
 
+# Through the repo's removal guard, which takes only a path under CLEAN_UNDER.
+CLEAN_UNDER ?= $(CURDIR)
 clean:
-	rm -rf -- $(OUT)
+	if [ -e '$(OUT)' ]; then bash '$(CURDIR)/../../cicd/utility/include/safe-rm.bash' --under '$(abspath $(CLEAN_UNDER))' '$(abspath $(OUT))'; fi

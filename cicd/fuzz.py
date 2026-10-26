@@ -447,9 +447,16 @@ def check_info(case: Case, output: str) -> list[str]:
 	return problems
 
 
+def rm_tree(path: Path, parent: Path) -> None:
+	# The repo's safe removal rule: only a folder right inside parent, never a link or a path through one.
+	if path.is_symlink() or path.parent != parent or path.resolve() != parent.resolve() / path.name:
+		raise OSError(f"fuzz: refused to remove {path}")
+	shutil.rmtree(path)
+
+
 def run_driver(cmd: list[str], version: int, doc: Path, work: Path, script: str) -> tuple[int, str, str]:
 	if work.exists():
-		shutil.rmtree(work)
+		rm_tree(work, work.parent)
 	work.mkdir(parents=True)
 	shutil.copyfile(doc, work / "doc.shcl")
 	try:
@@ -579,7 +586,12 @@ def main() -> int:
 		# Only what this run made. --out may sit inside --work, so the folder goes only if empty.
 		doc_path.unlink(missing_ok=True)
 		for sub in drivers:
-			shutil.rmtree(args.work / sub, ignore_errors=True)
+			try:
+				rm_tree(args.work / sub, args.work)
+			except FileNotFoundError:
+				pass
+			except OSError as e:
+				print(e, file=sys.stderr)
 		if made_work:
 			with contextlib.suppress(OSError):
 				args.work.rmdir()

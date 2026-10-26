@@ -271,7 +271,8 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 - CICD reset: temp files and safe removal
 	- ID: 2026102416400070
 	- Type: Enhancement
-	- Status: Queued
+	- Status: Waiting on automated testing
+	- Needs local test suite run?: `cicd/cicd.bash --backlog-run-full`, for the CodeQL build's `make clean` through the guard in the C leak checks.
 	- Priority: Avg
 	- Opened: 2026-10-24 16:40
 	- Opened by: JC
@@ -286,6 +287,19 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- `--keep-temp` keeps it and prints its path.
 		- Each run removes the project's own run folders older than 2 days whose `run.pid` names no live process. Older scratch folders are still under the temp root.
 		- A copy of the shared safe removal guard in the repo, for every recursive removal in the cicd scripts and the Makefile's `clean`. File list in the private notes.
+	- Progress log:
+		- 2026-10-25: The run's folder is `${HOST_TEMP}/shclwrap/<stamp>_<NNN>/`, from a temp root with its links resolved, so no `//` on macOS. It holds `run.pid`, and `TMPDIR`, `TEMP` and `TMP` point there, in both containers too. Each run first removes stale run folders.
+		- 2026-10-25: `cicd/utility/include/safe-rm.bash` is the guard. `fSafeRm` takes temp paths, and `fSafeRm_Under` takes a path inside one named folder, for the fuzz sets, `cicd/cache/` and `make clean`. fuzz.py has its own small check. design.md says so.
+		- 2026-10-25: A `--keep-temp` run failed dednv and dedpt, since both inherited `SHCLW_KEEP_TEMP`. Both now unset it.
+		- Verified: deean passes, and fails with the own-root rule, the live-process check, the link resolving or the through-link check taken out, a test's removal put back to a bare one, or the `TMPDIR` export dropped. `--backlog-run-quick go python c` passed CLEAN, and `--backlog-run-quick cicd` passed, plain and with `--keep-temp`. A kept run folder aged 3 days went in the next run, and a folder made by hand stayed. `make clean` in the C image removed a folder under `CLEAN_UNDER` and refused one outside it. shellcheck and ruff are clean.
+		- Swept: every `rm -r`, `shutil.rmtree` and `Remove-Item -Recurse` in `cicd/`, `cicd/hooks/` and `source/c/Makefile`: cicd.bash 2, 9 test scripts, `fCache_Rm` in docker-tidy.bash, fuzz.py 2, and `clean`. No PowerShell in the repo.
+	- Decisions:
+		- The sweep takes only a folder with a `run.pid`, the run's mark and a `<stamp>_<NNN>` name. A folder made by hand in the same place has no `run.pid`, so it stays.
+		- The guard resolves links with `cd -P` and `pwd -P`, and uses `-x` where `rm` has no `--one-file-system`, since macOS has neither `realpath -e` nor that flag.
+		- `fSafeRm_Under` lets the named folder sit behind a link, as a checkout can, but nothing below it.
+		- Left alone: the Dockerfiles' `rm -rf` of apt lists and download leftovers, inside the image build, and Python's `TemporaryDirectory`, which removes only what it made.
+		- No `test_shclw_*` folders were left under the temp roots on this box, so nothing sweeps the old layout.
+	- Test case: deean, `cicd/temp-test.bash`.
 
 - CICD reset: CICD process gaps
 	- ID: 2026102416400080

@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 
+#  shellcheck disable=1091  ## 'Not following.' The include is found at run time.
+
 ##	Purpose: Test dedta. A run drops cached shcl headers no pin names, and keeps
 ##		the newest 10 fuzz failure sets it marked as its own (2026101916500100).
 ##		Anything else in those folders stays.
@@ -9,10 +11,11 @@
 set -Eeuo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${here}/utility/include/safe-rm.bash"
 scratch="$(mktemp -d "${TMPDIR:-/tmp}/test_shclw_prune_XXXXXX")"
 touch "${scratch}/.shclw-prune-owned"
 fCleanup(){
-	if [[ -f "${scratch}/.shclw-prune-owned" ]]; then rm -rf -- "${scratch}"; fi
+	if [[ -f "${scratch}/.shclw-prune-owned" ]]; then fSafeRm "${scratch}" >/dev/null; fi
 	return 0
 }
 trap fCleanup EXIT

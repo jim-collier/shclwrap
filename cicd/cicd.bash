@@ -57,7 +57,11 @@
 ##	  for Rust and C against Go, and SHCLW_GOFUZZ_SECONDS (default 30, 0 with --quick)
 ##	  for Go's fuzzer. Failing fuzz cases go to cicd/artifacts/fuzz/, and the
 ##	  newest 10 sets are kept.
-##	- Test scratch goes under $TMPDIR, in a folder the run makes and removes.
+##	- Each run makes its own folder, ${HOST_TEMP}/shclwrap/<YYYYmmDD-HHMMSS>_<NNN>/,
+##	  and points TMPDIR, TEMP and TMP at it. HOST_TEMP defaults to ${TMPDIR:-/tmp}.
+##	  It goes at the end, on failure and Ctrl+C too, unless --keep-temp. Each run
+##	  also removes the project's run folders older than 2 days whose run.pid names
+##	  no live process.
 ##	- Runs at nice 19 and idle IO. Parallel tools get half the CPUs, or a quarter
 ##	  when the 1-minute load is over half the CPU count, checked before each
 ##	  stage. The leak checks, sanitized C, and fuzz always get a quarter.
@@ -91,6 +95,7 @@ source "${here}/utility/include/cpu-cap.bash"
 source "${here}/utility/include/steps.bash"
 source "${here}/utility/include/c-tests.bash"
 source "${here}/utility/include/docker-tidy.bash"
+source "${here}/utility/include/safe-rm.bash"
 fLowPriority
 stamp="$(date +%Y%m%d-%H%M%S)"
 
@@ -245,7 +250,7 @@ fFuzzFail_Prune(){
 		if [[ -f "${dir}.shclw-cicd-owned" ]]; then owned+=("${dir%/}"); fi
 	done
 	for ((i = 0; i < ${#owned[@]} - 10; i++)); do
-		if [[ -f "${owned[i]}/.shclw-cicd-owned" ]]; then rm -rf -- "${owned[i]}"; fi
+		if [[ -f "${owned[i]}/.shclw-cicd-owned" ]]; then fSafeRm_Under "${root}/cicd/artifacts/fuzz" "${owned[i]}" >/dev/null || true; fi
 	done
 	return 0
 }
@@ -270,20 +275,21 @@ fCicdTests(){
 	fTest -q de7yv "cicd flag mixes" bash "${here}/flags-test.bash"
 	fTest -q deea7 "--list names every test a run would run, and runs nothing" bash "${here}/list-test.bash"
 	fTest dece1 "fuzz corpus keeps its bytes" env PYTHONPYCACHEPREFIX="${work}/pycache" PYTHONWARNDEFAULTENCODING=1 PYTHONWARNINGS=error::EncodingWarning python3 "${here}/fuzz_test.py" -q LoadCorpus
-	fTest dedph "fuzz judges the generator only from enough cases" env TMPDIR="${work}" PYTHONPYCACHEPREFIX="${work}/pycache" PYTHONWARNDEFAULTENCODING=1 PYTHONWARNINGS=error::EncodingWarning python3 "${here}/fuzz_test.py" -q Judge
-	fTest dee8t "shared cases, language tests and fuzz print a test line each, by their own IDs" env TMPDIR="${work}" PYTHONPYCACHEPREFIX="${work}/pycache" PYTHONWARNDEFAULTENCODING=1 PYTHONWARNINGS=error::EncodingWarning python3 "${here}/test_lines_test.py" -q
-	fTest -q decc9 "one cicd run per tree at a time" env TMPDIR="${work}" bash "${here}/lock-test.bash"
-	fTest -q decdx "runs started in the same second get their own logs" env TMPDIR="${work}" bash "${here}/log-name-test.bash"
-	fTest -q dee8b "lint-report doesn't read a path as a warning" env TMPDIR="${work}" bash "${here}/lint-report-test.bash"
-	fTest -q decb9 "line ends under core.autocrlf=true" env TMPDIR="${work}" bash "${here}/eol-test.bash"
+	fTest dedph "fuzz judges the generator only from enough cases" env PYTHONPYCACHEPREFIX="${work}/pycache" PYTHONWARNDEFAULTENCODING=1 PYTHONWARNINGS=error::EncodingWarning python3 "${here}/fuzz_test.py" -q Judge
+	fTest dee8t "shared cases, language tests and fuzz print a test line each, by their own IDs" env PYTHONPYCACHEPREFIX="${work}/pycache" PYTHONWARNDEFAULTENCODING=1 PYTHONWARNINGS=error::EncodingWarning python3 "${here}/test_lines_test.py" -q
+	fTest -q decc9 "one cicd run per tree at a time" bash "${here}/lock-test.bash"
+	fTest -q decdx "runs started in the same second get their own logs" bash "${here}/log-name-test.bash"
+	fTest -q dee8b "lint-report doesn't read a path as a warning" bash "${here}/lint-report-test.bash"
+	fTest -q decb9 "line ends under core.autocrlf=true" bash "${here}/eol-test.bash"
 	fTest -q dedkv "CPU caps and low priority" bash "${here}/cpu-cap-test.bash"
 	fTest -q dedm7 "step and test lines" bash "${here}/steps-test.bash"
-	fTest -q dedn4 "pre-push hook gates only a push to main that changes more than docs" env TMPDIR="${work}" bash "${here}/hook-test.bash"
+	fTest -q dedn4 "pre-push hook gates only a push to main that changes more than docs" bash "${here}/hook-test.bash"
 	fTest dedn5 "C containers carry the run's name and labels" fDockerLabels
-	fTest -q dednv "C runs on the host without docker or its image" env TMPDIR="${work}" bash "${here}/c-host-test.bash"
-	fTest -q dedpt "Go, Rust and Python run on the host without docker or their image" env TMPDIR="${work}" bash "${here}/lang-host-test.bash"
-	fTest -q dedqv "a run's end removes its containers and stale images, and nothing else" env TMPDIR="${work}" bash "${here}/docker-tidy-test.bash"
-	fTest -q dedta "stale headers and fuzz sets are pruned, and nothing else" env TMPDIR="${work}" bash "${here}/prune-test.bash"
+	fTest -q dednv "C runs on the host without docker or its image" bash "${here}/c-host-test.bash"
+	fTest -q dedpt "Go, Rust and Python run on the host without docker or their image" bash "${here}/lang-host-test.bash"
+	fTest -q dedqv "a run's end removes its containers and stale images, and nothing else" bash "${here}/docker-tidy-test.bash"
+	fTest -q dedta "stale headers and fuzz sets are pruned, and nothing else" bash "${here}/prune-test.bash"
+	fTest -q deean "run folders and safe removal" bash "${here}/temp-test.bash"
 }
 
 ## --list: the test IDs each step that's on would run, one line each, by the flags given.
@@ -360,23 +366,24 @@ fDockerLabels(){
 	return "${bad}"
 }
 
-## The run's scratch folder, with a marker so cleanup only ever removes its own.
-fScratchName(){ work="${TMPDIR:-/tmp}/test_shclw_${stamp}$(printf '%02d' $((RANDOM % 100)))"; }
+## The run's folder as it will most likely be named; fRunDir counts up from it when it's taken.
+fScratchName(){ work="${HOST_TEMP}/${projectName}/${stamp}_001"; }
 fScratchName
-runPassed=0; consoleFd=""
+runPassed=0; consoleFd=""; workMade=0
 ## The run's end, on failure and Ctrl+C too: its containers, stale images, and its scratch folder,
 ## in one line. Ctrl+C has already taken tee down, so the line goes to the console instead.
 fCleanup(){
 	local line="" size=""
 	trap '' PIPE INT
-	if [[ ! -f "${work}/.shclw-cicd-owned" ]]; then return 0; fi
+	if ((! workMade)) || [[ ! -f "${work}/.shclw-cicd-owned" ]]; then return 0; fi
 	fDocker_Tidy "${work}" "${runPassed}" "${keepTemp}" || true
 	if ((keepTemp)); then
 		line="kept the scratch folder ${work}"
 	else
 		size="$(du -sk "${work}" 2>/dev/null | cut -f1 || true)"
-		rm -rf -- "${work}"
-		line="removed the scratch folder${size:+ ($(fBytes $((size * 1000))))}"
+		if fSafeRm "${work}" >/dev/null; then line="removed the scratch folder${size:+ ($(fBytes $((size * 1000))))}"
+		else line="couldn't remove the scratch folder ${work}"
+		fi
 	fi
 	if [[ -n "${dockerNote}" ]]; then line+=", ${dockerNote}"; fi
 	line="Cleanup: ${line}."
@@ -402,14 +409,12 @@ exec {logFd}>&-
 fPreflight
 if ((! assumeYes)); then read -r -p "Proceed? (Ctrl+C aborts, Enter continues) " _; fi
 fRunLock "${root}" "cicd.bash ${cmdLine}"
-## Another tree's run can pick the same name under the same TMPDIR.
-mkdir -p "${work%/*}"
-for ((scratchTry = 0; ; scratchTry++)); do
-	if mkdir -- "${work}" 2>/dev/null; then break; fi
-	((scratchTry < 20)) || fDie "no free scratch folder name under ${TMPDIR:-/tmp}"
-	fScratchName
-done
-touch "${work}/.shclw-cicd-owned"
+fRunDir_Sweep
+## A plain mkdir, counting up, since another tree's run or a folder made by hand can have the name.
+fRunDir "${stamp}" || fDie "no run folder under ${HOST_TEMP}/${projectName}"
+if [[ "${runDir}" != "${work}" ]]; then fEcho_Clean "Scratch ......: ${runDir}"; fi
+work="${runDir}"; workMade=1
+export HOST_TEMP TMPDIR="${work}" TEMP="${work}" TMP="${work}"
 
 #•••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••
 if fStep_On "Remote sync"; then
@@ -595,3 +600,4 @@ fEcho_Clean
 ##		- 2026-10-25 JC: The run's end stops and removes its containers by label, drops stale images and week-old build cache, and says what went in one line.
 ##		- 2026-10-25 JC: Test lines for the shared cases, the fuzz and Go's fuzzer, and SKIP lines for them when the fuzz is off.
 ##		- 2026-10-25 JC: --list names the test IDs each step would run, and --dry-run stays the step list.
+##		- 2026-10-25 JC: The run's folder is ${HOST_TEMP}/shclwrap/<stamp>_<NNN>, and TMPDIR, TEMP and TMP point there. Stale run folders go. Every recursive removal goes through safe-rm.bash.

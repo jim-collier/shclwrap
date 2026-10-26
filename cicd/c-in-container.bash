@@ -227,7 +227,7 @@ case "\${1:-capture}" in
 		make -s -C ${root}/source/c SHCL_DIR=${shcl3Dir} SHCL2_DIR=${shcl2Dir} OUT="${work}/codeql-build-v3" CC="${cc15}" CXX="${cxx}" CC15="${cc15}" CLANG="${clang}" CLANG_TIDY="${clangTidy}" drive-plain
 		;;
 	capture)
-		make -s -C ${root}/source/c OUT="${work}/codeql-build-v3" clean
+		make -s -C ${root}/source/c OUT="${work}/codeql-build-v3" CLEAN_UNDER="${work}" clean
 		make -s -C ${root}/source/c SHCL_DIR=${shcl3Dir} SHCL2_DIR=${shcl2Dir} OUT="${work}/codeql-build-v3" CC="${cc15}" CXX="${cxx}" CC15="${cc15}" CLANG="${clang}" CLANG_TIDY="${clangTidy}" drive-plain
 		;;
 	*) echo "unknown CodeQL build mode: \${1}" >&2; exit 2 ;;
