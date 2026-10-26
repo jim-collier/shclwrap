@@ -126,7 +126,7 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 - CICD reset: test IDs
 	- ID: 2026102416400060
 	- Type: Enhancement
-	- Status: Queued
+	- Status: Done
 	- Priority: High
 	- Opened: 2026-10-24 16:40
 	- Opened by: JC
@@ -138,6 +138,10 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- The run prints one line per regression and fuzz test: `PASS`, `FAIL` or `SKIP`, then the ID and the name.
 	- Progress log:
 		- 2026-10-25: Too big for one go, so split into 2026102507142900 (cicd's own checks), 2026102507142902 (shared cases), 2026102507142905 (Go, Rust, Python and C tests) and 2026102507142907 (fuzz). Closes with the last of them.
+		- 2026-10-25: Closed with its last child, 2026102507142905. All 4 children are Done, and nothing of its own is left.
+	- Test case: dedm7 (cicd's checks) and dee8t (the cases, the language tests and the fuzz).
+	- Closed: 2026-10-25 18:26
+	- Acceptance signoff: Self-closed: every CI test prints its line by its own ID, per its 4 children.
 
 - Test IDs: shared cases
 	- ID: 2026102507142902
@@ -168,7 +172,7 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 - Test IDs: Go, Rust, Python and C tests
 	- ID: 2026102507142905
 	- Type: Enhancement
-	- Status: Queued
+	- Status: Done
 	- Priority: High
 	- Opened: 2026-10-25 07:14
 	- Opened by: JC
@@ -177,6 +181,21 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Requirements:
 		- Each test function gets an ID from its first commit, about 100 across the 4 languages. Split per language if it won't fit.
 		- The run prints one line per test, skips included.
+	- Progress log:
+		- 2026-10-25: 95 tests got IDs: Go 29, Rust 26, Python 14 and C 26. Each is from the oldest commit that adds the test, same-minute ones taking the next free minute. Go, Rust and Python keep it on a `Test ID:` comment just above the test, and C in a table in `api_test.c`'s `main`.
+		- Each prints `PASS|FAIL|SKIP <id> <Lang> <name>`, such as `PASS ddzw5 Go TestOpen`. Go's come from `go test -json` through `go_test_lines.py`, Rust's from libtest's own lines through the new `rust_test_lines.py`, and Python's from the new `py_tests.py`. `api_test.c` prints its own, as `C++` in its C++ build, and its 2 memory tests say `SKIP` under ASan. A test with no ID fails the run. `cicd/test_ids.py` finds the tests and their IDs.
+		- Rust's tests run with `--tests` now, which leaves out the one doc example. It was `ignore` anyway.
+		- Verified: `cicd/cicd.bash --backlog-run-quick go rust python c cicd` passed, CLEAN, with a line for every test in all 4 languages. `c-checks.bash test 3` printed 26 C++ lines, 24 ASan PASS lines and 2 SKIPs. `c-checks.bash lint 3` passed. A planted failure in `test_nul` printed its FAIL line and exit 1.
+		- Swept: every place the Go, Rust, Python and C tests run in cicd (`lang-in-container.bash`, `c-in-container.bash` quick and test modes, the Makefile's `test`), what reads their output (`lint-report.bash`), and the case ID tool, which now skips these IDs too.
+	- Decisions:
+		- Each language's copy of a test gets its own ID, since each is its own function. A Go subtest is part of its function's line.
+		- Go's `TestCases` has no ID, since each case has its own. Go's `FuzzRun` run on its seeds under `go test` is `ddzw4`, apart from `ddzw3`, the fuzzer.
+		- A Rust test can't mark itself skipped once it runs, so `save_refused_by_folder` says `PASS` when the folder takes files anyway. design.md says so.
+	- Branch: r1025
+	- Commit: d5792d0
+	- Test case: dee8t, `cicd/test_lines_test.py`, class LangIds: every Go, Rust, Python and C test has its own ID, apart from the cases' and cicd's, C's table holds every test function, and the 3 line printers print the lines and fail on a test with no ID. It failed with TestOpen's ID taken out, with a Python test given a C test's ID, and with one given a case's.
+	- Closed: 2026-10-25 18:26
+	- Acceptance signoff: Self-closed: every test prints its line by its own ID in all 4 languages, and dee8t covers it.
 
 - Test IDs: fuzz
 	- ID: 2026102507142907
