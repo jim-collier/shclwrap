@@ -56,235 +56,6 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Test case: shared case `057-write-create` in all 4 languages, and the race tests: Go `TestCreateRace`, Rust `create_race_link` and `create_race_in_place`, Python `CreateRace`, C `test_create_raced` (8 processes).
 	- Acceptance signoff: waits on JC after the full run, for the README line.
 
-- shcl 4 adapters
-	- ID: 2026101512024163
-	- Type: Feature
-	- Status: Stalled
-	- Priority: High
-	- Opened: 2026-10-15
-	- Opened by: JC
-	- Prereq IDs: shcl 4 in each language. It's planned Rust first, then C, then Go and Python.
-	- Requirements:
-		- The same API, over shcl 4.
-	- Notes:
-		- 4 keeps every line as typed, so Text and Write get simpler. Its read-back check in setters can replace the wrapper's.
-	- Progress log:
-		- 20261015: shcl 4 isn't built in any language yet, only planned in its v4 doc. This waits on it.
-
-- Move the 3.0 pin to the first 3.0 beta
-	- ID: 2026101512024165
-	- Type: Task
-	- Status: Stalled
-	- Priority: Avg
-	- Opened: 2026-10-15
-	- Opened by: JC
-	- Requirements:
-		- Pin `v3.0.0-beta1` once it's tagged, in place of a dev commit.
-	- Notes:
-		- The tag is spelled with no dot, per shcl's own backlog.
-		- shcl's Go module path is still `.../v2`, and Go won't take a v3 tag on it. Go stays on a commit until that changes.
-		- Quillroute plans to have its release refuse a commit pin. The same check would fit here.
-
-- CICD reset: containers
-	- ID: 2026102416400010
-	- Type: Enhancement
-	- Status: Done
-	- Priority: High
-	- Opened: 2026-10-24 16:40
-	- Opened by: JC
-	- Notes:
-		- 2026-10-25: `--no-container` is in since `533c1df` (2026102319573100).
-	- Requirements:
-		- Per `Containers` in the shared CICD rules. The C checks already run in a pinned image.
-		- Sweeping override, 2026-10-24: this supersedes any earlier decision on this project that conflicts with it.
-		- Go, Rust, and Python build and test in a pinned image too, from a recipe in `cicd/`.
-		- With docker missing or an image that won't build, the run falls back to the host and says so in one line. Today a missing docker fails the C checks.
-		- `--no-container` runs on the host on purpose.
-		- A test whose point is the real OS, such as Windows file behavior, stays on the host or a test box.
-	- Progress log:
-	- Test case: dednv (C on the host) and dedpt (Go, Rust and Python on the host), per its 2 children.
-	- Closed: 20261025
-		- 2026-10-25: Split into 2026102507474935 (C falls back to the host) and 2026102507474940 (Go, Rust and Python in a pinned image).
-		- 2026-10-25: 2026102507474935 is Done. C runs on the host with docker missing, a C image that won't build, or `--no-container`.
-	- 2026-10-25: Closed with its 2 children, 2026102507474935 and 2026102507474940, both Done.
-
-- CICD reset: a test for every Done item
-	- ID: 2026102416400050
-	- Type: Enhancement
-	- Status: Done
-	- Priority: High
-	- Opened: 2026-10-24 16:40
-	- Opened by: JC
-	- Related IDs: 2026102416400060
-	- Prereq IDs: 2026102416400060
-		- 2026-10-25: the Done items name test IDs, which that item gives out.
-	- Requirements:
-		- Per the regression bullet in `Testing` in the shared CICD rules. Most closed items already have a `Test case:` row.
-		- Sweeping override, 2026-10-24: this supersedes any earlier decision on this project that conflicts with it.
-		- Each Done feature and bug names its test's ID, or says in a few words why it has none. Many rows name a file or shared case only.
-		- A Done item with no test where one could exist and would make sense gets one.
-	- Progress log:
-		- 2026-10-25: Every Done item's Test case row now names its tests by ID, or says why it has none. Each named case, test function and fuzz check got its ID beside it, and the old base 62 IDs on those rows became their new ones.
-		- The leak run's leak, null and heap growth probes and the heaptrack soak had no IDs, so 2026101619042485 couldn't name them. They're now de2xw, de2xx, de2xy and de2xz, dated from the commit that added them, and print their own lines.
-		- 3 Done items had no Test case row and got one: 2026102416400010, 2026101512024159 and 2026101512024148.
-	- Decisions:
-		- No new test for the 6 Done items left without an ID. A rename, a repo setting and a clang-tidy cast fix have nothing for a test to add. The CodeQL cache bug fails the full run's CodeQL step if it comes back. md-check.py lives outside the repo, and the Rust scratch folders go after the test ends.
-		- A row naming a whole set, such as every shared case through the Python driver, says so rather than listing each case's ID.
-		- Done items only. Open items get their IDs as they close.
-	- Branch: r1025
-	- Test case: de2xw, de2xx, de2xy and de2xz, the new lines in `cicd/c-in-container.bash` leak mode. The rest is backlog text.
-	- Verified: every ID on a Done item's Test case row is in the tree, and none is an old base 62 one. `cicd/c-checks.bash leakcheck` and `leakcheck-resume` printed PASS for all 5 leak IDs in the container, and with the null probe broken it printed FAIL de2xx. On the host under `SHCLW_C_HOST=1` it printed a SKIP for each by name. dedm7, dee8t, shellcheck, and `--backlog-run-quick cicd` with `lint-report.bash` (CLEAN) passed.
-	- Swept: all 85 Done items' Test case rows. The other checks in leak mode, CodeQL and CTU, are gates over our code with deb9f as the CTU probe. Lint mode's probes already had IDs. The Makefile's `names` check, named on 2026101516111033, has none, so it's filed as 2026102518381781. `make pick`, named on 2026101516111070, went with the 3.0 floor.
-	- Acceptance signoff: Self-closed: mechanical, with every named ID checked against the tree and the new test lines watched to fail.
-	- Closed: 2026-10-25 18:37
-
-- CICD reset: test IDs
-	- ID: 2026102416400060
-	- Type: Enhancement
-	- Status: Done
-	- Priority: High
-	- Opened: 2026-10-24 16:40
-	- Opened by: JC
-	- Requirements:
-		- Per the ID and per-test line bullets in `Testing` in the shared CICD rules. Some cicd checks already have IDs.
-		- Sweeping override, 2026-10-24: this supersedes any earlier decision on this project that conflicts with it.
-		- Overrides the private notes' rule that test IDs count seconds since 2000.
-		- Every CI test gets an ID in the shared scheme, the Go, Rust, Python and C tests and the shared cases included. The existing ones convert once, from the time each gives. An ID never changes after that.
-		- The run prints one line per regression and fuzz test: `PASS`, `FAIL` or `SKIP`, then the ID and the name.
-	- Progress log:
-		- 2026-10-25: Too big for one go, so split into 2026102507142900 (cicd's own checks), 2026102507142902 (shared cases), 2026102507142905 (Go, Rust, Python and C tests) and 2026102507142907 (fuzz). Closes with the last of them.
-		- 2026-10-25: Closed with its last child, 2026102507142905. All 4 children are Done, and nothing of its own is left.
-	- Test case: dedm7 (cicd's checks) and dee8t (the cases, the language tests and the fuzz).
-	- Closed: 2026-10-25 18:26
-	- Acceptance signoff: Self-closed: every CI test prints its line by its own ID, per its 4 children.
-
-- Test IDs: shared cases
-	- ID: 2026102507142902
-	- Type: Enhancement
-	- Status: Done
-	- Priority: High
-	- Opened: 2026-10-25 07:14
-	- Opened by: JC
-	- Parent ID: 2026102416400060
-	- Prereq IDs: 2026102507142900
-	- Requirements:
-		- Each case under `tests/cases/` gets an ID from its first commit, kept with the case.
-		- The Go, Rust, Python and C case runs print one line per case, with the language in the name.
-	- Note: `go test` shows a passing test's output only with `-v`, and cargo captures it, so Go's and Rust's lines may have to come from `go test -json` and cargo's own per-test lines, as in 2026102507142905. C and Python go through `cicd/c_cases.py`.
-	- Progress log:
-		- 2026-10-25: Each case's ID is the first line of its `ops.txt`, as `# Test ID: <id>`, from the folder's first commit, same-minute ones taking the next free minute. 001-reads is `ddzvq` and 061-commented-defaults `decg2`.
-		- Each language prints `PASS|FAIL|SKIP <id> <Lang> case <name>`, and a case with no ID fails. Go's lines come from `go test -json` through `cicd/go_test_lines.py`. Rust's case runner is its own harness, so it prints its own lines, and still takes a name filter and `--list`. C and Python print theirs from `c_cases.py`.
-		- Verified: `cicd/cicd.bash --ci --quick -y` passed twice, CLEAN, with 61 case lines each in Go, Rust, C and Python. `c-checks.bash test 3` printed 61 sanitized C case lines. With a want file broken and one case's ID line taken out, Go, Rust and Python each printed a FAIL line for the first and named the second.
-		- Swept: every runner of the shared cases: Go's `TestCases`, Rust's `tests/cases.rs`, `c_cases.py` for C and Python, and what reads their output in cicd and the round tools.
-	- Decisions:
-		- One ID per case, shared by the 4 languages, which the language in the name tells apart.
-	- Branch: r1025
-	- Commit: 349e436
-	- Test case: dee8t, `cicd/test_lines_test.py`: every case has its own ID, and `c_cases.py` and `go_test_lines.py` print the lines. It failed with 2 cases sharing an ID, with c_cases' PASS line taken out, and with Go's line renamed.
-	- Closed: 2026-10-25 18:04
-	- Acceptance signoff: Self-closed: every case prints its line by its ID in all 4 languages, and dee8t covers it.
-
-- Test IDs: Go, Rust, Python and C tests
-	- ID: 2026102507142905
-	- Type: Enhancement
-	- Status: Done
-	- Priority: High
-	- Opened: 2026-10-25 07:14
-	- Opened by: JC
-	- Parent ID: 2026102416400060
-	- Prereq IDs: 2026102507142900
-	- Requirements:
-		- Each test function gets an ID from its first commit, about 100 across the 4 languages. Split per language if it won't fit.
-		- The run prints one line per test, skips included.
-	- Progress log:
-		- 2026-10-25: 95 tests got IDs: Go 29, Rust 26, Python 14 and C 26. Each is from the oldest commit that adds the test, same-minute ones taking the next free minute. Go, Rust and Python keep it on a `Test ID:` comment just above the test, and C in a table in `api_test.c`'s `main`.
-		- Each prints `PASS|FAIL|SKIP <id> <Lang> <name>`, such as `PASS ddzw5 Go TestOpen`. Go's come from `go test -json` through `go_test_lines.py`, Rust's from libtest's own lines through the new `rust_test_lines.py`, and Python's from the new `py_tests.py`. `api_test.c` prints its own, as `C++` in its C++ build, and its 2 memory tests say `SKIP` under ASan. A test with no ID fails the run. `cicd/test_ids.py` finds the tests and their IDs.
-		- Rust's tests run with `--tests` now, which leaves out the one doc example. It was `ignore` anyway.
-		- Verified: `cicd/cicd.bash --backlog-run-quick go rust python c cicd` passed, CLEAN, with a line for every test in all 4 languages. `c-checks.bash test 3` printed 26 C++ lines, 24 ASan PASS lines and 2 SKIPs. `c-checks.bash lint 3` passed. A planted failure in `test_nul` printed its FAIL line and exit 1.
-		- Swept: every place the Go, Rust, Python and C tests run in cicd (`lang-in-container.bash`, `c-in-container.bash` quick and test modes, the Makefile's `test`), what reads their output (`lint-report.bash`), and the case ID tool, which now skips these IDs too.
-	- Decisions:
-		- Each language's copy of a test gets its own ID, since each is its own function. A Go subtest is part of its function's line.
-		- Go's `TestCases` has no ID, since each case has its own. Go's `FuzzRun` run on its seeds under `go test` is `ddzw4`, apart from `ddzw3`, the fuzzer.
-		- A Rust test can't mark itself skipped once it runs, so `save_refused_by_folder` says `PASS` when the folder takes files anyway. design.md says so.
-	- Branch: r1025
-	- Commit: d5792d0
-	- Test case: dee8t, `cicd/test_lines_test.py`, class LangIds: every Go, Rust, Python and C test has its own ID, apart from the cases' and cicd's, C's table holds every test function, and the 3 line printers print the lines and fail on a test with no ID. It failed with TestOpen's ID taken out, with a Python test given a C test's ID, and with one given a case's.
-	- Closed: 2026-10-25 18:26
-	- Acceptance signoff: Self-closed: every test prints its line by its own ID in all 4 languages, and dee8t covers it.
-
-- Test IDs: fuzz
-	- ID: 2026102507142907
-	- Type: Enhancement
-	- Status: Done
-	- Priority: High
-	- Opened: 2026-10-25 07:14
-	- Opened by: JC
-	- Parent ID: 2026102416400060
-	- Prereq IDs: 2026102507142900
-	- Requirements:
-		- The generated fuzz in `fuzz.py`, each language against Go, and Go's own fuzzer each get an ID and print one line per run.
-	- Progress log:
-		- 2026-10-25: `fuzz.py` ends with a line for `ddzw1`, a Go crash, the checks on Go's output and the generator judge, then `ddzw2`, `de57g` and `de8ed` for Rust, C and Python against Go. A driver not in the run is `SKIP`. Go's fuzzer is `ddzw3`. With the fuzz off, all 5 say `SKIP` with the flag, and `ddzw3` says `--quick` under it.
-		- Times from `fuzz.py`'s first commit, and from the commits that added C and Python to it.
-		- A failing seed's line now starts `fuzz: seed`, not `FAIL seed`, so it isn't read as a test line.
-		- Verified: `cicd/cicd.bash --ci --quick -y` passed with all 4 fuzz.py lines PASS, through the C container. `lang-checks.bash gofuzz` printed `PASS ddzw3`, and `--backlog-run-quick cicd` the 5 SKIP lines.
-		- Swept: every fuzz.py caller, in `c-in-container.bash`, `lang-in-container.bash` and cicd.bash, and every branch of cicd's fuzz step.
-	- Branch: r1025
-	- Commit: 349e436
-	- Test case: dee8t, `cicd/test_lines_test.py`, class FuzzLines: a Rust driver that fails is Rust's FAIL alone, a Go crash is Go's, and `--skip` names all 4. It failed with the blame taken out.
-	- Closed: 2026-10-25 18:04
-	- Acceptance signoff: Self-closed: each fuzz test prints its line by its ID, and dee8t covers the blame.
-
-- Run the tests on Windows and macOS
-	- ID: 2026101512024174
-	- Type: Task
-	- Status: Queued
-	- Priority: High
-	- Opened: 2026-10-15
-	- Opened by: JC
-	- Requirements:
-		- The shared cases on Windows and macOS, mostly for the atomic write.
-		- Sweeping override, 2026-10-24: this supersedes any earlier decision on this project that conflicts with it.
-	- Notes:
-		- shcl 2.0 on Windows could lose the old file when a replace failed. 3.0 fixed it, and Wovenshell still keeps its own restore. The wrapper's own 1.2 write needs the same check.
-		- 2026-10-24, CICD reset: this is the reset's `other hosts and VMs` item, raised to High, per `Other hosts and VMs` in the shared CICD rules. The default run builds and tests on the test boxes: Windows on b29w, with vm925w for timed work, and macOS on b26 or vmKt6m. Each box is held through the shared host lock by `wrap` for the whole time it's used, and a VM is put back the way it was found through the VM state helper. `--no-remote` skips them, a box that isn't there is a `SKIP` that never stops a run, and each box gets a work folder of its own under its temp root. `b29w`, never `b29w-wif`.
-
-- Create-only Write fails on a FAT volume on Windows
-	- ID: 2026102412381602
-	- Type: Bug
-	- Status: Queued
-	- Needs external testing: Windows, on vm925w: `win-go-fat.ps1`, the FAT32 steps.
-	- Severity: Avg
-	- Opened: 2026-10-24 12:38
-	- Related IDs: 2026101513330015
-	- Target OS: Windows
-	- Steps to reproduce [Bug]:
-		- On Windows, point `TMP` and `TMPDIR` at a FAT32 volume, then run Go's `TestCreateRace`, Rust's `create_race_link`, Python's `CreateRace`, or shared case `057-write-create`.
-	- Incorrect behavior [Bug]:
-		- Every create-only `Write` fails as `io`, "Incorrect function", in Go, Rust and Python, where it should fall back to the exclusive create.
-	- Expected behavior [Bug]:
-		- It falls back, as design.md says for a filesystem with no hard links. C passes there, since on Windows it moves the temp into place without a link.
-	- Reproduced [Bug]: 2026-10-24, on vm925w, Windows 11, on a FAT32 volume, at `b9a392c`. The in-place races pass there, so only the fallback check misses.
-	- Possible cause [Bug]: `CreateHardLink` on FAT gives `ERROR_INVALID_FUNCTION` (1). Go's `ErrUnsupported` takes only `ERROR_NOT_SUPPORTED`, `ERROR_CALL_NOT_IMPLEMENTED` and a few errnos, and Rust doesn't call it `Unsupported` either. Python sees errno 22 with winerror 1. exFAT and network shares may give other codes, not tried.
-	- Test case: none yet. CI has no FAT volume. On vm925w `win-go-fat.ps1` makes one and runs the 3 languages' race tests and shared cases on it.
-
-- Go 1.27 prints a float32 halfway value differently
-	- ID: 2026102519333440
-	- Type: Bug
-	- Status: Queued
-	- Severity: Avg
-	- Opened: 2026-10-25 19:33
-	- Opened by: JC
-	- Related IDs: 2026102519333240
-	- Steps to reproduce [Bug]:
-		- In `source/go`, run `GOTOOLCHAIN=go1.27.3 go test -count=1 -run TestPutFloat32 ./shclw/`.
-	- Incorrect behavior [Bug]:
-		- `v3 0.00024414062: read back Good 0.00024414062, want 0.00024414063`.
-	- Expected behavior [Bug]:
-		- It passes, as it does on the pinned go1.26.2. Float ties print by Go's rule in every language, so a Go program built with 1.27 would write a value Rust, C and Python don't.
-	- Reproduced [Bug]: 2026-10-25, with go1.27.3 on b23 (linux/amd64) and on b26 (darwin/amd64). go1.26.2 passes on both.
-	- Possible cause [Bug]: Go 1.27 changed how `strconv` rounds a float32 halfway case. Not looked into yet.
-
 - CICD reset: temp files and safe removal
 	- ID: 2026102416400070
 	- Type: Enhancement
@@ -350,31 +121,84 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Commit: 5b699a9
 	- Test case: deebf, `cicd/c-nosan-test.bash`. The workflow itself is the `ci` run on GitHub.
 
-- CICD reset: CICD process gaps
-	- ID: 2026102416400080
-	- Type: Enhancement
-	- Status: Done
+- shcl 4 adapters
+	- ID: 2026101512024163
+	- Type: Feature
+	- Status: Stalled
+	- Priority: High
+	- Opened: 2026-10-15
+	- Opened by: JC
+	- Prereq IDs: shcl 4 in each language. It's planned Rust first, then C, then Go and Python.
+	- Requirements:
+		- The same API, over shcl 4.
+	- Notes:
+		- 4 keeps every line as typed, so Text and Write get simpler. Its read-back check in setters can replace the wrapper's.
+	- Progress log:
+		- 20261015: shcl 4 isn't built in any language yet, only planned in its v4 doc. This waits on it.
+
+- Move the 3.0 pin to the first 3.0 beta
+	- ID: 2026101512024165
+	- Type: Task
+	- Status: Stalled
 	- Priority: Avg
-	- Opened: 2026-10-24 16:40
+	- Opened: 2026-10-15
 	- Opened by: JC
 	- Requirements:
-		- What else in the shared CICD rules' `CICD process` shclwrap doesn't do yet. The Go, Rust and Python leak checks are 2026101711245585, and the commit and publish stage is 2026101512024171.
+		- Pin `v3.0.0-beta1` once it's tagged, in place of a dev commit.
+	- Notes:
+		- The tag is spelled with no dot, per shcl's own backlog.
+		- shcl's Go module path is still `.../v2`, and Go won't take a v3 tag on it. Go stays on a commit until that changes.
+		- Quillroute plans to have its release refuse a commit pin. The same check would fit here.
+
+- Run the tests on Windows and macOS
+	- ID: 2026101512024174
+	- Type: Task
+	- Status: Queued
+	- Priority: High
+	- Opened: 2026-10-15
+	- Opened by: JC
+	- Requirements:
+		- The shared cases on Windows and macOS, mostly for the atomic write.
 		- Sweeping override, 2026-10-24: this supersedes any earlier decision on this project that conflicts with it.
-		- A profiling step that `--quick` skips, with flamegraphs under `cicd/artifacts/profiling/` and `flame-report.py`.
-	- Progress log:
-		- 2026-10-25: A Profile step, last in the run. Go's `BenchmarkCases` runs every shared case through `Run` for 5 seconds with a CPU profile. `cicd/utility/pprof2flame.py` makes the flamegraph, which is rotated in `cicd/artifacts/profiling/`, and `cicd/utility/flame-report.py` prints its summary. Both scripts are copied from zuid. `--quick`, `--backlog-run-quick` and `--no-profile` leave it out. design.md says so.
-		- 2026-10-25: dedm7's turned-off lists for `--quick`, `--ci --quick`, `--quick --no-sync` and `--backlog-run-quick` now end with the Profile step, which they didn't have before.
-		- Verified: the step passed alone in the language image and on the host with `--no-container`, and the second flamegraph rotated the first. deeap passes, and fails with plain mode writing the marker or the flamegraph dropping a frame. de7yv's new profile rows fail with `--quick` leaving the step on. `--backlog-run-quick go cicd` passed CLEAN.
-		- Swept: the gap list in the private notes' CICD reset findings names only the profiling step, beside the 2 items above.
-		- The first profile puts about half the time in `Commented`, through `fieldsOf` and shcl's `ReadFields`.
-	- Decisions:
-		- Go only. It's the reference implementation and has a profiler built in, and `perf` can't record on this box, so Rust and C would need an in-process sampler as new dependencies.
-		- The benchmark runs the shared cases, so the profile follows what the tests cover, with no workload of its own to keep up.
-		- The step fails only when the benchmark does. A flamegraph that won't convert, or a summary that won't parse, is a warning.
-	- Commit: a2c78dd
-	- Test case: deeap, `cicd/profile-test.bash`, for the flamegraph and its summary, and de7yv for which runs leave the step out.
-	- Closed: 2026-10-25 19:16
-	- Acceptance signoff: Self-closed: deeap and de7yv cover it, and the step adds nothing a person has to judge.
+	- Notes:
+		- shcl 2.0 on Windows could lose the old file when a replace failed. 3.0 fixed it, and Wovenshell still keeps its own restore. The wrapper's own 1.2 write needs the same check.
+		- 2026-10-24, CICD reset: this is the reset's `other hosts and VMs` item, raised to High, per `Other hosts and VMs` in the shared CICD rules. The default run builds and tests on the test boxes: Windows on b29w, with vm925w for timed work, and macOS on b26 or vmKt6m. Each box is held through the shared host lock by `wrap` for the whole time it's used, and a VM is put back the way it was found through the VM state helper. `--no-remote` skips them, a box that isn't there is a `SKIP` that never stops a run, and each box gets a work folder of its own under its temp root. `b29w`, never `b29w-wif`.
+
+- Create-only Write fails on a FAT volume on Windows
+	- ID: 2026102412381602
+	- Type: Bug
+	- Status: Queued
+	- Needs external testing: Windows, on vm925w: `win-go-fat.ps1`, the FAT32 steps.
+	- Severity: Avg
+	- Opened: 2026-10-24 12:38
+	- Related IDs: 2026101513330015
+	- Target OS: Windows
+	- Steps to reproduce [Bug]:
+		- On Windows, point `TMP` and `TMPDIR` at a FAT32 volume, then run Go's `TestCreateRace`, Rust's `create_race_link`, Python's `CreateRace`, or shared case `057-write-create`.
+	- Incorrect behavior [Bug]:
+		- Every create-only `Write` fails as `io`, "Incorrect function", in Go, Rust and Python, where it should fall back to the exclusive create.
+	- Expected behavior [Bug]:
+		- It falls back, as design.md says for a filesystem with no hard links. C passes there, since on Windows it moves the temp into place without a link.
+	- Reproduced [Bug]: 2026-10-24, on vm925w, Windows 11, on a FAT32 volume, at `b9a392c`. The in-place races pass there, so only the fallback check misses.
+	- Possible cause [Bug]: `CreateHardLink` on FAT gives `ERROR_INVALID_FUNCTION` (1). Go's `ErrUnsupported` takes only `ERROR_NOT_SUPPORTED`, `ERROR_CALL_NOT_IMPLEMENTED` and a few errnos, and Rust doesn't call it `Unsupported` either. Python sees errno 22 with winerror 1. exFAT and network shares may give other codes, not tried.
+	- Test case: none yet. CI has no FAT volume. On vm925w `win-go-fat.ps1` makes one and runs the 3 languages' race tests and shared cases on it.
+
+- Go 1.27 prints a float32 halfway value differently
+	- ID: 2026102519333440
+	- Type: Bug
+	- Status: Queued
+	- Severity: Avg
+	- Opened: 2026-10-25 19:33
+	- Opened by: JC
+	- Related IDs: 2026102519333240
+	- Steps to reproduce [Bug]:
+		- In `source/go`, run `GOTOOLCHAIN=go1.27.3 go test -count=1 -run TestPutFloat32 ./shclw/`.
+	- Incorrect behavior [Bug]:
+		- `v3 0.00024414062: read back Good 0.00024414062, want 0.00024414063`.
+	- Expected behavior [Bug]:
+		- It passes, as it does on the pinned go1.26.2. Float ties print by Go's rule in every language, so a Go program built with 1.27 would write a value Rust, C and Python don't.
+	- Reproduced [Bug]: 2026-10-25, with go1.27.3 on b23 (linux/amd64) and on b26 (darwin/amd64). go1.26.2 passes on both.
+	- Possible cause [Bug]: Go 1.27 changed how `strconv` rounds a float32 halfway case. Not looked into yet.
 
 - Comment doesn't stack, and leaves the user's own notes
 	- ID: 2026101513330022
@@ -813,55 +637,6 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Related IDs: 2026101513330009
 	- Note: `Merged` finds them with a second parse in each language. shcl's parser sees each fold, so a call there would be cheaper and could take that code's place.
 
-- `--list` names the test IDs a run would run
-	- ID: 2026102507433885
-	- Type: Enhancement
-	- Status: Done
-	- Priority: High
-	- Opened: 2026-10-25 07:43
-	- Opened by: JC
-	- Parent ID: 2026102319573100
-	- Prereq IDs: 2026102507142902, 2026102507142905, 2026102507142907
-	- Requirements:
-		- Per `--list` in `CICD style guide` in the shared CICD rules: print the steps and test IDs the other flags given would run, and run nothing.
-		- Today `--list` is another name for `--dry-run`, which lists the steps only. Most tests have no ID yet.
-	- Progress log:
-		- 2026-10-25: `--list` prints the first section as `--dry-run` does, then a section per step that's on, with one `<id> <name>` line per test that step would run, or `(none)`. `--dry-run` stays the step list.
-		- cicd's own tests and debab moved into `fCicdTests` and `fLint_Tests`, which the run and `--list` both call. Under `fTest_ListOnly 1`, `fTest` prints the ID and name and runs nothing. The language tests and cases come from `test_ids.py tests|cases`, the fuzz from `fuzz.py --list`, and the C container's from `c-tests.bash`.
-		- Verified: deea7 passed, and failed with the leak IDs left out, with the names check left out, with `--dry-run` listing, with Go's tests listed outside their area, and with the analyzer probes listed under `--quick`. dedm7 failed with `fTest` running its command under `fTest_ListOnly`. de7yv, dee8t, shellcheck and ruff passed. `cicd/cicd.bash --backlog-run-quick cicd c` passed, and `lint-report.bash` said CLEAN. With a `.PHONY` name planted, debab still printed its FAIL line and failed Lint.
-		- Swept: every caller of `--dry-run` or `--list` (`flags-test.bash`, `cpu-cap-test.bash`, `steps-test.bash`, the round's `mac-dryrun.bash`, design.md), and every place a test line is printed: cicd.bash, `c-in-container.bash`, `lang-in-container.bash`, `fuzz.py`, the 3 line printers, `api_test.c` and the cases. deea7 checks that the default run's list holds every ID found in the tree. The 4 bindings don't read cicd flags.
-	- Decisions:
-		- One line per ID. A shared case is one line with the languages it runs in, and a C test is one line though it also runs as C++.
-		- It lists by the flags given and probes nothing, so a box missing a tool or a cached pin still skips some at run time. `--help` says so.
-		- Only what would run is listed. A step that's off has no section, and a test the flags skip, such as the analyzer probes under `--quick`, isn't listed.
-	- Branch: r1025
-	- Commit: 527271e
-	- Test case: deea7, `cicd/list-test.bash`, and dedm7 for `fTest_ListOnly` and `fStep_Each`.
-	- Closed: 2026-10-25 18:53
-	- Acceptance signoff: Self-closed: does what the shared rule asks, and deea7 was watched to fail 5 ways.
-
-- C's 2.0 names check has no test ID
-	- ID: 2026102518381781
-	- Type: Enhancement
-	- Status: Done
-	- Priority: Low
-	- Opened: 2026-10-25 18:38
-	- Related IDs: 2026102416400050, 2026101516111033
-	- Requirements:
-		- The Makefile's `names` check, which fails when a shcl 2.0 name leaks past `shclw3_v2_names.h`, prints a test line with its own ID, per `Testing` in the shared CICD rules. Today it runs inside `make test` with no line of its own.
-	- Progress log:
-		- 2026-10-25: The check is de07q, from c71ca83, its first commit, taking the next free minute after the C tests from that commit. `c-in-container.bash` runs `make names` on its own line in test and quick modes, and a host with no gcc-15 prints its SKIP line.
-		- Verified: `c-checks.bash test 3` and the quick gate printed `PASS de07q`. With one `#define` taken out of `shclw3_v2_names.h`, quick mode printed `FAIL de07q` and exited 2.
-		- Swept: `make test` is the only target that ran `names`, and the container's test mode the only caller. Quick mode now runs it too. Go, Rust and Python take 2.0 as a module, a crate and a file of their own, so there's no name to leak.
-	- Decisions:
-		- `make test` still depends on `names`, so a hand run keeps the check. In the container it runs twice, a fraction of a second.
-		- Quick mode runs it as well, since it's cheap.
-	- Branch: r1025
-	- Commit: 527271e
-	- Test case: de07q, in `cicd/c-in-container.bash` test and quick modes.
-	- Closed: 2026-10-25 18:53
-	- Acceptance signoff: Self-closed: mechanical, and the line was watched to fail.
-
 - Rename the project shclwrap
 	- ID: 2026101513524769
 	- Type: Task
@@ -1024,6 +799,183 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Swept: `Upgrade` and `UpgradeFile` in Go `shclw3` and Rust `v3`. The 1.2 and 2.0 adapters convert nothing. A format 3 file passed with `from` 2 that 2.0 has errors on, such as `tags: [a, b]`, is still left alone.
 	- Closed: 20261017-11325800
 	- Acceptance signoff: Self-closed: the 2.0 check is now required in every build, per 2026101613005800, and the test failed before the fix and passes after.
+
+- CICD reset: containers
+	- ID: 2026102416400010
+	- Type: Enhancement
+	- Status: Done
+	- Priority: High
+	- Opened: 2026-10-24 16:40
+	- Opened by: JC
+	- Notes:
+		- 2026-10-25: `--no-container` is in since `533c1df` (2026102319573100).
+	- Requirements:
+		- Per `Containers` in the shared CICD rules. The C checks already run in a pinned image.
+		- Sweeping override, 2026-10-24: this supersedes any earlier decision on this project that conflicts with it.
+		- Go, Rust, and Python build and test in a pinned image too, from a recipe in `cicd/`.
+		- With docker missing or an image that won't build, the run falls back to the host and says so in one line. Today a missing docker fails the C checks.
+		- `--no-container` runs on the host on purpose.
+		- A test whose point is the real OS, such as Windows file behavior, stays on the host or a test box.
+	- Progress log:
+	- Test case: dednv (C on the host) and dedpt (Go, Rust and Python on the host), per its 2 children.
+	- Closed: 20261025
+		- 2026-10-25: Split into 2026102507474935 (C falls back to the host) and 2026102507474940 (Go, Rust and Python in a pinned image).
+		- 2026-10-25: 2026102507474935 is Done. C runs on the host with docker missing, a C image that won't build, or `--no-container`.
+	- 2026-10-25: Closed with its 2 children, 2026102507474935 and 2026102507474940, both Done.
+
+- CICD reset: a test for every Done item
+	- ID: 2026102416400050
+	- Type: Enhancement
+	- Status: Done
+	- Priority: High
+	- Opened: 2026-10-24 16:40
+	- Opened by: JC
+	- Related IDs: 2026102416400060
+	- Prereq IDs: 2026102416400060
+		- 2026-10-25: the Done items name test IDs, which that item gives out.
+	- Requirements:
+		- Per the regression bullet in `Testing` in the shared CICD rules. Most closed items already have a `Test case:` row.
+		- Sweeping override, 2026-10-24: this supersedes any earlier decision on this project that conflicts with it.
+		- Each Done feature and bug names its test's ID, or says in a few words why it has none. Many rows name a file or shared case only.
+		- A Done item with no test where one could exist and would make sense gets one.
+	- Progress log:
+		- 2026-10-25: Every Done item's Test case row now names its tests by ID, or says why it has none. Each named case, test function and fuzz check got its ID beside it, and the old base 62 IDs on those rows became their new ones.
+		- The leak run's leak, null and heap growth probes and the heaptrack soak had no IDs, so 2026101619042485 couldn't name them. They're now de2xw, de2xx, de2xy and de2xz, dated from the commit that added them, and print their own lines.
+		- 3 Done items had no Test case row and got one: 2026102416400010, 2026101512024159 and 2026101512024148.
+	- Decisions:
+		- No new test for the 6 Done items left without an ID. A rename, a repo setting and a clang-tidy cast fix have nothing for a test to add. The CodeQL cache bug fails the full run's CodeQL step if it comes back. md-check.py lives outside the repo, and the Rust scratch folders go after the test ends.
+		- A row naming a whole set, such as every shared case through the Python driver, says so rather than listing each case's ID.
+		- Done items only. Open items get their IDs as they close.
+	- Branch: r1025
+	- Test case: de2xw, de2xx, de2xy and de2xz, the new lines in `cicd/c-in-container.bash` leak mode. The rest is backlog text.
+	- Verified: every ID on a Done item's Test case row is in the tree, and none is an old base 62 one. `cicd/c-checks.bash leakcheck` and `leakcheck-resume` printed PASS for all 5 leak IDs in the container, and with the null probe broken it printed FAIL de2xx. On the host under `SHCLW_C_HOST=1` it printed a SKIP for each by name. dedm7, dee8t, shellcheck, and `--backlog-run-quick cicd` with `lint-report.bash` (CLEAN) passed.
+	- Swept: all 85 Done items' Test case rows. The other checks in leak mode, CodeQL and CTU, are gates over our code with deb9f as the CTU probe. Lint mode's probes already had IDs. The Makefile's `names` check, named on 2026101516111033, has none, so it's filed as 2026102518381781. `make pick`, named on 2026101516111070, went with the 3.0 floor.
+	- Acceptance signoff: Self-closed: mechanical, with every named ID checked against the tree and the new test lines watched to fail.
+	- Closed: 2026-10-25 18:37
+
+- CICD reset: test IDs
+	- ID: 2026102416400060
+	- Type: Enhancement
+	- Status: Done
+	- Priority: High
+	- Opened: 2026-10-24 16:40
+	- Opened by: JC
+	- Requirements:
+		- Per the ID and per-test line bullets in `Testing` in the shared CICD rules. Some cicd checks already have IDs.
+		- Sweeping override, 2026-10-24: this supersedes any earlier decision on this project that conflicts with it.
+		- Overrides the private notes' rule that test IDs count seconds since 2000.
+		- Every CI test gets an ID in the shared scheme, the Go, Rust, Python and C tests and the shared cases included. The existing ones convert once, from the time each gives. An ID never changes after that.
+		- The run prints one line per regression and fuzz test: `PASS`, `FAIL` or `SKIP`, then the ID and the name.
+	- Progress log:
+		- 2026-10-25: Too big for one go, so split into 2026102507142900 (cicd's own checks), 2026102507142902 (shared cases), 2026102507142905 (Go, Rust, Python and C tests) and 2026102507142907 (fuzz). Closes with the last of them.
+		- 2026-10-25: Closed with its last child, 2026102507142905. All 4 children are Done, and nothing of its own is left.
+	- Test case: dedm7 (cicd's checks) and dee8t (the cases, the language tests and the fuzz).
+	- Closed: 2026-10-25 18:26
+	- Acceptance signoff: Self-closed: every CI test prints its line by its own ID, per its 4 children.
+
+- Test IDs: shared cases
+	- ID: 2026102507142902
+	- Type: Enhancement
+	- Status: Done
+	- Priority: High
+	- Opened: 2026-10-25 07:14
+	- Opened by: JC
+	- Parent ID: 2026102416400060
+	- Prereq IDs: 2026102507142900
+	- Requirements:
+		- Each case under `tests/cases/` gets an ID from its first commit, kept with the case.
+		- The Go, Rust, Python and C case runs print one line per case, with the language in the name.
+	- Note: `go test` shows a passing test's output only with `-v`, and cargo captures it, so Go's and Rust's lines may have to come from `go test -json` and cargo's own per-test lines, as in 2026102507142905. C and Python go through `cicd/c_cases.py`.
+	- Progress log:
+		- 2026-10-25: Each case's ID is the first line of its `ops.txt`, as `# Test ID: <id>`, from the folder's first commit, same-minute ones taking the next free minute. 001-reads is `ddzvq` and 061-commented-defaults `decg2`.
+		- Each language prints `PASS|FAIL|SKIP <id> <Lang> case <name>`, and a case with no ID fails. Go's lines come from `go test -json` through `cicd/go_test_lines.py`. Rust's case runner is its own harness, so it prints its own lines, and still takes a name filter and `--list`. C and Python print theirs from `c_cases.py`.
+		- Verified: `cicd/cicd.bash --ci --quick -y` passed twice, CLEAN, with 61 case lines each in Go, Rust, C and Python. `c-checks.bash test 3` printed 61 sanitized C case lines. With a want file broken and one case's ID line taken out, Go, Rust and Python each printed a FAIL line for the first and named the second.
+		- Swept: every runner of the shared cases: Go's `TestCases`, Rust's `tests/cases.rs`, `c_cases.py` for C and Python, and what reads their output in cicd and the round tools.
+	- Decisions:
+		- One ID per case, shared by the 4 languages, which the language in the name tells apart.
+	- Branch: r1025
+	- Commit: 349e436
+	- Test case: dee8t, `cicd/test_lines_test.py`: every case has its own ID, and `c_cases.py` and `go_test_lines.py` print the lines. It failed with 2 cases sharing an ID, with c_cases' PASS line taken out, and with Go's line renamed.
+	- Closed: 2026-10-25 18:04
+	- Acceptance signoff: Self-closed: every case prints its line by its ID in all 4 languages, and dee8t covers it.
+
+- Test IDs: Go, Rust, Python and C tests
+	- ID: 2026102507142905
+	- Type: Enhancement
+	- Status: Done
+	- Priority: High
+	- Opened: 2026-10-25 07:14
+	- Opened by: JC
+	- Parent ID: 2026102416400060
+	- Prereq IDs: 2026102507142900
+	- Requirements:
+		- Each test function gets an ID from its first commit, about 100 across the 4 languages. Split per language if it won't fit.
+		- The run prints one line per test, skips included.
+	- Progress log:
+		- 2026-10-25: 95 tests got IDs: Go 29, Rust 26, Python 14 and C 26. Each is from the oldest commit that adds the test, same-minute ones taking the next free minute. Go, Rust and Python keep it on a `Test ID:` comment just above the test, and C in a table in `api_test.c`'s `main`.
+		- Each prints `PASS|FAIL|SKIP <id> <Lang> <name>`, such as `PASS ddzw5 Go TestOpen`. Go's come from `go test -json` through `go_test_lines.py`, Rust's from libtest's own lines through the new `rust_test_lines.py`, and Python's from the new `py_tests.py`. `api_test.c` prints its own, as `C++` in its C++ build, and its 2 memory tests say `SKIP` under ASan. A test with no ID fails the run. `cicd/test_ids.py` finds the tests and their IDs.
+		- Rust's tests run with `--tests` now, which leaves out the one doc example. It was `ignore` anyway.
+		- Verified: `cicd/cicd.bash --backlog-run-quick go rust python c cicd` passed, CLEAN, with a line for every test in all 4 languages. `c-checks.bash test 3` printed 26 C++ lines, 24 ASan PASS lines and 2 SKIPs. `c-checks.bash lint 3` passed. A planted failure in `test_nul` printed its FAIL line and exit 1.
+		- Swept: every place the Go, Rust, Python and C tests run in cicd (`lang-in-container.bash`, `c-in-container.bash` quick and test modes, the Makefile's `test`), what reads their output (`lint-report.bash`), and the case ID tool, which now skips these IDs too.
+	- Decisions:
+		- Each language's copy of a test gets its own ID, since each is its own function. A Go subtest is part of its function's line.
+		- Go's `TestCases` has no ID, since each case has its own. Go's `FuzzRun` run on its seeds under `go test` is `ddzw4`, apart from `ddzw3`, the fuzzer.
+		- A Rust test can't mark itself skipped once it runs, so `save_refused_by_folder` says `PASS` when the folder takes files anyway. design.md says so.
+	- Branch: r1025
+	- Commit: d5792d0
+	- Test case: dee8t, `cicd/test_lines_test.py`, class LangIds: every Go, Rust, Python and C test has its own ID, apart from the cases' and cicd's, C's table holds every test function, and the 3 line printers print the lines and fail on a test with no ID. It failed with TestOpen's ID taken out, with a Python test given a C test's ID, and with one given a case's.
+	- Closed: 2026-10-25 18:26
+	- Acceptance signoff: Self-closed: every test prints its line by its own ID in all 4 languages, and dee8t covers it.
+
+- Test IDs: fuzz
+	- ID: 2026102507142907
+	- Type: Enhancement
+	- Status: Done
+	- Priority: High
+	- Opened: 2026-10-25 07:14
+	- Opened by: JC
+	- Parent ID: 2026102416400060
+	- Prereq IDs: 2026102507142900
+	- Requirements:
+		- The generated fuzz in `fuzz.py`, each language against Go, and Go's own fuzzer each get an ID and print one line per run.
+	- Progress log:
+		- 2026-10-25: `fuzz.py` ends with a line for `ddzw1`, a Go crash, the checks on Go's output and the generator judge, then `ddzw2`, `de57g` and `de8ed` for Rust, C and Python against Go. A driver not in the run is `SKIP`. Go's fuzzer is `ddzw3`. With the fuzz off, all 5 say `SKIP` with the flag, and `ddzw3` says `--quick` under it.
+		- Times from `fuzz.py`'s first commit, and from the commits that added C and Python to it.
+		- A failing seed's line now starts `fuzz: seed`, not `FAIL seed`, so it isn't read as a test line.
+		- Verified: `cicd/cicd.bash --ci --quick -y` passed with all 4 fuzz.py lines PASS, through the C container. `lang-checks.bash gofuzz` printed `PASS ddzw3`, and `--backlog-run-quick cicd` the 5 SKIP lines.
+		- Swept: every fuzz.py caller, in `c-in-container.bash`, `lang-in-container.bash` and cicd.bash, and every branch of cicd's fuzz step.
+	- Branch: r1025
+	- Commit: 349e436
+	- Test case: dee8t, `cicd/test_lines_test.py`, class FuzzLines: a Rust driver that fails is Rust's FAIL alone, a Go crash is Go's, and `--skip` names all 4. It failed with the blame taken out.
+	- Closed: 2026-10-25 18:04
+	- Acceptance signoff: Self-closed: each fuzz test prints its line by its ID, and dee8t covers the blame.
+
+- `--list` names the test IDs a run would run
+	- ID: 2026102507433885
+	- Type: Enhancement
+	- Status: Done
+	- Priority: High
+	- Opened: 2026-10-25 07:43
+	- Opened by: JC
+	- Parent ID: 2026102319573100
+	- Prereq IDs: 2026102507142902, 2026102507142905, 2026102507142907
+	- Requirements:
+		- Per `--list` in `CICD style guide` in the shared CICD rules: print the steps and test IDs the other flags given would run, and run nothing.
+		- Today `--list` is another name for `--dry-run`, which lists the steps only. Most tests have no ID yet.
+	- Progress log:
+		- 2026-10-25: `--list` prints the first section as `--dry-run` does, then a section per step that's on, with one `<id> <name>` line per test that step would run, or `(none)`. `--dry-run` stays the step list.
+		- cicd's own tests and debab moved into `fCicdTests` and `fLint_Tests`, which the run and `--list` both call. Under `fTest_ListOnly 1`, `fTest` prints the ID and name and runs nothing. The language tests and cases come from `test_ids.py tests|cases`, the fuzz from `fuzz.py --list`, and the C container's from `c-tests.bash`.
+		- Verified: deea7 passed, and failed with the leak IDs left out, with the names check left out, with `--dry-run` listing, with Go's tests listed outside their area, and with the analyzer probes listed under `--quick`. dedm7 failed with `fTest` running its command under `fTest_ListOnly`. de7yv, dee8t, shellcheck and ruff passed. `cicd/cicd.bash --backlog-run-quick cicd c` passed, and `lint-report.bash` said CLEAN. With a `.PHONY` name planted, debab still printed its FAIL line and failed Lint.
+		- Swept: every caller of `--dry-run` or `--list` (`flags-test.bash`, `cpu-cap-test.bash`, `steps-test.bash`, the round's `mac-dryrun.bash`, design.md), and every place a test line is printed: cicd.bash, `c-in-container.bash`, `lang-in-container.bash`, `fuzz.py`, the 3 line printers, `api_test.c` and the cases. deea7 checks that the default run's list holds every ID found in the tree. The 4 bindings don't read cicd flags.
+	- Decisions:
+		- One line per ID. A shared case is one line with the languages it runs in, and a C test is one line though it also runs as C++.
+		- It lists by the flags given and probes nothing, so a box missing a tool or a cached pin still skips some at run time. `--help` says so.
+		- Only what would run is listed. A step that's off has no section, and a test the flags skip, such as the analyzer probes under `--quick`, isn't listed.
+	- Branch: r1025
+	- Commit: 527271e
+	- Test case: deea7, `cicd/list-test.bash`, and dedm7 for `fTest_ListOnly` and `fStep_Each`.
+	- Closed: 2026-10-25 18:53
+	- Acceptance signoff: Self-closed: does what the shared rule asks, and deea7 was watched to fail 5 ways.
 
 - Sort shcl's analyzer and CodeQL findings
 	- ID: 2026102321270143
@@ -2145,6 +2097,32 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Closed: 20261017-11325800
 	- Acceptance signoff: Self-closed: reproduced, and its test failed before the fix and passes after. The narrowed path is what `Each` already gave.
 
+- CICD reset: CICD process gaps
+	- ID: 2026102416400080
+	- Type: Enhancement
+	- Status: Done
+	- Priority: Avg
+	- Opened: 2026-10-24 16:40
+	- Opened by: JC
+	- Requirements:
+		- What else in the shared CICD rules' `CICD process` shclwrap doesn't do yet. The Go, Rust and Python leak checks are 2026101711245585, and the commit and publish stage is 2026101512024171.
+		- Sweeping override, 2026-10-24: this supersedes any earlier decision on this project that conflicts with it.
+		- A profiling step that `--quick` skips, with flamegraphs under `cicd/artifacts/profiling/` and `flame-report.py`.
+	- Progress log:
+		- 2026-10-25: A Profile step, last in the run. Go's `BenchmarkCases` runs every shared case through `Run` for 5 seconds with a CPU profile. `cicd/utility/pprof2flame.py` makes the flamegraph, which is rotated in `cicd/artifacts/profiling/`, and `cicd/utility/flame-report.py` prints its summary. Both scripts are copied from zuid. `--quick`, `--backlog-run-quick` and `--no-profile` leave it out. design.md says so.
+		- 2026-10-25: dedm7's turned-off lists for `--quick`, `--ci --quick`, `--quick --no-sync` and `--backlog-run-quick` now end with the Profile step, which they didn't have before.
+		- Verified: the step passed alone in the language image and on the host with `--no-container`, and the second flamegraph rotated the first. deeap passes, and fails with plain mode writing the marker or the flamegraph dropping a frame. de7yv's new profile rows fail with `--quick` leaving the step on. `--backlog-run-quick go cicd` passed CLEAN.
+		- Swept: the gap list in the private notes' CICD reset findings names only the profiling step, beside the 2 items above.
+		- The first profile puts about half the time in `Commented`, through `fieldsOf` and shcl's `ReadFields`.
+	- Decisions:
+		- Go only. It's the reference implementation and has a profiler built in, and `perf` can't record on this box, so Rust and C would need an in-process sampler as new dependencies.
+		- The benchmark runs the shared cases, so the profile follows what the tests cover, with no workload of its own to keep up.
+		- The step fails only when the benchmark does. A flamegraph that won't convert, or a summary that won't parse, is a warning.
+	- Commit: a2c78dd
+	- Test case: deeap, `cicd/profile-test.bash`, for the flamegraph and its summary, and de7yv for which runs leave the step out.
+	- Closed: 2026-10-25 19:16
+	- Acceptance signoff: Self-closed: deeap and de7yv cover it, and the step adds nothing a person has to judge.
+
 - Layered loading
 	- ID: 2026101512024156
 	- Type: Feature
@@ -3061,6 +3039,28 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Swept: every place Rust turns a float into text, `format_float` and `From<f32>`. Go's and C's already follow Go's rule. No other float-to-text site in the 3 wrappers.
 	- Closed: 20261017-11325800
 	- Acceptance signoff: Self-closed: reproduced, and its test failed before the fix and passes after. Go's rule needed no change to any want file.
+
+- C's 2.0 names check has no test ID
+	- ID: 2026102518381781
+	- Type: Enhancement
+	- Status: Done
+	- Priority: Low
+	- Opened: 2026-10-25 18:38
+	- Related IDs: 2026102416400050, 2026101516111033
+	- Requirements:
+		- The Makefile's `names` check, which fails when a shcl 2.0 name leaks past `shclw3_v2_names.h`, prints a test line with its own ID, per `Testing` in the shared CICD rules. Today it runs inside `make test` with no line of its own.
+	- Progress log:
+		- 2026-10-25: The check is de07q, from c71ca83, its first commit, taking the next free minute after the C tests from that commit. `c-in-container.bash` runs `make names` on its own line in test and quick modes, and a host with no gcc-15 prints its SKIP line.
+		- Verified: `c-checks.bash test 3` and the quick gate printed `PASS de07q`. With one `#define` taken out of `shclw3_v2_names.h`, quick mode printed `FAIL de07q` and exited 2.
+		- Swept: `make test` is the only target that ran `names`, and the container's test mode the only caller. Quick mode now runs it too. Go, Rust and Python take 2.0 as a module, a crate and a file of their own, so there's no name to leak.
+	- Decisions:
+		- `make test` still depends on `names`, so a hand run keeps the check. In the container it runs twice, a fraction of a second.
+		- Quick mode runs it as well, since it's cheap.
+	- Branch: r1025
+	- Commit: 527271e
+	- Test case: de07q, in `cicd/c-in-container.bash` test and quick modes.
+	- Closed: 2026-10-25 18:53
+	- Acceptance signoff: Self-closed: mechanical, and the line was watched to fail.
 
 - Python: run from a copied file
 	- ID: 2026101513330050
