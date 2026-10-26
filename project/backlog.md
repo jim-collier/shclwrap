@@ -142,7 +142,7 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 - Test IDs: shared cases
 	- ID: 2026102507142902
 	- Type: Enhancement
-	- Status: Queued
+	- Status: Done
 	- Priority: High
 	- Opened: 2026-10-25 07:14
 	- Opened by: JC
@@ -152,6 +152,18 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- Each case under `tests/cases/` gets an ID from its first commit, kept with the case.
 		- The Go, Rust, Python and C case runs print one line per case, with the language in the name.
 	- Note: `go test` shows a passing test's output only with `-v`, and cargo captures it, so Go's and Rust's lines may have to come from `go test -json` and cargo's own per-test lines, as in 2026102507142905. C and Python go through `cicd/c_cases.py`.
+	- Progress log:
+		- 2026-10-25: Each case's ID is the first line of its `ops.txt`, as `# Test ID: <id>`, from the folder's first commit, same-minute ones taking the next free minute. 001-reads is `ddzvq` and 061-commented-defaults `decg2`.
+		- Each language prints `PASS|FAIL|SKIP <id> <Lang> case <name>`, and a case with no ID fails. Go's lines come from `go test -json` through `cicd/go_test_lines.py`. Rust's case runner is its own harness, so it prints its own lines, and still takes a name filter and `--list`. C and Python print theirs from `c_cases.py`.
+		- Verified: `cicd/cicd.bash --ci --quick -y` passed twice, CLEAN, with 61 case lines each in Go, Rust, C and Python. `c-checks.bash test 3` printed 61 sanitized C case lines. With a want file broken and one case's ID line taken out, Go, Rust and Python each printed a FAIL line for the first and named the second.
+		- Swept: every runner of the shared cases: Go's `TestCases`, Rust's `tests/cases.rs`, `c_cases.py` for C and Python, and what reads their output in cicd and the round tools.
+	- Decisions:
+		- One ID per case, shared by the 4 languages, which the language in the name tells apart.
+	- Branch: r1025
+	- Commit: 349e436
+	- Test case: dee8t, `cicd/test_lines_test.py`: every case has its own ID, and `c_cases.py` and `go_test_lines.py` print the lines. It failed with 2 cases sharing an ID, with c_cases' PASS line taken out, and with Go's line renamed.
+	- Closed: 2026-10-25 18:04
+	- Acceptance signoff: Self-closed: every case prints its line by its ID in all 4 languages, and dee8t covers it.
 
 - Test IDs: Go, Rust, Python and C tests
 	- ID: 2026102507142905
@@ -169,7 +181,7 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 - Test IDs: fuzz
 	- ID: 2026102507142907
 	- Type: Enhancement
-	- Status: Queued
+	- Status: Done
 	- Priority: High
 	- Opened: 2026-10-25 07:14
 	- Opened by: JC
@@ -177,6 +189,17 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Prereq IDs: 2026102507142900
 	- Requirements:
 		- The generated fuzz in `fuzz.py`, each language against Go, and Go's own fuzzer each get an ID and print one line per run.
+	- Progress log:
+		- 2026-10-25: `fuzz.py` ends with a line for `ddzw1`, a Go crash, the checks on Go's output and the generator judge, then `ddzw2`, `de57g` and `de8ed` for Rust, C and Python against Go. A driver not in the run is `SKIP`. Go's fuzzer is `ddzw3`. With the fuzz off, all 5 say `SKIP` with the flag, and `ddzw3` says `--quick` under it.
+		- Times from `fuzz.py`'s first commit, and from the commits that added C and Python to it.
+		- A failing seed's line now starts `fuzz: seed`, not `FAIL seed`, so it isn't read as a test line.
+		- Verified: `cicd/cicd.bash --ci --quick -y` passed with all 4 fuzz.py lines PASS, through the C container. `lang-checks.bash gofuzz` printed `PASS ddzw3`, and `--backlog-run-quick cicd` the 5 SKIP lines.
+		- Swept: every fuzz.py caller, in `c-in-container.bash`, `lang-in-container.bash` and cicd.bash, and every branch of cicd's fuzz step.
+	- Branch: r1025
+	- Commit: 349e436
+	- Test case: dee8t, `cicd/test_lines_test.py`, class FuzzLines: a Rust driver that fails is Rust's FAIL alone, a Go crash is Go's, and `--skip` names all 4. It failed with the blame taken out.
+	- Closed: 2026-10-25 18:04
+	- Acceptance signoff: Self-closed: each fuzz test prints its line by its ID, and dee8t covers the blame.
 
 - `--list` names the test IDs a run would run
 	- ID: 2026102507433885
