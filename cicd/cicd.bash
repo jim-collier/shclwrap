@@ -46,7 +46,10 @@
 ##	   --no-remote     skip other hosts and VMs. There are none yet.
 ##	  Other:
 ##	   --keep-temp     keep the run's scratch folder, and print where it is
-##	   --list, --dry-run  show which stages would run, and stop
+##	   --dry-run       show which stages would run, and stop
+##	   --list          the same, plus the test IDs each stage would run, by the
+##	                   flags given. A box missing a tool or a cached pin still
+##	                   skips some of them at run time.
 ##	   -q, --quiet     only the step list up front, and no prompt
 ##	   -y, --yes       no prompt
 ##	   -h, --help      show this help
@@ -98,7 +101,7 @@ export PATH="${HOME}/.cargo/bin:${PATH}"
 fCpuCap
 
 cmdLine="$*"
-doQuick=0; doLeakcheck=""; doQuiet=0; assumeYes=0; dryRun=0; keepTemp=0
+doQuick=0; doLeakcheck=""; doQuiet=0; assumeYes=0; dryRun=0; listTests=0; keepTemp=0
 doSync=1; doFormat=1; doLint=1; doTests=1; doFuzz=1; doContainer=1
 ## checkOnly: format checks and nothing syncs or prompts. runName is the named run that set it.
 checkOnly=0; runName=""; aliasNote=""
@@ -134,7 +137,8 @@ while (($#)); do case "$1" in
 	--no-container) doContainer=0; shift ;;
 	--no-remote) shift ;;
 	--keep-temp) keepTemp=1; shift ;;
-	--dry-run|--list) dryRun=1; shift ;;
+	--dry-run)  dryRun=1; shift ;;
+	--list)     dryRun=1; listTests=1; shift ;;
 	-h|--help)  sed -n '/^##	- Purpose:/,/^##	History:/p' "${BASH_SOURCE[0]}" | sed '$d; s/^##	\{0,1\}//'; exit 0 ;;
 	*) echo "unknown option: $1 (try --help)" >&2; exit 2 ;;
 esac; done
@@ -249,6 +253,78 @@ fFuzzFail_Prune(){
 ## fuzz.py's SKIP lines, so its test names stay in one place.
 fFuzzSkip(){ PYTHONPYCACHEPREFIX="${work}/pycache" python3 "${here}/fuzz.py" "--skip=$1"; }
 
+## A .PHONY name with no rule makes make say "nothing to be done" and pass.
+fPhonyRules(){
+	local makeRules target
+	local -a phonyTargets=()
+	read -ra phonyTargets < <(sed -n 's/^\.PHONY:[[:space:]]*//p' "${root}/source/c/Makefile") || true
+	((${#phonyTargets[@]})) || { echo "no .PHONY line in source/c/Makefile" >&2; return 1; }
+	makeRules="$(grep -oE '^[A-Za-z0-9_-]+:' "${root}/source/c/Makefile")"
+	for target in "${phonyTargets[@]}"; do
+		grep -qxF -- "${target}:" <<<"${makeRules}" || { echo "source/c/Makefile: .PHONY names ${target}, which has no rule" >&2; return 1; }
+	done
+}
+## The Lint and Tests steps' own checks. --list calls them too, under fTest_ListOnly.
+fLint_Tests(){ if fArea c; then fTest debab "C Makefile .PHONY names have rules" fPhonyRules; fi; }
+fCicdTests(){
+	fTest -q de7yv "cicd flag mixes" bash "${here}/flags-test.bash"
+	fTest -q deea7 "--list names every test a run would run, and runs nothing" bash "${here}/list-test.bash"
+	fTest dece1 "fuzz corpus keeps its bytes" env PYTHONPYCACHEPREFIX="${work}/pycache" PYTHONWARNDEFAULTENCODING=1 PYTHONWARNINGS=error::EncodingWarning python3 "${here}/fuzz_test.py" -q LoadCorpus
+	fTest dedph "fuzz judges the generator only from enough cases" env TMPDIR="${work}" PYTHONPYCACHEPREFIX="${work}/pycache" PYTHONWARNDEFAULTENCODING=1 PYTHONWARNINGS=error::EncodingWarning python3 "${here}/fuzz_test.py" -q Judge
+	fTest dee8t "shared cases, language tests and fuzz print a test line each, by their own IDs" env TMPDIR="${work}" PYTHONPYCACHEPREFIX="${work}/pycache" PYTHONWARNDEFAULTENCODING=1 PYTHONWARNINGS=error::EncodingWarning python3 "${here}/test_lines_test.py" -q
+	fTest -q decc9 "one cicd run per tree at a time" env TMPDIR="${work}" bash "${here}/lock-test.bash"
+	fTest -q decdx "runs started in the same second get their own logs" env TMPDIR="${work}" bash "${here}/log-name-test.bash"
+	fTest -q dee8b "lint-report doesn't read a path as a warning" env TMPDIR="${work}" bash "${here}/lint-report-test.bash"
+	fTest -q decb9 "line ends under core.autocrlf=true" env TMPDIR="${work}" bash "${here}/eol-test.bash"
+	fTest -q dedkv "CPU caps and low priority" bash "${here}/cpu-cap-test.bash"
+	fTest -q dedm7 "step and test lines" bash "${here}/steps-test.bash"
+	fTest -q dedn4 "pre-push hook gates only a push to main that changes more than docs" env TMPDIR="${work}" bash "${here}/hook-test.bash"
+	fTest dedn5 "C containers carry the run's name and labels" fDockerLabels
+	fTest -q dednv "C runs on the host without docker or its image" env TMPDIR="${work}" bash "${here}/c-host-test.bash"
+	fTest -q dedpt "Go, Rust and Python run on the host without docker or their image" env TMPDIR="${work}" bash "${here}/lang-host-test.bash"
+	fTest -q dedqv "a run's end removes its containers and stale images, and nothing else" env TMPDIR="${work}" bash "${here}/docker-tidy-test.bash"
+	fTest -q dedta "stale headers and fuzz sets are pruned, and nothing else" env TMPDIR="${work}" bash "${here}/prune-test.bash"
+}
+
+## --list: the test IDs each step that's on would run, one line each, by the flags given.
+fListStep(){
+	local py=(env PYTHONDONTWRITEBYTECODE=1 python3) a
+	local -a langs=()
+	for a in go rust python c; do if fArea "${a}"; then langs+=("${a}"); fi; done
+	case "$1" in
+		Lint)
+			fLint_Tests
+			if fArea c && ((! doQuick)); then fCTest_List "${cTestsLint[@]}"; fi ;;
+		Tests)
+			if fArea go;   then "${py[@]}" "${here}/test_ids.py" tests go; fi
+			if fArea rust; then "${py[@]}" "${here}/test_ids.py" tests rust; fi
+			if fArea python; then
+				fTest decd4 "Python tests and shared cases, encoding warnings as errors" :
+				"${py[@]}" "${here}/test_ids.py" tests python
+			fi
+			if fArea cicd; then fCicdTests; fi
+			if fArea c; then
+				if ((doQuick)); then fCTest_List decbj; fi
+				fCTest_List "${cTestsBuild[@]}"
+				"${py[@]}" "${here}/test_ids.py" tests c
+			fi
+			if ((${#langs[@]})); then "${py[@]}" "${here}/test_ids.py" cases "${langs[@]}"; fi ;;
+		"C leak checks") fCTest_List "${cTestsLeak[@]}" ;;
+		Fuzz)
+			if ((fuzzSecs > 0)); then "${py[@]}" "${here}/fuzz.py" --list; fi
+			if ((goFuzzSecs > 0)); then fTest ddzw3 "Go's fuzzer finds no panic in Run" :; fi ;;
+	esac
+}
+fListOne(){
+	local ids
+	fStep_On "$1" || return 0
+	fStep_Num "$1"
+	fSection "Step ${stepNum} of ${stepTotal}; $1, test IDs"
+	ids="$(fListStep "$1")"
+	printf '%s\n' "${ids:-(none)}"
+}
+fListTests(){ fTest_ListOnly 1; fStep_Each fListOne; fTest_ListOnly 0; }
+
 ## The first section. --quiet keeps only the step list, except under --dry-run.
 fPreflight(){
 	local mode ni
@@ -314,7 +390,7 @@ trap fCleanup EXIT
 ## Ctrl+C takes tee down too, and a write to it would kill this shell before the cleanup runs.
 trap 'trap "" PIPE; exit 130' INT
 
-if ((dryRun)); then fPreflight; fEcho_Clean; exit 0; fi
+if ((dryRun)); then fPreflight; if ((listTests)); then fListTests; fi; fEcho_Clean; exit 0; fi
 
 ## Tee the whole run to a rotated log, for cicd/utility/lint-report.bash.
 fRunLog "${root}/cicd/artifacts/lint" stamp logFd
@@ -424,17 +500,7 @@ if fStep_On "Lint"; then
 		shellcheck "${shellFiles[@]}"
 		fEcho "OK: shellcheck (${#shellFiles[@]} files)"
 	fi
-	if fArea c; then
-		## A .PHONY name with no rule makes make say "nothing to be done" and pass.
-		fTest_Start debab "C Makefile .PHONY names have rules"
-		read -ra phonyTargets < <(sed -n 's/^\.PHONY:[[:space:]]*//p' "${root}/source/c/Makefile") || true
-		((${#phonyTargets[@]})) || fDie "no .PHONY line in source/c/Makefile"
-		makeRules="$(grep -oE '^[A-Za-z0-9_-]+:' "${root}/source/c/Makefile")"
-		for target in "${phonyTargets[@]}"; do
-			grep -qxF -- "${target}:" <<<"${makeRules}" || fDie "source/c/Makefile: .PHONY names ${target}, which has no rule"
-		done
-		fTest_Pass
-	fi
+	fLint_Tests
 	fStep_Pass
 fi
 
@@ -444,24 +510,7 @@ if fStep_On "Tests"; then
 	fShclFetch
 	## The Go, Rust and Python tests, and Python's shared cases (decd4).
 	if fArea go rust python; then bash "${here}/lang-checks.bash" test "${work}"; fi
-	if fArea cicd; then
-		fTest -q de7yv "cicd flag mixes" bash "${here}/flags-test.bash"
-		fTest dece1 "fuzz corpus keeps its bytes" env PYTHONPYCACHEPREFIX="${work}/pycache" PYTHONWARNDEFAULTENCODING=1 PYTHONWARNINGS=error::EncodingWarning python3 "${here}/fuzz_test.py" -q LoadCorpus
-		fTest dedph "fuzz judges the generator only from enough cases" env TMPDIR="${work}" PYTHONPYCACHEPREFIX="${work}/pycache" PYTHONWARNDEFAULTENCODING=1 PYTHONWARNINGS=error::EncodingWarning python3 "${here}/fuzz_test.py" -q Judge
-		fTest dee8t "shared cases, language tests and fuzz print a test line each, by their own IDs" env TMPDIR="${work}" PYTHONPYCACHEPREFIX="${work}/pycache" PYTHONWARNDEFAULTENCODING=1 PYTHONWARNINGS=error::EncodingWarning python3 "${here}/test_lines_test.py" -q
-		fTest -q decc9 "one cicd run per tree at a time" env TMPDIR="${work}" bash "${here}/lock-test.bash"
-		fTest -q decdx "runs started in the same second get their own logs" env TMPDIR="${work}" bash "${here}/log-name-test.bash"
-		fTest -q dee8b "lint-report doesn't read a path as a warning" env TMPDIR="${work}" bash "${here}/lint-report-test.bash"
-		fTest -q decb9 "line ends under core.autocrlf=true" env TMPDIR="${work}" bash "${here}/eol-test.bash"
-		fTest -q dedkv "CPU caps and low priority" bash "${here}/cpu-cap-test.bash"
-		fTest -q dedm7 "step and test lines" bash "${here}/steps-test.bash"
-		fTest -q dedn4 "pre-push hook gates only a push to main that changes more than docs" env TMPDIR="${work}" bash "${here}/hook-test.bash"
-		fTest dedn5 "C containers carry the run's name and labels" fDockerLabels
-		fTest -q dednv "C runs on the host without docker or its image" env TMPDIR="${work}" bash "${here}/c-host-test.bash"
-		fTest -q dedpt "Go, Rust and Python run on the host without docker or their image" env TMPDIR="${work}" bash "${here}/lang-host-test.bash"
-		fTest -q dedqv "a run's end removes its containers and stale images, and nothing else" env TMPDIR="${work}" bash "${here}/docker-tidy-test.bash"
-		fTest -q dedta "stale headers and fuzz sets are pruned, and nothing else" env TMPDIR="${work}" bash "${here}/prune-test.bash"
-	fi
+	if fArea cicd; then fCicdTests; fi
 	if ! fArea c || ((! doC)); then
 		:
 	elif ((doQuick)); then
@@ -545,3 +594,4 @@ fEcho_Clean
 ##		- 2026-10-25 JC: Go, Rust and Python run in their own pinned image through lang-checks.bash, with the same host fallback.
 ##		- 2026-10-25 JC: The run's end stops and removes its containers by label, drops stale images and week-old build cache, and says what went in one line.
 ##		- 2026-10-25 JC: Test lines for the shared cases, the fuzz and Go's fuzzer, and SKIP lines for them when the fuzz is off.
+##		- 2026-10-25 JC: --list names the test IDs each step would run, and --dry-run stays the step list.

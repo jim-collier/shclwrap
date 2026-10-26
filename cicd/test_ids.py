@@ -8,8 +8,11 @@
 from __future__ import annotations
 
 import re
+import sys
 from dataclasses import dataclass
 from pathlib import Path
+
+from c_cases import case_id
 
 ROOT = Path(__file__).resolve().parent.parent
 ID = r"[0-9a-hjkmnp-tv-z]{5}"
@@ -82,3 +85,24 @@ def all_tests() -> list[Test]:
 
 def ids(lang: str) -> dict[str, str | None]:
 	return {t.name: t.tid for p in sources()[lang] for t in scan(lang, p)}
+
+
+## For cicd.bash --list: `tests LANG...` or `cases LANG...`, an ID and a name a line.
+def main(argv: list[str]) -> int:
+	langs = {"go": "Go", "rust": "Rust", "python": "Python", "c": "C"}
+	if len(argv) < 2 or argv[0] not in ("tests", "cases") or not set(argv[1:]) <= langs.keys():
+		print("usage: test_ids.py tests|cases go|rust|python|c...", file=sys.stderr)
+		return 2
+	picked = [langs[a] for a in langs if a in argv[1:]]
+	if argv[0] == "tests":
+		for t in all_tests():
+			if t.lang in picked:
+				print(f"{t.tid or '-----'} {t.lang} {t.name}")
+		return 0
+	for case in sorted(p for p in (ROOT / "tests" / "cases").iterdir() if p.is_dir()):
+		print(f"{case_id(case) or '-----'} case {case.name} ({', '.join(picked)})")
+	return 0
+
+
+if __name__ == "__main__":
+	sys.exit(main(sys.argv[1:]))

@@ -487,6 +487,7 @@ def test_lines(fails: dict[str, int], drivers: dict[str, list[str]], skip_why: s
 def main() -> int:
 	ap = argparse.ArgumentParser(description=__doc__)
 	ap.add_argument("--skip", metavar="WHY", help="print a SKIP line per test, saying why, and run nothing")
+	ap.add_argument("--list", action="store_true", help="print each test's ID and name, and run nothing")
 	ap.add_argument("--go", help="Go driver binary")
 	ap.add_argument("--rust", help="Rust driver binary")
 	ap.add_argument("--c", default=None, help="C driver binary, with {v} where its shcl version goes")
@@ -499,6 +500,10 @@ def main() -> int:
 	ap.add_argument("--work", type=Path, help="scratch dir this run owns")
 	ap.add_argument("--out", type=Path, help="where failing cases go")
 	args = ap.parse_args()
+	if args.list:
+		for tid, title in TESTS.values():
+			print(f"{tid} {title}")
+		return 0
 	if args.skip is not None:
 		test_lines({}, {}, args.skip or "skipped")
 		return 0

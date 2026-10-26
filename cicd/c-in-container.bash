@@ -81,6 +81,8 @@ jobs="${SHCLW_JOBS:-}"
 fMingw(){
 	if fNeed "the Windows build" mingwCc; then fCTest_Start decbj; make_c "$@" mingw; fTest_Pass; else fCTest_Skip "no mingw-w64 gcc on the host" decbj; fi
 }
+## fNames [MAKE ARGS]: the Makefile's names check, on its own line (de07q).
+fNames(){ fCTest_Start de07q; make_c "$@" names; fTest_Pass; }
 fLeakTools(){ fNeed "the C leak checks" cc15 cxx clang extdef heaptrack || { fCTest_Skip "no C leak tools on the host" "${cTestsLeak[@]}"; exit 0; }; }
 
 make_c(){
@@ -148,7 +150,8 @@ EOF
 		fMingw
 		;;
 	test)
-		fNeed "the C tests" cc15 cxx || exit 0
+		fNeed "the C tests" cc15 cxx || { fCTest_Skip "no gcc-15 on the host" "${cTestsBuild[@]}"; exit 0; }
+		fNames -j "${jobs}"
 		make_c -j "${jobs}" test drive
 		LSAN_OPTIONS="suppressions=${root}/source/c/lsan.supp:print_suppressions=1" \
 		ASAN_OPTIONS="detect_leaks=1:halt_on_error=1" \
@@ -157,8 +160,9 @@ EOF
 		;;
 	quick)
 		## No sanitizers and no analyzers, which are most of the time.
-		fNeed "the C quick tests" cc15 || exit 0
+		fNeed "the C quick tests" cc15 || { fCTest_Skip "no gcc-15 on the host" "${cTestsBuild[@]}"; exit 0; }
 		fMingw -j "${jobs}"
+		fNames -j "${jobs}"
 		make_c -j "${jobs}" strict drive-plain "${work}/c${version}/api-test-plain"
 		"${work}/c${version}/api-test-plain"
 		python3 "${here}/c_cases.py" --drive "${work}/c${version}/shclw-drive-plain" \

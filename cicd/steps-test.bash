@@ -143,6 +143,11 @@ fRun 'if ! fTest abcde "a name" false; then echo handled; fi'
 [[ "${rc}" == 0 && "${out}" == $'FAIL abcde a name\nhandled\n' ]] || fFail "a failing fTest under if: rc ${rc}: ${out}"
 fRun 'fNope(){ return 3; }; fTest abcde "a name" fNope'
 [[ "${rc}" == 3 && "${out}" == *"FAIL abcde a name"* ]] || fFail "a function returning 3: rc ${rc}: ${out}"
+## For --list: only the ID and name, and the command never runs. Then back to running.
+fRun 'fTest_ListOnly 1; fTest -q abcde "a name" echo ran; fTest abcdf "two" false; fTest_ListOnly 0; fTest abcdg "three" true'
+[[ "${rc}" == 0 && "${out}" == $'abcde a name\nabcdf two\nPASS abcdg three\n' ]] || fFail "fTest_ListOnly: rc ${rc}: ${out}"
+fRun 'fStep_Each echo step'
+[[ "${out}" == $'step A\nstep B\nstep C\nstep D\n' ]] || fFail "fStep_Each: ${out}"
 ## Inline, inside a step: the test's FAIL comes before the step's.
 for cmd in 'false' '(cd / && false)'; do
 	fRun "fStep_Start A; fTest_Start abcde 'an inline one'; ${cmd}; fTest_Pass; fStep_Pass"
