@@ -1,0 +1,153 @@
+# The off-box check, and the only Apple Silicon run, since both local Macs are
+# Intel. Not the gate: cicd/cicd.bash --merge-gate is, from the pre-push hook.
+# Both jobs run the merge gate as far as a fresh runner can. Format is left to
+# the local gate, since its clang-format pin isn't on either runner, and so are
+# the leak checks, whose CodeQL takes about 45 minutes cold.
+name: ci
+
+on:
+  push:
+    branches: [main]
+    # The pre-push hook's docs-only list.
+    paths-ignore: ["**.md", "project/**"]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  linux:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Only for when an image won't build and cicd falls back to the host.
+      - id: pins
+        run: |
+          source cicd/tool-pins.env
+          {
+            echo "go=${PIN_GO#go}"
+            echo "python=${PIN_PYTHON_CONTAINER%.*}"
+            echo "ruff=${PIN_RUFF}"
+            echo "staticcheck=${PIN_STATICCHECK}"
+          } >> "${GITHUB_OUTPUT}"
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: ${{ steps.pins.outputs.go }}
+          cache-dependency-path: source/go/go.sum
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: ${{ steps.pins.outputs.python }}
+
+      # shellcheck runs on the host either way, and the image's copy is older.
+      - name: host tools
+        run: |
+          go install "honnef.co/go/tools/cmd/staticcheck@${{ steps.pins.outputs.staticcheck }}"
+          echo "$(go env GOPATH)/bin" >> "${GITHUB_PATH}"
+          pip install "ruff==${{ steps.pins.outputs.ruff }}"
+          curl -fsSL --proto '=https' --tlsv1.2 -o "${RUNNER_TEMP}/shellcheck.tar.xz" \
+            "https://github.com/koalaman/shellcheck/releases/download/v0.11.0/shellcheck-v0.11.0.linux.x86_64.tar.xz"
+          echo "8c3be12b05d5c177a04c29e3c78ce89ac86f1595681cab149b65b97c4e227198  ${RUNNER_TEMP}/shellcheck.tar.xz" | sha256sum -c -
+          tar -xJf "${RUNNER_TEMP}/shellcheck.tar.xz" -C "${RUNNER_TEMP}"
+          sudo install -m 0755 "${RUNNER_TEMP}/shellcheck-v0.11.0/shellcheck" /usr/local/bin/shellcheck
+
+      - name: merge gate
+        env:
+          HOST_TEMP: ${{ runner.temp }}
+        run: bash cicd/cicd.bash -q --merge-gate --no-remote --no-format --no-leakcheck --no-profile < /dev/null
+
+      - name: logs
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: linux-logs
+          path: |
+            cicd/artifacts/lint/*.log
+            cicd/artifacts/fuzz/
+            cicd/artifacts/*.log
+          retention-days: 7
+
+  # Free on a public repo only. A private one pays 10 times the Linux rate.
+  macos-arm64:
+    runs-on: macos-15
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+    env:
+      HOMEBREW_NO_AUTO_UPDATE: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # The image's bash is 3.2 and its make 3.81. The cicd scripts expect GNU
+      # coreutils and flock, and the C build is gcc-15's.
+      - name: brew
+        run: |
+          brew install bash coreutils make flock gcc@15
+          prefix="$(brew --prefix)"
+          {
+            echo "${prefix}/opt/make/libexec/gnubin"
+            echo "${prefix}/opt/coreutils/libexec/gnubin"
+            echo "${prefix}/bin"
+          } >> "${GITHUB_PATH}"
+
+      - id: pins
+        run: |
+          source cicd/tool-pins.env
+          echo "go=${PIN_GO#go}" >> "${GITHUB_OUTPUT}"
+          echo "python=${PIN_PYTHON_CONTAINER%.*}" >> "${GITHUB_OUTPUT}"
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: ${{ steps.pins.outputs.go }}
+          cache-dependency-path: source/go/go.sum
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: ${{ steps.pins.outputs.python }}
+
+      # rustup is on the image, and takes the toolchain from rust-toolchain.toml.
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry
+            source/rust/target
+          key: macos-arm64-${{ hashFiles('source/rust/rust-toolchain.toml', 'source/rust/Cargo.lock') }}
+
+      - name: versions
+        run: |
+          sw_vers; uname -m
+          bash --version | head -n 1
+          gcc-15 --version | head -n 1
+          go version
+          python3 --version
+
+      # Tests, fuzz and cicd's own checks. Lint reads the same on every box, so
+      # the Linux job has it. With no docker, C runs plain, since macOS has no
+      # LeakSanitizer.
+      - name: merge gate
+        env:
+          HOST_TEMP: ${{ runner.temp }}
+        run: bash cicd/cicd.bash -q --merge-gate --no-container --no-remote --no-format --no-lint --no-profile < /dev/null
+
+      - name: drivers
+        run: bash cicd/utility/driver-smoke.bash "${RUNNER_TEMP}/drivers"
+
+      - name: logs
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: macos-arm64-logs
+          path: |
+            cicd/artifacts/lint/*.log
+            cicd/artifacts/fuzz/
+          retention-days: 7

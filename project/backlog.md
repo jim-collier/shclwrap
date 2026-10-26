@@ -268,6 +268,23 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Possible cause [Bug]: `CreateHardLink` on FAT gives `ERROR_INVALID_FUNCTION` (1). Go's `ErrUnsupported` takes only `ERROR_NOT_SUPPORTED`, `ERROR_CALL_NOT_IMPLEMENTED` and a few errnos, and Rust doesn't call it `Unsupported` either. Python sees errno 22 with winerror 1. exFAT and network shares may give other codes, not tried.
 	- Test case: none yet. CI has no FAT volume. On vm925w `win-go-fat.ps1` makes one and runs the 3 languages' race tests and shared cases on it.
 
+- Go 1.27 prints a float32 halfway value differently
+	- ID: 2026102519333440
+	- Type: Bug
+	- Status: Queued
+	- Severity: Avg
+	- Opened: 2026-10-25 19:33
+	- Opened by: JC
+	- Related IDs: 2026102519333240
+	- Steps to reproduce [Bug]:
+		- In `source/go`, run `GOTOOLCHAIN=go1.27.3 go test -count=1 -run TestPutFloat32 ./shclw/`.
+	- Incorrect behavior [Bug]:
+		- `v3 0.00024414062: read back Good 0.00024414062, want 0.00024414063`.
+	- Expected behavior [Bug]:
+		- It passes, as it does on the pinned go1.26.2. Float ties print by Go's rule in every language, so a Go program built with 1.27 would write a value Rust, C and Python don't.
+	- Reproduced [Bug]: 2026-10-25, with go1.27.3 on b23 (linux/amd64) and on b26 (darwin/amd64). go1.26.2 passes on both.
+	- Possible cause [Bug]: Go 1.27 changed how `strconv` rounds a float32 halfway case. Not looked into yet.
+
 - CICD reset: temp files and safe removal
 	- ID: 2026102416400070
 	- Type: Enhancement
@@ -301,6 +318,36 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- No `test_shclw_*` folders were left under the temp roots on this box, so nothing sweeps the old layout.
 	- Commit: 0f9d2ae
 	- Test case: deean, `cicd/temp-test.bash`.
+
+- Hosted workflow, with the arm64 Mac job
+	- ID: 2026102519333240
+	- Type: Enhancement
+	- Status: Waiting on automated testing
+	- Needs local test suite run?: No. The C tests passed in the container and on the host, and deebf covers the plain fallback.
+	- Needs external testing: The `ci` workflow on GitHub, both jobs, once `.github/workflows/ci.yml` is on main: `gitsby raw gh workflow run ci.yml --ref main`, or a pull request against main.
+	- Priority: Avg
+	- Opened: 2026-10-25 19:33
+	- Opened by: JC
+	- Parent ID: 2026102307090301
+	- Related IDs: 2026101512024174
+	- Requirements:
+		- One small workflow on push and PR against main, plus `workflow_dispatch`, runs `--merge-gate` as far as the runner can, with GitHub's free arm64 macOS job beside it.
+		- The Mac job builds, runs the tests, and smoke-tests the built drivers, since there's no CLI of its own.
+	- Progress log:
+		- 2026-10-25: `.github/workflows/ci.yml`. Its Linux job runs `--merge-gate` in the images. Its `macos-15` arm64 job runs the tests and fuzz on the host, then `cicd/utility/driver-smoke.bash`, which runs the shared cases through Go's and Rust's release drivers, C's plain one, and Python's.
+		- 2026-10-25: A host whose gcc-15 can't build or run the sanitizers, such as a Mac, builds C's tests and fuzz driver plain, and says so. design.md says so.
+		- 2026-10-25: dee8t named `/bin/true`, which macOS doesn't have. It now looks `true` and `false` up on PATH.
+		- Verified: actionlint, with its shellcheck pass, is clean. deebf passes, and fails against the old `c-in-container.bash`. `c-checks.bash test 3` passed sanitized in the container and on this host. `driver-smoke.bash` passed here, 61 cases in each language. `--backlog-run-quick cicd` passed CLEAN.
+		- 2026-10-25: On b26 (Intel, macOS 15.8, no gcc-15), the Mac job's cicd line from the working tree: Go, Rust and Python tests and shared cases passed, and so did cicd's own checks up to decc9, which needs flock, which b26 lacks and the workflow installs. The fuzz step passed alone there, C skipped. Go had to be the pinned 1.26.2, per bug 2026102519333440.
+		- Swept: every `-fsanitize` path in cicd: `c-in-container.bash` test and fuzz modes, both fixed. Its leak mode needs clang-22 and heaptrack, so a Mac skips it by name. The Makefile's `test` and `drive` are called only from those modes. No other `/bin/` path is left in cicd's Python and Bash tests.
+	- Decisions:
+		- One workflow, `ci.yml`, with both jobs, not a Mac-only file.
+		- Both jobs leave format to the local gate, since neither runner has the pinned clang-format, and the leak checks, since a cold CodeQL takes about 45 minutes. The Mac job leaves lint to the Linux job too, since lint reads the same on every box. Neither runs the profile, which nobody reads there.
+		- The Mac job runs on the host, since its runner has no docker. bash, GNU coreutils, make, flock and gcc-15 come from Homebrew, and Go and Python at the versions `cicd/tool-pins.env` pins.
+		- The Linux job installs the host tools too, so it still runs when an image won't build there and cicd falls back to the host. The images pin Debian unstable package versions, which can drop off the mirror.
+		- The repo is public, so the Mac job runs on every trigger.
+	- Branch: r1025
+	- Test case: deebf, `cicd/c-nosan-test.bash`. The workflow itself is the `ci` run on GitHub.
 
 - CICD reset: CICD process gaps
 	- ID: 2026102416400080
@@ -589,6 +636,21 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- Both local Macs are Intel, so this is the only Apple Silicon run.
 		- 2026-10-24: JC wants a hosted workflow for this.
 		- 2026-10-24, CICD reset: per `macOS builds on GitHub` and `Merge gate` in the shared CICD rules. One small workflow on push and PR against main, plus `workflow_dispatch`, runs `--merge-gate` as far as the runner can, with the arm64 macOS job beside it. cicd.bash flags picked by how long the job takes start it. It's free while the repo is public.
+		- 2026-10-25: Split into 2026102519333240, the workflow, and 2026102519333340, cicd.bash starting it.
+
+- cicd.bash starts the hosted workflow and waits for it
+	- ID: 2026102519333340
+	- Type: Enhancement
+	- Status: Queued
+	- Priority: Avg
+	- Opened: 2026-10-25 19:33
+	- Opened by: JC
+	- Parent ID: 2026102307090301
+	- Prereq IDs: 2026102519333240
+	- Requirements:
+		- cicd.bash flags picked by how long the job takes start the `ci` workflow, per the parent's CICD reset note.
+		- A run that starts it waits for its result at the end. Anything short of a finished run that failed is a `SKIP`, as for a test box that doesn't answer. `--no-remote` skips it.
+	- Note: zuid does this for its full run, `--backlog-run-full` and `--merge-gate`, in `fStage_Hosted_Start` and `fStage_Hosted_Result` in its cicd.bash, tests dedwh, dedwj, dedwk and dedwm. GitHub runs only what's pushed, and `workflow_dispatch` works only once the workflow is on the default branch.
 
 - Say which layer a read came from
 	- ID: 2026102114101028

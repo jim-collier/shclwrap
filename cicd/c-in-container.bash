@@ -65,6 +65,23 @@ fNeed(){
 	if ((! host)); then echo "the C image has no ${missing[*]}" >&2; exit 1; fi
 	echo "WARNING: no ${missing[*]} on the host; skipping ${what}"; return 1
 }
+## fSanitizers: true when gcc-15 here builds and runs the sanitized C. macOS has no
+## LeakSanitizer, so a Mac host builds the C plain, and says so. The image always can.
+sanChecked=""
+fSanitizers(){
+	((host)) || return 0
+	if [[ -z "${sanChecked}" ]]; then
+		local d="${work}/san-probe"
+		sanChecked=0
+		mkdir -p "${d}"
+		printf 'int main(void) { return 0; }\n' > "${d}/probe.c"
+		if "${cc15}" -fsanitize=address,leak,undefined "${d}/probe.c" -o "${d}/probe" >/dev/null 2>&1 \
+			&& ASAN_OPTIONS=detect_leaks=1 "${d}/probe" >/dev/null 2>&1; then sanChecked=1
+		else echo "WARNING: ${cc15} here can't build or run the sanitized C, so C builds plain"
+		fi
+	fi
+	((sanChecked))
+}
 
 shcl2Dir="${root}/cicd/cache/shcl-c/${SHCL2_REV}"
 shcl3Dir="${root}/cicd/cache/shcl-c/${SHCL3_REV}"
@@ -152,11 +169,20 @@ EOF
 	test)
 		fNeed "the C tests" cc15 cxx || { fCTest_Skip "no gcc-15 on the host" "${cTestsBuild[@]}"; exit 0; }
 		fNames -j "${jobs}"
-		make_c -j "${jobs}" test drive
-		LSAN_OPTIONS="suppressions=${root}/source/c/lsan.supp:print_suppressions=1" \
-		ASAN_OPTIONS="detect_leaks=1:halt_on_error=1" \
-		python3 "${here}/c_cases.py" --drive "${work}/c${version}/shclw-drive" \
-			--version "${version}" --cases "${root}/tests/cases"
+		if fSanitizers; then
+			make_c -j "${jobs}" test drive
+			LSAN_OPTIONS="suppressions=${root}/source/c/lsan.supp:print_suppressions=1" \
+			ASAN_OPTIONS="detect_leaks=1:halt_on_error=1" \
+			python3 "${here}/c_cases.py" --drive "${work}/c${version}/shclw-drive" \
+				--version "${version}" --cases "${root}/tests/cases"
+		else
+			## make test less its ASan build.
+			make_c -j "${jobs}" "${work}/c${version}/api-test-plain" "${work}/c${version}/api-test-cxx" drive-plain
+			"${work}/c${version}/api-test-plain"
+			"${work}/c${version}/api-test-cxx"
+			python3 "${here}/c_cases.py" --drive "${work}/c${version}/shclw-drive-plain" \
+				--version "${version}" --cases "${root}/tests/cases"
+		fi
 		;;
 	quick)
 		## No sanitizers and no analyzers, which are most of the time.
@@ -173,7 +199,10 @@ EOF
 		drive="$1"; shift
 		## A host with no gcc-15 still fuzzes the rest against Go.
 		cArgs=()
-		if fNeed "C in the fuzz" cc15; then make_c -j "${jobs}" "${work}/c${version}/${drive}"; cArgs=(--c "${work}/c{v}/${drive}"); fi
+		if fNeed "C in the fuzz" cc15; then
+			if [[ "${drive}" == shclw-drive ]] && ! fSanitizers; then drive=shclw-drive-plain; fi
+			make_c -j "${jobs}" "${work}/c${version}/${drive}"; cArgs=(--c "${work}/c{v}/${drive}")
+		fi
 		## Python too, when cicd.bash had its pinned shcl.py.
 		pyDir="${root}/cicd/cache/shcl-py/${SHCL3_PY_REV}"
 		pyArgs=()

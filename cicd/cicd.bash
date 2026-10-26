@@ -296,6 +296,7 @@ fCicdTests(){
 	fTest -q dedn4 "pre-push hook gates only a push to main that changes more than docs" bash "${here}/hook-test.bash"
 	fTest dedn5 "C containers carry the run's name and labels" fDockerLabels
 	fTest -q dednv "C runs on the host without docker or its image" bash "${here}/c-host-test.bash"
+	fTest -q deebf "C builds plain on a host with no sanitizers" bash "${here}/c-nosan-test.bash"
 	fTest -q dedpt "Go, Rust and Python run on the host without docker or their image" bash "${here}/lang-host-test.bash"
 	fTest -q dedqv "a run's end removes its containers and stale images, and nothing else" bash "${here}/docker-tidy-test.bash"
 	fTest -q dedta "stale headers and fuzz sets are pruned, and nothing else" bash "${here}/prune-test.bash"

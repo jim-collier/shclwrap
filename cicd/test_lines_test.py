@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -276,11 +277,13 @@ class FuzzLines(unittest.TestCase):
 		self.assertTrue(all(TEST_ID.fullmatch(tid) for tid in ids))
 
 	def test_blames_the_driver(self) -> None:
-		got = self.fuzz("/bin/true", "/bin/false")
+		# macOS keeps them in /usr/bin only.
+		true, false = shutil.which("true") or "true", shutil.which("false") or "false"
+		got = self.fuzz(true, false)
 		self.assertEqual([line[:10] for line in got], ["PASS ddzw1", "FAIL ddzw2", "SKIP de57g", "SKIP de8ed"])
 		self.assertTrue(got[2].endswith(", no C driver"), got[2])
 		# A Go crash is Go's, whatever the others did.
-		self.assertEqual(self.fuzz("/bin/false", "/bin/false")[0][:10], "FAIL ddzw1")
+		self.assertEqual(self.fuzz(false, false)[0][:10], "FAIL ddzw1")
 
 	def test_skip(self) -> None:
 		p = run(sys.executable, str(here / "fuzz.py"), "--skip=--no-fuzz")
