@@ -1,3 +1,4 @@
+# Test ID: de5cn
 # Open upgrades a 2.x file in memory. Reads, lines, and diags are the
 # upgraded text's, and nothing is written until a Write over the file.
 open	doc.shcl

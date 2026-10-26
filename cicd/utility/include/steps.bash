@@ -7,6 +7,7 @@
 ##			fStep_Plan NAME...    every step, in run order
 ##			fStep_Off NAME WHY    turns a step off; WHY is the flag that did it
 ##			fStep_On NAME         true when the step runs
+##			fStep_Each CMD...     runs CMD... NAME for each step in the plan
 ##			fStep_Summary         the steps that run, and why the rest are off
 ##			fStep_Start NAME      opens a step: "Step N of M; Starting NAME"
 ##			fStep_Pass            closes it with PASS
@@ -14,6 +15,7 @@
 ##			fStep_AllPassed       fails unless every step that's on passed
 ##			fStep_Abort RC LINE CMD  the ERR trap's line, then FAIL for the open test and step
 ##			fTest [-q] ID NAME CMD...  runs CMD and prints its test line; -q drops CMD's stdout
+##			fTest_ListOnly 1|0    1: fTest prints only "ID NAME" and runs nothing, for --list
 ##			fTest_Start ID NAME   opens a test whose checks run inline
 ##			fTest_Pass            "PASS ID NAME" for the open test
 ##			fTest_Fail            "FAIL ID NAME" for the open test, if any; for traps
@@ -41,6 +43,7 @@ declare -i _stepsPassed=0 stepNum=0 stepTotal=0
 fStep_Plan(){ _stepNames=("$@"); _stepOffBy=(); _stepsPassed=0; return 0; }
 fStep_Off(){  _stepOffBy["$1"]="$2"; }
 fStep_On(){   [[ -z "${_stepOffBy["$1"]+x}" ]]; }
+fStep_Each(){ local name; for name in "${_stepNames[@]}"; do "$@" "${name}"; done; }
 
 ## fStep_Num NAME: stepNum is NAME's place among the steps that are on, 0 if it
 ## isn't one, and stepTotal is how many are on.
@@ -112,7 +115,8 @@ fStep_Abort(){
 	exit "$1"
 }
 
-_testId=""; _testName=""
+_testId=""; _testName=""; _testListOnly=0
+fTest_ListOnly(){ _testListOnly="$1"; }
 fTest_Line(){  fEcho_Clean "$1 $2 $3"; }
 fTest_Start(){ _testId="$1"; _testName="$2"; }
 fTest_Pass(){
@@ -127,6 +131,7 @@ fTest_Skip(){ fTest_Line SKIP "$1" "$2${3:+, $3}"; }
 fTest(){
 	local quiet=0 rc=0
 	if [[ "${1:-}" == -q ]]; then quiet=1; shift; fi
+	if ((_testListOnly)); then fEcho_Clean "$1 $2"; return 0; fi
 	fTest_Start "$1" "$2"; shift 2
 	if ((quiet)); then "$@" >/dev/null || rc=$?; else "$@" || rc=$?; fi
 	if ((rc)); then fTest_Fail; return "${rc}"; fi
@@ -142,3 +147,4 @@ fStep_AllPassed(){
 ##	History:
 ##		- 2026-10-25 JC: Created, from cicd.bash's output helpers. Step lines, a 79-wide rule, and the off list.
 ##		- 2026-10-25 JC: Test lines, PASS, FAIL or SKIP with the test's ID and name.
+##		- 2026-10-25 JC: fTest_ListOnly and fStep_Each, for --list.

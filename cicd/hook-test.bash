@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 
+#  shellcheck disable=1091  ## 'Not following.' The include is found at run time.
+
 ##	Purpose: Test dedn4. The pre-push hook runs cicd's merge gate only for a
 ##		push to main that changes more than docs, per the Merge gate rule in
 ##		the shared CICD rules. It runs the real hook in a scratch repo, with a
@@ -10,10 +12,11 @@
 set -Eeuo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${here}/utility/include/safe-rm.bash"
 scratch="$(mktemp -d "${TMPDIR:-/tmp}/test_shclw_hook_XXXXXX")"
 touch "${scratch}/.shclw-hook-owned"
 fCleanup(){
-	if [[ -f "${scratch}/.shclw-hook-owned" ]]; then rm -rf -- "${scratch}"; fi
+	if [[ -f "${scratch}/.shclw-hook-owned" ]]; then fSafeRm "${scratch}" >/dev/null; fi
 	return 0
 }
 trap fCleanup EXIT

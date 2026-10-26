@@ -1,3 +1,4 @@
+# Test ID: de002
 diags
 get	str	x
 upgrade

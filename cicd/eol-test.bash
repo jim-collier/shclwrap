@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 
+#  shellcheck disable=1091  ## 'Not following.' The include is found at run time.
+
 ##	Purpose: Test decb9. A checkout with core.autocrlf=true, Git for Windows'
 ##		default, must write every tracked file byte for byte as committed.
 ##		The shared cases fail on CRLF, and case 027 needs its own CRLF kept.
@@ -9,10 +11,11 @@
 set -Eeuo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "${root}/cicd/utility/include/safe-rm.bash"
 scratch="$(mktemp -d "${TMPDIR:-/tmp}/test_shclw_eol_XXXXXX")"
 touch "${scratch}/.shclw-eol-owned"
 fCleanup(){
-	if [[ -f "${scratch}/.shclw-eol-owned" ]]; then rm -rf -- "${scratch}"; fi
+	if [[ -f "${scratch}/.shclw-eol-owned" ]]; then fSafeRm "${scratch}" >/dev/null; fi
 	return 0
 }
 trap fCleanup EXIT

@@ -38,13 +38,16 @@ class FindsShcl(unittest.TestCase):
 		self.assertNotEqual(p.returncode, 0)
 		return p.stderr
 
+	# Test ID: de8es
 	def test_older_refused(self) -> None:
 		# 1.2 and 2.0 have no FORMAT_MAJOR.
 		self.assertIn("older than 3.0", self.refused("VERSION = '2.0.0'\n"))
 
+	# Test ID: de8eq
 	def test_newer_refused(self) -> None:
 		self.assertIn("format 4", self.refused("FORMAT_MAJOR = 4\n"))
 
+	# Test ID: de8er
 	def test_none(self) -> None:
 		with tempfile.TemporaryDirectory() as tmp:
 			p = subprocess.run(
@@ -57,6 +60,7 @@ class FindsShcl(unittest.TestCase):
 			)
 		self.assertIn("installed or copied beside", p.stderr)
 
+	# Test ID: de8en
 	def test_copied(self) -> None:
 		# 3.0 copied beside the wrapper in a package, with an older shcl installed.
 		installed = Path(shclw.shcl.__file__)
@@ -81,6 +85,7 @@ class FindsShcl(unittest.TestCase):
 			)
 		self.assertEqual(p.stdout.split(), ["_shclw_shcl3", "False", "1"], p.stderr)
 
+	# Test ID: de8ep
 	def test_found(self) -> None:
 		self.assertEqual(shclw.FORMAT_MAJOR, 3)
 		self.assertEqual(shclw.shcl.FORMAT_MAJOR, 3)
@@ -95,6 +100,7 @@ class Api(unittest.TestCase):
 	def tearDown(self) -> None:
 		self.tmp.cleanup()
 
+	# Test ID: de8ej
 	def test_reads(self) -> None:
 		d = shclw.parse("a: 1\nb: x\nc: [1, 2]\nf: 1e400\n")
 		self.assertEqual(d.get_int("a").value, 1)
@@ -105,6 +111,7 @@ class Api(unittest.TestCase):
 		self.assertIs(d.get_float("f").status, shclw.Status.BadType)
 		self.assertEqual(d.float_or("f", 2.5), 2.5)
 
+	# Test ID: de8eh
 	def test_put_kinds(self) -> None:
 		d = shclw.new()
 		d.put("i", 3)
@@ -119,17 +126,20 @@ class Api(unittest.TestCase):
 				d.put("x", bad)
 			self.assertIs(e.exception.kind, shclw.ErrKind.BadValue)
 
+	# Test ID: de8ek
 	def test_strict(self) -> None:
 		with self.assertRaises(shclw.Error) as e:
 			shclw.parse_with("a: [1\n", shclw.Strictness.Strict)
 		self.assertIs(e.exception.kind, shclw.ErrKind.Strict)
 		self.assertTrue(e.exception.diags)
 
+	# Test ID: de8eg
 	def test_open_missing(self) -> None:
 		with self.assertRaises(shclw.Error) as e:
 			shclw.open(str(self.dir / "none.shcl"))
 		self.assertIs(e.exception.kind, shclw.ErrKind.NotFound)
 
+	# Test ID: de8em
 	def test_upgrade_on_write(self) -> None:
 		p = self.dir / "old.shcl"
 		p.write_bytes((HERE.parent.parent / "tests/cases/036-open-upgrade/doc.shcl").read_bytes())
@@ -143,6 +153,7 @@ class Api(unittest.TestCase):
 		self.assertEqual(shclw.format_of(p.read_bytes().decode("utf-8")), 3)
 		self.assertEqual(shclw.open(str(p)).upgraded_from(), 0)
 
+	# Test ID: de8ef
 	def test_layers(self) -> None:
 		(self.dir / "user.shcl").write_bytes(b"a: 2\n")
 		d = shclw.open_layers(
@@ -153,6 +164,7 @@ class Api(unittest.TestCase):
 		d.write(str(self.dir / "user.shcl"))
 		self.assertEqual((self.dir / "user.shcl").read_bytes(), b"a: 2\n\nb: 5\n")
 
+	# Test ID: de8ee
 	def test_format_float(self) -> None:
 		cases = [(0.0, "0.0"), (-0.0, "-0.0"), (1e17, "1e17"), (1e16, "10000000000000000.0"), (1e-5, "0.00001")]
 		cases += [(1e-6, "1e-6"), (123.456, "123.456"), (5e-324, "5e-324"), (0.1, "0.1"), (-2.5e20, "-2.5e20")]
@@ -196,8 +208,10 @@ class CreateRace(unittest.TestCase):
 				if os.name != "nt":
 					self.assertEqual(os.stat(path).st_mode & 0o777, 0o600)
 
+	# Test ID: de8hx
 	def test_link(self) -> None:
 		self.race(shclw.create_new)
 
+	# Test ID: de8hw
 	def test_in_place(self) -> None:
 		self.race(shclw._create_in_place)  # noqa: SLF001 - the no-hard-link path

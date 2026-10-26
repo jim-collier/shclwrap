@@ -1,3 +1,4 @@
+# Test ID: de030
 # A raw block that never closes would take the block in as its content.
 diags
 info	on

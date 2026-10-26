@@ -1,3 +1,4 @@
+# Test ID: de031
 # A lone stamp naming format 2. 3.0 refuses it until the file is upgraded.
 info	on
 text

@@ -69,12 +69,47 @@ func TestCases(t *testing.T) {
 	}
 }
 
+// BenchmarkCases runs every shared case through Run, for cicd's profile
+// step. A case that writes files writes into the same folder each round.
+func BenchmarkCases(b *testing.B) {
+	type prepared struct {
+		lib           shclw.Lib
+		doc, ops, dir string
+	}
+	dirs, err := os.ReadDir(casesDir)
+	if err != nil {
+		b.Fatal(err)
+	}
+	var all []prepared
+	for _, c := range dirs {
+		if !c.IsDir() {
+			continue
+		}
+		for _, v := range libs {
+			dir := b.TempDir()
+			if !materialize(b, filepath.Join(casesDir, c.Name()), dir, v.n) {
+				continue
+			}
+			all = append(all, prepared{v.lib, mustRead(b, filepath.Join(dir, "doc.shcl")), mustRead(b, filepath.Join(dir, "ops.txt")), dir})
+		}
+	}
+	if len(all) == 0 {
+		b.Fatal("no cases")
+	}
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		for _, p := range all {
+			shclw.Run(p.lib, p.doc, p.ops, shclw.RunOptions{Dir: p.dir})
+		}
+	}
+}
+
 var verFile = regexp.MustCompile(`^(.+)\.v(\d+)(\.[^.]+)$`)
 
 // materialize copies a case into dir as version n sees it. A file named
 // x.vK.ext stands in for x.ext from version K up, until a higher K takes
 // over.
-func materialize(t *testing.T, from, dir string, n int) bool {
+func materialize(t testing.TB, from, dir string, n int) bool {
 	t.Helper()
 	ents, err := os.ReadDir(from)
 	if err != nil {
@@ -112,7 +147,7 @@ func materialize(t *testing.T, from, dir string, n int) bool {
 	return ok
 }
 
-func mustRead(t *testing.T, path string) string {
+func mustRead(t testing.TB, path string) string {
 	t.Helper()
 	b, err := os.ReadFile(path)
 	if err != nil {

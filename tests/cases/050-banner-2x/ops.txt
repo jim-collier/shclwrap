@@ -1,3 +1,4 @@
+# Test ID: de5k2
 # A file with no Format line that has 2.x's info block is 2.x, even one that
 # loads clean on 3.0, so its `\\` reads as one backslash, as 2.x read it.
 format

@@ -1,3 +1,4 @@
+# Test ID: de02y
 # An old spelling above the first field, where shcl 3.0's own setter adds a
 # second block. Its Schema line stays.
 info	on

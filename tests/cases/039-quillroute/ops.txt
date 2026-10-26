@@ -1,3 +1,4 @@
+# Test ID: de5cr
 # An accounts file as Quillroute wrote it under shcl 2.x, kept in its tests.
 # It loads clean on 3.0, but its 2.x info block says it's 2.x, so Open
 # upgrades it and reads the bare \\ as one backslash, as 2.x did

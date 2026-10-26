@@ -16,6 +16,7 @@ import (
 	"github.com/jim-collier/shclwrap/source/go/shclw3"
 )
 
+// Test ID: ddzw6
 func TestVerifyPut(t *testing.T) {
 	for _, v := range libs {
 		d := v.lib.Parse("a: 1\n")
@@ -35,6 +36,7 @@ func TestVerifyPut(t *testing.T) {
 
 // A float32 has to go in as its own shortest digits. Widened to float64
 // first, 0.9 was written as 0.8999999761581421.
+// Test ID: ddzzn
 func TestPutFloat32(t *testing.T) {
 	texts := map[float32]string{0.9: "f: 0.9\n", 0.1: "f: 0.1\n", -2.5: "f: -2.5\n"}
 	for _, v := range libs {
@@ -74,6 +76,7 @@ func TestPutFloat32(t *testing.T) {
 	}
 }
 
+// Test ID: ddzw5
 func TestOpen(t *testing.T) {
 	dir := t.TempDir()
 	write := func(name, text string) string {
@@ -124,6 +127,7 @@ func TestOpen(t *testing.T) {
 
 // A 2.x file the old shcl reported errors on is refused, and UpgradeFile
 // leaves it as it was, with no backup. A clean one still goes.
+// Test ID: de003
 func TestUpgradeRefusesOldErrors(t *testing.T) {
 	for _, c := range []struct {
 		text string
@@ -159,6 +163,7 @@ func TestUpgradeRefusesOldErrors(t *testing.T) {
 
 // A new document has no lines of its own to keep, so it never rewrites. A
 // load at any strictness counts the same as Parse.
+// Test ID: de019
 func TestRewritesNew(t *testing.T) {
 	for _, v := range libs {
 		d := v.lib.New()
@@ -177,6 +182,7 @@ func TestRewritesNew(t *testing.T) {
 
 // First and Last pick by line, so the fallback reads and an edit take that
 // instance alone. An instance a put made has no line and sorts last.
+// Test ID: de01f
 func TestFirstLast(t *testing.T) {
 	for _, v := range libs {
 		d := v.lib.Parse("p: 1\ntv: a\n\tf: 1\ntv: b\n\tf: 2\ntv: a\n\tf: 3\np: 2\n")

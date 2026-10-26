@@ -6,10 +6,13 @@
 ##			format        gofmt -w and cargo fmt
 ##			format-check  the same, changing nothing
 ##			lint          go vet, staticcheck, clippy, ruff
-##			test          the Go, Rust and Python tests, and Python's shared cases
+##			test          the Go, Rust and Python tests, and Python's shared cases,
+##			              a test line per test function and shared case in each
 ##			drivers       the Go and Rust fuzz drivers, into WORK/bin
 ##			gofuzz SECS   Go's own fuzzer
 ##			fuzz ARGS...  fuzz.py, Rust and Python against Go, with no C
+##			profile SECS SVG  Go's Run over every shared case for SECS, as a
+##			              flamegraph, WORK/SVG
 ##		SHCLW_AREAS picks go, rust, python and cicd; empty is all of them.
 ##		SHCLW_CARGO_LOCKED=1 adds --locked, and SHCLW_PY=1 runs Python.
 ##	Copyright © 2026 Jim Collier [ID: 2უNაɘ«҂թȹɤξπ๙¿ձϖ]
@@ -84,11 +87,15 @@ case "${mode}" in
 		;;
 	test)
 		if fArea go; then
-			(cd "${root}/source/go" && TMPDIR="${work}" go test -p "${jobs}" ./...)
+			## go test hides a passing test's output, so the test lines come from its JSON.
+			(cd "${root}/source/go" && TMPDIR="${work}" go test -json -p "${jobs}" ./...) \
+				| PYTHONPYCACHEPREFIX="${work}/pycache" python3 "${here}/go_test_lines.py" --cases "${root}/tests/cases"
 			fEcho "OK: Go tests"
 		fi
 		if fArea rust; then
-			(cd "${root}/source/rust" && TMPDIR="${work}" cargo test --quiet "${cargoLocked[@]}" -j "${jobs}" --all-features)
+			## --tests leaves out the doc examples, which aren't tests. Pretty gives a line per test.
+			(cd "${root}/source/rust" && TMPDIR="${work}" cargo test --quiet "${cargoLocked[@]}" -j "${jobs}" --all-features --tests -- --format pretty) \
+				| PYTHONPYCACHEPREFIX="${work}/pycache" python3 "${here}/rust_test_lines.py"
 			fEcho "OK: Rust tests"
 		fi
 		if ! fArea python; then
@@ -97,7 +104,7 @@ case "${mode}" in
 			## A text read or write left to the locale's encoding fails here, not first on Windows.
 			fTest_Start decd4 "Python tests and shared cases, encoding warnings as errors"
 			export PYTHONWARNDEFAULTENCODING=1 PYTHONWARNINGS=error::EncodingWarning PYTHONPATH="${pyPath}" PYTHONPYCACHEPREFIX="${work}/pycache"
-			(cd "${root}/source/python" && TMPDIR="${work}" python3 -m unittest discover -q -s tests)
+			(cd "${root}/source/python" && TMPDIR="${work}" python3 "${here}/py_tests.py" tests)
 			python3 "${here}/c_cases.py" --lang Python --version 3 --cases "${root}/tests/cases" \
 				--drive python3 "${root}/source/python/shclw_drive.py"
 			unset PYTHONWARNDEFAULTENCODING PYTHONWARNINGS PYTHONPATH
@@ -113,12 +120,21 @@ case "${mode}" in
 		cp "${rustTarget}/release/shclw-drive" "${work}/bin/rust-drive"
 		;;
 	gofuzz)
+		fTest_Start ddzw3 "Go's fuzzer finds no panic in Run"
 		(cd "${root}/source/go" && TMPDIR="${work}" go test ./shclw/ -run '^$' -fuzz=FuzzRun -fuzztime="${1:?seconds}s" -p "${jobs}" -parallel "${jobs}")
+		fTest_Pass
 		;;
 	fuzz)
 		pyArgs=(); if [[ "${SHCLW_PY:-}" == 1 ]]; then pyArgs=(--python "${root}/source/python/shclw_drive.py" --python-path "${pyPath}"); fi
 		PYTHONPYCACHEPREFIX="${work}/pycache" python3 "${here}/fuzz.py" --go "${work}/bin/go-drive" --rust "${work}/bin/rust-drive" "${pyArgs[@]}" \
 			--cases "${root}/tests/cases" --work "${work}/fuzz" --out "${work}/fuzz-fail" "$@"
+		;;
+	profile)
+		## -o, since -cpuprofile keeps the test binary, and the tree is read-only here.
+		(cd "${root}/source/go" && TMPDIR="${work}" go test -run '^$' -bench '^BenchmarkCases$' -benchtime "${1:?seconds}s" -p "${jobs}" \
+			-cpuprofile "${work}/cpu.pprof" -o "${work}/shclw.test" ./shclw/ >/dev/null)
+		PYTHONPYCACHEPREFIX="${work}/pycache" python3 "${here}/utility/pprof2flame.py" --prof "${work}/cpu.pprof" \
+			--title "shclwrap: Go's Run over the shared cases" --out "${work}/${2:?svg name}"
 		;;
 	*) echo "lang-in-container.bash: unknown mode ${mode}" >&2; exit 2 ;;
 esac
@@ -126,3 +142,6 @@ esac
 
 ##	History:
 ##		- 2026-10-25 JC: Created, from cicd.bash's Go, Rust and Python commands.
+##		- 2026-10-25 JC: A test line per shared case in Go, and one for Go's fuzzer.
+##		- 2026-10-25 JC: A test line per Go, Rust and Python test function.
+##		- 2026-10-25 JC: profile, for cicd's profile step.

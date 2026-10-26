@@ -31,6 +31,7 @@ Status: draft, 2026-10-15. Go, Rust, C, and Python are built over shcl 3.0, with
 - [Ops scripts](#ops-scripts)
 - [Testing](#testing)
 	- [Shared cases](#shared-cases)
+	- [Each language's own tests](#each-languages-own-tests)
 	- [Fuzzing](#fuzzing)
 - [Sharing the code](#sharing-the-code)
 - [Decisions](#decisions)
@@ -447,6 +448,18 @@ An ops script is one op per line, with fields split by tabs. `\t`, `\n`, `\r`, a
 
 - C runs the same cases through its driver with `cicd/c_cases.py`, op by op against the same want files. Python runs them the same way, with `--lang Python` and its driver, `source/python/shclw_drive.py`.
 
+- Each case's test ID is the first line of its `ops.txt`, as `# Test ID: <id>`, given once from the case's first commit. Each language prints one line per case, such as `PASS ddzvq Go case 001-reads`, with `Rust`, `C` or `Python` in place of `Go`. A case with no ID fails. Go's lines come from `go test -json` through `cicd/go_test_lines.py`, since `go test` hides a passing test's output, and Rust's case runner is its own harness for the same reason.
+
+### Each language's own tests
+
+- Each Go, Rust and Python test function has its test ID on a `Test ID: <id>` comment just above it, given once from the commit that added it. C's sit in the table in `api_test.c`'s `main`.
+
+- Each test prints one line, such as `PASS ddzw5 Go TestOpen`, `PASS ddzw7 Rust open`, `PASS de8ej Python Api.test_reads` or `PASS de04q C test_reads`. The C++ build of the C tests says `C++`. The Makefile's check that no shcl 2.0 name gets past `shclw3_v2_names.h` is `de07q`, on a line of its own. A skipped test says `SKIP` and why. A test with no ID fails the run.
+
+- Go's lines come from `go test -json` through `cicd/go_test_lines.py`, Rust's from libtest's own per-test lines through `cicd/rust_test_lines.py`, and Python's from `cicd/py_tests.py`, which runs the tests as `unittest discover` does. A Go subtest is part of its function's line. Go's `TestCases` has no ID, since each case has its own.
+
+- A Rust test can't mark itself skipped once it runs, so one that returns early, such as on a folder the user can still write to, says `PASS`.
+
 ### Fuzzing
 
 - `cicd/fuzz.py` makes a document and an ops script from each seed, with a generator that knows each format's syntax. Half of the generated documents are in the 1.2 and 2.0 syntax, as old programs wrote them, so the upgrade sees them. A quarter of the documents are mutated copies of the case documents instead.
@@ -460,16 +473,24 @@ An ops script is one op per line, with fields split by tabs. `\t`, `\n`, `\r`, a
 
 - Go's own fuzzer runs `Run` on random documents and scripts against every version, looking for panics.
 
-- `cicd/cicd.bash` runs format, lint, tests, the C leak checks, and both fuzzers. `--quick` leaves out the C sanitizers, analyzers, and leak checks, and anything that needs the network, and fuzzes for 10s. `--leakcheck` adds the leak checks to it, and `--no-leakcheck` drops them from any run. `--dry-run` or `--list` shows the stages a mix of flags picks.
+- A fuzz run ends with one line per test: `ddzw1` for Go's crashes, the checks on its output and the generator, then `ddzw2`, `de57g` and `de8ed` for Rust, C and Python matching Go. A driver that isn't in the run gets a `SKIP` line. Go's own fuzzer is `ddzw3`. With the fuzz turned off, all 5 say `SKIP` with the flag.
+
+- `cicd/cicd.bash` runs format, lint, tests, the C leak checks, and both fuzzers. `--quick` leaves out the C sanitizers, analyzers, and leak checks, and anything that needs the network, and fuzzes for 10s. `--leakcheck` adds the leak checks to it, and `--no-leakcheck` drops them from any run. `--dry-run` shows the stages a mix of flags picks, and `--list` adds the test IDs each stage would run, one line per ID. A case shared by several languages is one line, with the languages it runs in.
 	- 3 runs never sync, rewrite a tracked file, or prompt. Format only checks, and cargo runs `--locked`. `--merge-gate` and `--backlog-run-full` run every check of the default run. `--backlog-run-quick` runs the format check, lint, and the fast tests, and can be held to some of go, rust, python, c and cicd. `--ci` and `--gate` are other names for `--merge-gate` and `--backlog-run-quick`.
 	- `--no-format`, `--no-lint`, `--no-tests`, `--no-fuzz` and `--no-sync` turn one step off. `--no-container` runs C, Go, Rust and Python on the host, and turns the leak checks off. Each also runs on the host when docker is missing or its image won't build, and says so in one line. On the host a tool off its pin is a warning, and a check whose tool is missing, such as clang-22 for the analyzers, is a `SKIP` line. `--keep-temp` keeps the run's scratch folder, and its containers, stopped.
+	- The last step profiles Go's `Run` over every shared case for 5 seconds, `SHCLW_PROFILE_SECONDS`, through `BenchmarkCases`. `cicd/utility/pprof2flame.py` turns the profile into a flamegraph in `cicd/artifacts/profiling/`, rotated like the run logs, and `cicd/utility/flame-report.py` prints its hot spots into the log. Only a failed benchmark fails the step. `--quick` and `--backlog-run-quick` leave it out, and so does `--no-profile`. `flame-report.py --check` prints the newest flamegraph only once, by a `.flame-seen` marker that cicd never touches.
 	- The pre-push hook runs `--merge-gate` only on a push to main. A push to main that changes only `*.md` files and `project/` skips it, and so does a push to any other branch or a branch delete.
+	- `.github/workflows/ci.yml` runs on a push or pull request to main, and by hand. It's the only Apple Silicon run, and the only one off this box. Its Linux job runs `--merge-gate` in the images. Its job on GitHub's arm64 Mac runs the tests and fuzz on the host, then the shared cases through each language's driver as built (`cicd/utility/driver-smoke.bash`). Both leave format and the leak checks to the local gate. The Mac runner is free only while the repo is public.
+	- A host whose gcc-15 can't build or run the sanitizers, such as a Mac, which has no LeakSanitizer, builds the C tests and fuzz driver plain and says so in one line.
 	- Each C container is named `shclwrap-<run folder>-<mode>`, and each Go, Rust and Python one `shclwrap-<run folder>-lang-<mode>`, with labels `dev.project=shclwrap` and `dev.run=<run folder>`. Both images carry the same labels. The runs use bind mounts, not docker volumes.
 	- Go, Rust and Python format, lint, test, build the fuzz drivers and run Go's fuzzer in their own image, from `cicd/Lang.Dockerfile` on the C image's base, with the versions in `cicd/tool-pins.env` and `source/rust/rust-toolchain.toml`. The tree is mounted read-only, except for the format step that rewrites it and Go's fuzzer, which saves failing inputs there. shellcheck and cicd's own tests stay on the host.
 
 - One run goes at a time in a tree, since runs share `cicd/artifacts/`, `cicd/cache/`, and the checkout. A second run, such as the push hook, waits for the first and says which run it waits on. `c-checks.bash` run alone takes the same lock. Runs in separate worktrees don't wait on each other. Each run still gets its own log in `cicd/artifacts/lint/`, named for the second it started, so a run started in the same second as another waits for the next second to name its log.
 
 - The checks cover shcl's own code too, since every program built on the wrapper runs it. The sanitized builds and the fuzz drivers build it instrumented, and the analyzers and CodeQL read it. Its findings are reported but not fatal yet. Style lints, such as clang-tidy, stay on our code. Test-only and cicd-only code from elsewhere is left out, since no user runs it.
+
+- Each run works in its own folder, `${HOST_TEMP}/shclwrap/<YYYYmmDD-HHMMSS>_<NNN>/`, with `TMPDIR`, `TEMP` and `TMP` pointing there, in the containers too. `HOST_TEMP` falls back to `TMPDIR`, then `/tmp`, with any link in it resolved, since macOS's temp folder sits behind `/var`. The folder holds a `run.pid`, and a run also removes the project's run folders older than 2 days whose `run.pid` names no live process. A folder with no `run.pid`, such as one made by hand, is left alone.
+	- Every recursive removal in cicd, and `make clean`, goes through `cicd/utility/include/safe-rm.bash`. It takes a path under a folder named `tmp` or under `${HOST_TEMP}/shclwrap/`, or inside the one folder its caller names, such as `cicd/artifacts/fuzz/`. It refuses a link, a path through one, `..` and `//`, and stays on one filesystem.
 
 - A run removes its own scratch folder. It keeps what the next run reuses: the C container's home with CodeQL's compiled queries, the pinned headers, the C image, the Go, Rust and Python image, and that image's module, crate and build caches in `cicd/cache/lang-home/`. It drops a cached header no pin names and leak reports from before the latest leak run. The newest 10 sets of fuzz failures are kept.
 	- At the end of a run, failed or stopped by Ctrl+C too, its containers are stopped and removed by `dev.run`, and the project's dangling images by `dev.project`. After a run that passed, older tags of each image go, keeping the current one and the one before it. After a real rebuild, `docker builder prune -f --filter until=168h` keeps a week of build cache for every project. Nothing without shclwrap's label or image name is touched.

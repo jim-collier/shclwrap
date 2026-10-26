@@ -1,3 +1,4 @@
+# Test ID: de00q
 remove	a
 write	out.shcl
 errors

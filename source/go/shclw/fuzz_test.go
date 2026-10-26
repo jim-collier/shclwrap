@@ -13,6 +13,7 @@ import (
 
 // FuzzRun feeds any document and any script to every version. Nothing may
 // panic. File ops are off, since RunOptions.Dir is empty.
+// Test ID: ddzw4
 func FuzzRun(f *testing.F) {
 	docs, _ := filepath.Glob(filepath.Join(casesDir, "*", "doc*.shcl"))
 	for _, p := range docs {

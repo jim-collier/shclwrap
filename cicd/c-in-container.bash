@@ -65,6 +65,23 @@ fNeed(){
 	if ((! host)); then echo "the C image has no ${missing[*]}" >&2; exit 1; fi
 	echo "WARNING: no ${missing[*]} on the host; skipping ${what}"; return 1
 }
+## fSanitizers: true when gcc-15 here builds and runs the sanitized C. macOS has no
+## LeakSanitizer, so a Mac host builds the C plain, and says so. The image always can.
+sanChecked=""
+fSanitizers(){
+	((host)) || return 0
+	if [[ -z "${sanChecked}" ]]; then
+		local d="${work}/san-probe"
+		sanChecked=0
+		mkdir -p "${d}"
+		printf 'int main(void) { return 0; }\n' > "${d}/probe.c"
+		if "${cc15}" -fsanitize=address,leak,undefined "${d}/probe.c" -o "${d}/probe" >/dev/null 2>&1 \
+			&& ASAN_OPTIONS=detect_leaks=1 "${d}/probe" >/dev/null 2>&1; then sanChecked=1
+		else echo "WARNING: ${cc15} here can't build or run the sanitized C, so C builds plain"
+		fi
+	fi
+	((sanChecked))
+}
 
 shcl2Dir="${root}/cicd/cache/shcl-c/${SHCL2_REV}"
 shcl3Dir="${root}/cicd/cache/shcl-c/${SHCL3_REV}"
@@ -81,6 +98,8 @@ jobs="${SHCLW_JOBS:-}"
 fMingw(){
 	if fNeed "the Windows build" mingwCc; then fCTest_Start decbj; make_c "$@" mingw; fTest_Pass; else fCTest_Skip "no mingw-w64 gcc on the host" decbj; fi
 }
+## fNames [MAKE ARGS]: the Makefile's names check, on its own line (de07q).
+fNames(){ fCTest_Start de07q; make_c "$@" names; fTest_Pass; }
 fLeakTools(){ fNeed "the C leak checks" cc15 cxx clang extdef heaptrack || { fCTest_Skip "no C leak tools on the host" "${cTestsLeak[@]}"; exit 0; }; }
 
 make_c(){
@@ -148,17 +167,28 @@ EOF
 		fMingw
 		;;
 	test)
-		fNeed "the C tests" cc15 cxx || exit 0
-		make_c -j "${jobs}" test drive
-		LSAN_OPTIONS="suppressions=${root}/source/c/lsan.supp:print_suppressions=1" \
-		ASAN_OPTIONS="detect_leaks=1:halt_on_error=1" \
-		python3 "${here}/c_cases.py" --drive "${work}/c${version}/shclw-drive" \
-			--version "${version}" --cases "${root}/tests/cases"
+		fNeed "the C tests" cc15 cxx || { fCTest_Skip "no gcc-15 on the host" "${cTestsBuild[@]}"; exit 0; }
+		fNames -j "${jobs}"
+		if fSanitizers; then
+			make_c -j "${jobs}" test drive
+			LSAN_OPTIONS="suppressions=${root}/source/c/lsan.supp:print_suppressions=1" \
+			ASAN_OPTIONS="detect_leaks=1:halt_on_error=1" \
+			python3 "${here}/c_cases.py" --drive "${work}/c${version}/shclw-drive" \
+				--version "${version}" --cases "${root}/tests/cases"
+		else
+			## make test less its ASan build.
+			make_c -j "${jobs}" "${work}/c${version}/api-test-plain" "${work}/c${version}/api-test-cxx" drive-plain
+			"${work}/c${version}/api-test-plain"
+			"${work}/c${version}/api-test-cxx"
+			python3 "${here}/c_cases.py" --drive "${work}/c${version}/shclw-drive-plain" \
+				--version "${version}" --cases "${root}/tests/cases"
+		fi
 		;;
 	quick)
 		## No sanitizers and no analyzers, which are most of the time.
-		fNeed "the C quick tests" cc15 || exit 0
+		fNeed "the C quick tests" cc15 || { fCTest_Skip "no gcc-15 on the host" "${cTestsBuild[@]}"; exit 0; }
 		fMingw -j "${jobs}"
+		fNames -j "${jobs}"
 		make_c -j "${jobs}" strict drive-plain "${work}/c${version}/api-test-plain"
 		"${work}/c${version}/api-test-plain"
 		python3 "${here}/c_cases.py" --drive "${work}/c${version}/shclw-drive-plain" \
@@ -169,7 +199,10 @@ EOF
 		drive="$1"; shift
 		## A host with no gcc-15 still fuzzes the rest against Go.
 		cArgs=()
-		if fNeed "C in the fuzz" cc15; then make_c -j "${jobs}" "${work}/c${version}/${drive}"; cArgs=(--c "${work}/c{v}/${drive}"); fi
+		if fNeed "C in the fuzz" cc15; then
+			if [[ "${drive}" == shclw-drive ]] && ! fSanitizers; then drive=shclw-drive-plain; fi
+			make_c -j "${jobs}" "${work}/c${version}/${drive}"; cArgs=(--c "${work}/c{v}/${drive}")
+		fi
 		## Python too, when cicd.bash had its pinned shcl.py.
 		pyDir="${root}/cicd/cache/shcl-py/${SHCL3_PY_REV}"
 		pyArgs=()
@@ -223,7 +256,7 @@ case "\${1:-capture}" in
 		make -s -C ${root}/source/c SHCL_DIR=${shcl3Dir} SHCL2_DIR=${shcl2Dir} OUT="${work}/codeql-build-v3" CC="${cc15}" CXX="${cxx}" CC15="${cc15}" CLANG="${clang}" CLANG_TIDY="${clangTidy}" drive-plain
 		;;
 	capture)
-		make -s -C ${root}/source/c OUT="${work}/codeql-build-v3" clean
+		make -s -C ${root}/source/c OUT="${work}/codeql-build-v3" CLEAN_UNDER="${work}" clean
 		make -s -C ${root}/source/c SHCL_DIR=${shcl3Dir} SHCL2_DIR=${shcl2Dir} OUT="${work}/codeql-build-v3" CC="${cc15}" CXX="${cxx}" CC15="${cc15}" CLANG="${clang}" CLANG_TIDY="${clangTidy}" drive-plain
 		;;
 	*) echo "unknown CodeQL build mode: \${1}" >&2; exit 2 ;;
@@ -309,6 +342,7 @@ EOF
 			|| { echo "CTU findings; see ${artifact_dir}/ctu-v3-*.log" >&2; exit 1; }
 		probe_dir="${work}/c-leak-probes"
 		mkdir -p "${probe_dir}"
+		fCTest_Start de2xw
 		cat > "${probe_dir}/leak.c" <<'EOF'
 #include <stdlib.h>
 int main(void) { return malloc(64) == NULL; }
@@ -316,11 +350,15 @@ EOF
 		"${cc15}" -fsanitize=address,leak -g "${probe_dir}/leak.c" -o "${probe_dir}/leak"
 		if "${probe_dir}/leak" >"${probe_dir}/leak.out" 2>&1; then echo "leak probe unexpectedly passed" >&2; exit 1; fi
 		grep -q 'LeakSanitizer: detected memory leaks' "${probe_dir}/leak.out" || { cat "${probe_dir}/leak.out" >&2; exit 1; }
+		fTest_Pass
+		fCTest_Start de2xx
 		cat > "${probe_dir}/null.c" <<'EOF'
 int main(void) { volatile int *p = 0; return *p; }
 EOF
 		if "${cc15}" -std=c17 -O1 -Wall -Wextra -Werror -fanalyzer -c -o /dev/null "${probe_dir}/null.c" >"${probe_dir}/null.out" 2>&1; then echo "null probe unexpectedly passed" >&2; exit 1; fi
 		grep -q 'analyzer-null-dereference' "${probe_dir}/null.out" || { cat "${probe_dir}/null.out" >&2; exit 1; }
+		fTest_Pass
+		fCTest_Start de2xy
 		cat > "${probe_dir}/growth.c" <<'EOF'
 #include <stdlib.h>
 void **volatile allocation_root;
@@ -343,6 +381,8 @@ def leaked(path):
 if leaked(sys.argv[2]) <= leaked(sys.argv[1]) + 65536:
     raise SystemExit("heap growth probe did not exceed the 64 KiB margin")
 PY
+		fTest_Pass
+		fCTest_Start de2xz
 		make -s -C "${root}/source/c" SHCL_DIR="${shcl3Dir}" SHCL2_DIR="${shcl2Dir}" \
 			OUT="${work}/c3" CC="${cc15}" CXX="${cxx}" CC15="${cc15}" CLANG="${clang}" \
 			CLANG_TIDY="${clangTidy}" drive-plain
@@ -365,6 +405,7 @@ def leaked(path):
 if leaked(sys.argv[2]) > leaked(sys.argv[1]) + 65536:
     raise SystemExit("heap grew by more than 64 KiB from N to 2N")
 PY
+		fTest_Pass
 fi
 
 if [[ "${mode}" != lint && "${mode}" != test && "${mode}" != quick && "${mode}" != fuzz && "${mode}" != leakcheck && "${mode}" != leakcheck-resume ]]; then

@@ -1,3 +1,4 @@
+# Test ID: ddzzm
 syntax	a	a # b
 get	str	a
 syntax	b	x#y
