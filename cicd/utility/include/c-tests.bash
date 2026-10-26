@@ -19,11 +19,15 @@ declare -A cTestName=(
 	[decas]="a clang analyzer finding alone fails make analyze"
 	[decbj]="C builds for Windows at the same warnings"
 	[deb9f]="CTU follows a call into shcl.h, held to the known list"
+	[de2xw]="LeakSanitizer sees a planted leak"
+	[de2xx]="gcc's analyzer sees a planted null dereference"
+	[de2xy]="heaptrack sees planted heap growth from N to 2N"
+	[de2xz]="the C driver's heap holds steady from 128 to 256 soak rounds"
 )
 ## The analyzer probes run in lint mode only. The Windows build runs under --quick too.
 cTestsAnalyze=(de7zp deb8c deba8 decas)
 cTestsLint=("${cTestsAnalyze[@]}" decbj)
-cTestsLeak=(deb9f)
+cTestsLeak=(deb9f de2xw de2xx de2xy de2xz)
 
 fCTest_Start(){ fTest_Start "$1" "${cTestName[$1]:?no C test $1}"; }
 fCTest_Skip(){

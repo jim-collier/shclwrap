@@ -309,6 +309,7 @@ EOF
 			|| { echo "CTU findings; see ${artifact_dir}/ctu-v3-*.log" >&2; exit 1; }
 		probe_dir="${work}/c-leak-probes"
 		mkdir -p "${probe_dir}"
+		fCTest_Start de2xw
 		cat > "${probe_dir}/leak.c" <<'EOF'
 #include <stdlib.h>
 int main(void) { return malloc(64) == NULL; }
@@ -316,11 +317,15 @@ EOF
 		"${cc15}" -fsanitize=address,leak -g "${probe_dir}/leak.c" -o "${probe_dir}/leak"
 		if "${probe_dir}/leak" >"${probe_dir}/leak.out" 2>&1; then echo "leak probe unexpectedly passed" >&2; exit 1; fi
 		grep -q 'LeakSanitizer: detected memory leaks' "${probe_dir}/leak.out" || { cat "${probe_dir}/leak.out" >&2; exit 1; }
+		fTest_Pass
+		fCTest_Start de2xx
 		cat > "${probe_dir}/null.c" <<'EOF'
 int main(void) { volatile int *p = 0; return *p; }
 EOF
 		if "${cc15}" -std=c17 -O1 -Wall -Wextra -Werror -fanalyzer -c -o /dev/null "${probe_dir}/null.c" >"${probe_dir}/null.out" 2>&1; then echo "null probe unexpectedly passed" >&2; exit 1; fi
 		grep -q 'analyzer-null-dereference' "${probe_dir}/null.out" || { cat "${probe_dir}/null.out" >&2; exit 1; }
+		fTest_Pass
+		fCTest_Start de2xy
 		cat > "${probe_dir}/growth.c" <<'EOF'
 #include <stdlib.h>
 void **volatile allocation_root;
@@ -343,6 +348,8 @@ def leaked(path):
 if leaked(sys.argv[2]) <= leaked(sys.argv[1]) + 65536:
     raise SystemExit("heap growth probe did not exceed the 64 KiB margin")
 PY
+		fTest_Pass
+		fCTest_Start de2xz
 		make -s -C "${root}/source/c" SHCL_DIR="${shcl3Dir}" SHCL2_DIR="${shcl2Dir}" \
 			OUT="${work}/c3" CC="${cc15}" CXX="${cxx}" CC15="${cc15}" CLANG="${clang}" \
 			CLANG_TIDY="${clangTidy}" drive-plain
@@ -365,6 +372,7 @@ def leaked(path):
 if leaked(sys.argv[2]) > leaked(sys.argv[1]) + 65536:
     raise SystemExit("heap grew by more than 64 KiB from N to 2N")
 PY
+		fTest_Pass
 fi
 
 if [[ "${mode}" != lint && "${mode}" != test && "${mode}" != quick && "${mode}" != fuzz && "${mode}" != leakcheck && "${mode}" != leakcheck-resume ]]; then
