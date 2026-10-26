@@ -2,7 +2,8 @@
 ## Purpose: Fuzzes the wrappers against each other. Each case is a document
 ##	plus an ops script, made from one seed, run through the Go, Rust, C,
 ##	and Python drivers with the same shcl version. The outputs must match Go's byte
-##	for byte, and a value that was put must read back the same.
+##	for byte, and a value that was put must read back the same. Ends with a
+##	PASS, FAIL or SKIP line per test below (2026102507142907).
 ## Copyright © 2026 Jim Collier [ID: 2უNაɘ«҂թȹɤξπ๙¿ձϖ]
 ## SPDX-License-Identifier: MIT
 
@@ -36,6 +37,14 @@ TITLE = "This config file format is SHCL."
 # A case makes about 5.6 reads and 1.2 values, and 30 in a row made at least
 # 122 reads and 14% values, over 600 seeds.
 JUDGE_CASES = 30
+# One test line each. Go's line covers what isn't another driver's fault: a
+# Go crash, the checks on Go's output, and the generator judge.
+TESTS = {
+	"go": ("ddzw1", "generated fuzz cases hold their checks in Go"),
+	"rust": ("ddzw2", "Rust matches Go on generated fuzz cases"),
+	"c": ("de57g", "C matches Go on generated fuzz cases"),
+	"python": ("de8ed", "Python matches Go on generated fuzz cases"),
+}
 # The info block's spellings over time, 2.x's first. {n} is a format.
 INFO_BLOCKS = (
 	("#", "", "jim-collier", "main", ""),
@@ -467,20 +476,35 @@ def load_corpus(cases_dir: Path) -> list[str]:
 	return [p.read_bytes().decode("utf-8") for p in sorted(cases_dir.glob("*/doc*.shcl"))]
 
 
+def test_lines(fails: dict[str, int], drivers: dict[str, list[str]], skip_why: str = "") -> None:
+	for name, (tid, title) in TESTS.items():
+		if skip_why or name not in drivers:
+			print(f"SKIP {tid} {title}, {skip_why or 'no ' + ('C' if name == 'c' else name.title()) + ' driver'}")
+		else:
+			print(f"{'FAIL' if fails.get(name) else 'PASS'} {tid} {title}")
+
+
 def main() -> int:
 	ap = argparse.ArgumentParser(description=__doc__)
-	ap.add_argument("--go", required=True, help="Go driver binary")
-	ap.add_argument("--rust", required=True, help="Rust driver binary")
+	ap.add_argument("--skip", metavar="WHY", help="print a SKIP line per test, saying why, and run nothing")
+	ap.add_argument("--go", help="Go driver binary")
+	ap.add_argument("--rust", help="Rust driver binary")
 	ap.add_argument("--c", default=None, help="C driver binary, with {v} where its shcl version goes")
 	ap.add_argument("--python", default=None, help="Python driver script, run with this python3")
 	ap.add_argument("--python-path", default=None, help="the folder with shcl 3.0's shcl.py, for the Python driver")
 	ap.add_argument("--seconds", type=float, default=30.0, help="wall-clock budget")
 	ap.add_argument("--seed", type=int, default=None, help="first seed; default is from the clock")
 	ap.add_argument("--count", type=int, default=0, help="stop after this many cases; 0 is no limit")
-	ap.add_argument("--cases", type=Path, required=True, help="the shared tests/cases dir, used as a mutation corpus")
-	ap.add_argument("--work", type=Path, required=True, help="scratch dir this run owns")
-	ap.add_argument("--out", type=Path, required=True, help="where failing cases go")
+	ap.add_argument("--cases", type=Path, help="the shared tests/cases dir, used as a mutation corpus")
+	ap.add_argument("--work", type=Path, help="scratch dir this run owns")
+	ap.add_argument("--out", type=Path, help="where failing cases go")
 	args = ap.parse_args()
+	if args.skip is not None:
+		test_lines({}, {}, args.skip or "skipped")
+		return 0
+	missing = [f"--{a}" for a in ("go", "rust", "cases", "work", "out") if getattr(args, a) is None]
+	if missing:
+		ap.error(f"needs {', '.join(missing)}")
 	# C is built once per version, so its path has the version in it.
 	drivers = {"go": [args.go], "rust": [args.rust]}
 	if args.c:
@@ -494,6 +518,7 @@ def main() -> int:
 	corpus = load_corpus(args.cases)
 	deadline = time.monotonic() + args.seconds
 	ran = gets = good_gets = failures = 0
+	fails: dict[str, int] = {}
 	seed = first
 	doc_path = args.work / "doc.shcl"
 	made_work = not args.work.exists()
@@ -514,19 +539,27 @@ def main() -> int:
 			}
 			go = runs["go"]
 			problems = []
+			blamed = set()
 			for name, run in runs.items():
+				said = len(problems)
 				if run[0] not in (0, 2):
 					problems.append(f"{name} crashed with exit {run[0]}")
 				if name != "go" and run[0] != go[0]:
 					problems.append(f"exit codes differ: go {go[0]}, {name} {run[0]}")
 				if name != "go" and unstamped(run[1]) != unstamped(go[1]):
 					problems.append(f"{name} output differs from go")
+				if len(problems) > said:
+					blamed.add(name)
 			if not problems and go[0] == 0:
 				problems += check_roundtrips(case, go[1])
 				problems += check_edits(case, go[1])
 				problems += check_finite(go[1])
 				problems += check_picks(go[1])
 				problems += check_info(case, go[1])
+				if problems:
+					blamed.add("go")
+			for name in blamed:
+				fails[name] = fails.get(name, 0) + 1
 			for line in go[1].split("\n"):
 				if line.startswith(("Good\t", "Empty\t", "NotFound\t", "BadType\t", "Multiple\t", "BadPath\t")):
 					gets += 1
@@ -534,7 +567,7 @@ def main() -> int:
 			if problems:
 				failures += 1
 				save_failure(args.out, case, "\n".join(problems), runs)
-				print(f"FAIL seed {seed} (shcl v{case.version}): {problems[0]}", file=sys.stderr)
+				print(f"fuzz: seed {seed} failed (shcl v{case.version}): {problems[0]}", file=sys.stderr)
 			ran += 1
 			seed += 1
 	finally:
@@ -552,13 +585,15 @@ def main() -> int:
 	)
 	if ran == 0:
 		print("fuzz: no cases ran", file=sys.stderr)
-		return 1
-	if ran < JUDGE_CASES:
+		fails["go"] = fails.get("go", 0) + 1
+	elif ran < JUDGE_CASES:
 		print(f"fuzz: {ran} cases are too few to judge the generator, which needs {JUDGE_CASES}")
 	elif gets < 2 * ran or good_gets * 10 < gets:
 		print("fuzz: too few reads found a value; the generator has drifted", file=sys.stderr)
-		return 1
-	return 1 if failures else 0
+		fails["go"] = fails.get("go", 0) + 1
+	sys.stdout.flush()
+	test_lines(fails, drivers)
+	return 1 if failures or fails else 0
 
 
 if __name__ == "__main__":

@@ -1,3 +1,4 @@
+# Test ID: de8h0
 # A file in a newer format opens, read as shcl 3.0 reads it, and is
 # read-only.
 open	newer.shcl

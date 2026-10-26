@@ -1,3 +1,4 @@
+# Test ID: de02z
 # The 2.x block comes off. The block's text in a raw body is the body's,
 # and so is its Format line.
 get	raw	tmpl

@@ -1,3 +1,4 @@
+# Test ID: de5cq
 # Tallowbase's sample schema, as written for shcl 1.2. With no Format line,
 # some of its 1.2 lines read two ways, so Open refuses it. The program knows
 # its files are older and converts them with `from` 2.

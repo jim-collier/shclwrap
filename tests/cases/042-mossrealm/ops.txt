@@ -1,3 +1,4 @@
+# Test ID: de5cv
 # A world save Mossrealm wrote under shcl 1.2, as its tests keep it.
 open	doc.shcl
 upgraded

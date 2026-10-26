@@ -1,3 +1,4 @@
+# Test ID: de06n
 # A file with no Format line that loads clean is taken as current, unless
 # the program says it's from 2.
 format

@@ -1,3 +1,4 @@
+# Test ID: ddzw0
 put	int	n	5
 get	int	n
 put	int	a	42

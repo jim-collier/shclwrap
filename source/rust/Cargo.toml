@@ -23,6 +23,8 @@ required-features = ["shcl3"]
 [[test]]
 name = "cases"
 required-features = ["shcl3"]
+# Its own main, so each shared case prints its own test line.
+harness = false
 
 [[test]]
 name = "api"

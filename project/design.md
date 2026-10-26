@@ -447,6 +447,8 @@ An ops script is one op per line, with fields split by tabs. `\t`, `\n`, `\r`, a
 
 - C runs the same cases through its driver with `cicd/c_cases.py`, op by op against the same want files. Python runs them the same way, with `--lang Python` and its driver, `source/python/shclw_drive.py`.
 
+- Each case's test ID is the first line of its `ops.txt`, as `# Test ID: <id>`, given once from the case's first commit. Each language prints one line per case, such as `PASS ddzvq Go case 001-reads`, with `Rust`, `C` or `Python` in place of `Go`. A case with no ID fails. Go's lines come from `go test -json` through `cicd/go_test_lines.py`, since `go test` hides a passing test's output, and Rust's case runner is its own harness for the same reason.
+
 ### Fuzzing
 
 - `cicd/fuzz.py` makes a document and an ops script from each seed, with a generator that knows each format's syntax. Half of the generated documents are in the 1.2 and 2.0 syntax, as old programs wrote them, so the upgrade sees them. A quarter of the documents are mutated copies of the case documents instead.
@@ -459,6 +461,8 @@ An ops script is one op per line, with fields split by tabs. `\t`, `\n`, `\r`, a
 - C's driver is the sanitized build, so a leak or a bad read fails the case. The fuzz runs where the C drivers are built, in the C container or on the host. Without the pinned C headers it fuzzes Go against Rust alone.
 
 - Go's own fuzzer runs `Run` on random documents and scripts against every version, looking for panics.
+
+- A fuzz run ends with one line per test: `ddzw1` for Go's crashes, the checks on its output and the generator, then `ddzw2`, `de57g` and `de8ed` for Rust, C and Python matching Go. A driver that isn't in the run gets a `SKIP` line. Go's own fuzzer is `ddzw3`. With the fuzz turned off, all 5 say `SKIP` with the flag.
 
 - `cicd/cicd.bash` runs format, lint, tests, the C leak checks, and both fuzzers. `--quick` leaves out the C sanitizers, analyzers, and leak checks, and anything that needs the network, and fuzzes for 10s. `--leakcheck` adds the leak checks to it, and `--no-leakcheck` drops them from any run. `--dry-run` or `--list` shows the stages a mix of flags picks.
 	- 3 runs never sync, rewrite a tracked file, or prompt. Format only checks, and cargo runs `--locked`. `--merge-gate` and `--backlog-run-full` run every check of the default run. `--backlog-run-quick` runs the format check, lint, and the fast tests, and can be held to some of go, rust, python, c and cicd. `--ci` and `--gate` are other names for `--merge-gate` and `--backlog-run-quick`.

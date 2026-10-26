@@ -1,3 +1,4 @@
+# Test ID: de5cs
 # Radixmill's first-run file, the shipped default plus 3.0's info block. It
 # names format 3, so Open leaves it as it is.
 open	doc.shcl

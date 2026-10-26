@@ -1,3 +1,4 @@
+# Test ID: de5b9
 # What the wrapper's 1.2 adapter wrote, with the info block naming format 1.
 # 3.0 upgrades it by its Format line.
 format

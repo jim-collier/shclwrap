@@ -246,6 +246,9 @@ fFuzzFail_Prune(){
 	return 0
 }
 
+## fuzz.py's SKIP lines, so its test names stay in one place.
+fFuzzSkip(){ PYTHONPYCACHEPREFIX="${work}/pycache" python3 "${here}/fuzz.py" "--skip=$1"; }
+
 ## The first section. --quiet keeps only the step list, except under --dry-run.
 fPreflight(){
 	local mode ni
@@ -445,6 +448,7 @@ if fStep_On "Tests"; then
 		fTest -q de7yv "cicd flag mixes" bash "${here}/flags-test.bash"
 		fTest dece1 "fuzz corpus keeps its bytes" env PYTHONPYCACHEPREFIX="${work}/pycache" PYTHONWARNDEFAULTENCODING=1 PYTHONWARNINGS=error::EncodingWarning python3 "${here}/fuzz_test.py" -q LoadCorpus
 		fTest dedph "fuzz judges the generator only from enough cases" env TMPDIR="${work}" PYTHONPYCACHEPREFIX="${work}/pycache" PYTHONWARNDEFAULTENCODING=1 PYTHONWARNINGS=error::EncodingWarning python3 "${here}/fuzz_test.py" -q Judge
+		fTest dee8t "shared cases and fuzz print a test line each, by their own IDs" env TMPDIR="${work}" PYTHONPYCACHEPREFIX="${work}/pycache" PYTHONWARNDEFAULTENCODING=1 PYTHONWARNINGS=error::EncodingWarning python3 "${here}/test_lines_test.py" -q
 		fTest -q decc9 "one cicd run per tree at a time" env TMPDIR="${work}" bash "${here}/lock-test.bash"
 		fTest -q decdx "runs started in the same second get their own logs" env TMPDIR="${work}" bash "${here}/log-name-test.bash"
 		fTest -q dee8b "lint-report doesn't read a path as a warning" env TMPDIR="${work}" bash "${here}/lint-report-test.bash"
@@ -499,12 +503,21 @@ if fStep_On "Fuzz"; then
 			if [[ -d "${work}/fuzz-fail" ]]; then mkdir -p "${failDir%/*}"; cp -r "${work}/fuzz-fail" "${failDir}"; touch "${failDir}/.shclw-cicd-owned"; fFuzzFail_Prune; fi
 			fDie "fuzz found failures; cases are in ${failDir}"
 		}
+	else
+		fFuzzSkip "SHCLW_FUZZ_SECONDS=0"
 	fi
 	if ((goFuzzSecs > 0)); then
 		bash "${here}/lang-checks.bash" gofuzz "${work}" "${goFuzzSecs}"
+	elif [[ -n "${SHCLW_GOFUZZ_SECONDS:-}" ]]; then
+		fTest_Skip ddzw3 "Go's fuzzer finds no panic in Run" "SHCLW_GOFUZZ_SECONDS=0"
+	else
+		fTest_Skip ddzw3 "Go's fuzzer finds no panic in Run" "--quick"
 	fi
 	fEcho "OK: fuzz"
 	fStep_Pass
+else
+	fFuzzSkip "${fuzzOffBy}"
+	fTest_Skip ddzw3 "Go's fuzzer finds no panic in Run" "${fuzzOffBy}"
 fi
 
 fStep_AllPassed
@@ -531,3 +544,4 @@ fEcho_Clean
 ##		- 2026-10-25 JC: C runs on the host under --no-container, or when docker is missing or the C image won't build.
 ##		- 2026-10-25 JC: Go, Rust and Python run in their own pinned image through lang-checks.bash, with the same host fallback.
 ##		- 2026-10-25 JC: The run's end stops and removes its containers by label, drops stale images and week-old build cache, and says what went in one line.
+##		- 2026-10-25 JC: Test lines for the shared cases, the fuzz and Go's fuzzer, and SKIP lines for them when the fuzz is off.

@@ -1,3 +1,4 @@
+# Test ID: de5ct
 # The file Wovenshell's beta3 wrote on first run, under shcl 1.2. It loads
 # clean on 3.0, so Open takes it as current.
 open	doc.shcl

@@ -1,3 +1,4 @@
+# Test ID: ddzvw
 check	schema.shcl
 check	schema.shcl	all
 check	schema.shcl	drop

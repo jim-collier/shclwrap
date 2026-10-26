@@ -1,3 +1,4 @@
+# Test ID: de5er
 # 2.0 read a backslash escape in a name too, so `"C:\\tools"` was C:\tools,
 # where 1.2 and 3.0 read it as typed. The upgrade can't rename it, so it
 # refuses and names the line. `C:\dir` has no escape and reads the same
