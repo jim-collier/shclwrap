@@ -56,42 +56,6 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Test case: shared case `057-write-create` in all 4 languages, and the race tests: Go `TestCreateRace`, Rust `create_race_link` and `create_race_in_place`, Python `CreateRace`, C `test_create_raced` (8 processes).
 	- Acceptance signoff: waits on JC after the full run, for the README line.
 
-- CICD reset: temp files and safe removal
-	- ID: 2026102416400070
-	- Type: Enhancement
-	- Status: Done
-	- Needs local test suite run?: No
-	- Priority: Avg
-	- Opened: 2026-10-24 16:40
-	- Opened by: JC
-	- Related IDs: 2026101916500100
-	- Notes:
-		- 2026-10-25: `--keep-temp` is in since `533c1df` (2026102319573100).
-		- 2026-10-25: on macOS the run's scratch path has a `//`, since `$TMPDIR` ends in `/`. The guard refuses that, so build the folder from a `realpath`'d temp root.
-	- Requirements:
-		- Per `Temp files` and `Safe removal` in the shared CICD rules. Each run already makes a scratch folder of its own with an ownership mark, and removes it at exit.
-		- Sweeping override, 2026-10-24: this supersedes any earlier decision on this project that conflicts with it.
-		- The run's folder is `${HOST_TEMP}/shclwrap/<YYYYmmDD-HHMMSS>_<NNN>/`, made with a plain `mkdir`, and `TMPDIR`, `TEMP` and `TMP` point there for the whole run. Today only some tools get `TMPDIR`.
-		- `--keep-temp` keeps it and prints its path.
-		- Each run removes the project's own run folders older than 2 days whose `run.pid` names no live process. Older scratch folders are still under the temp root.
-		- A copy of the shared safe removal guard in the repo, for every recursive removal in the cicd scripts and the Makefile's `clean`. File list in the private notes.
-	- Progress log:
-		- 2026-10-25: The run's folder is `${HOST_TEMP}/shclwrap/<stamp>_<NNN>/`, from a temp root with its links resolved, so no `//` on macOS. It holds `run.pid`, and `TMPDIR`, `TEMP` and `TMP` point there, in both containers too. Each run first removes stale run folders.
-		- 2026-10-25: `cicd/utility/include/safe-rm.bash` is the guard. `fSafeRm` takes temp paths, and `fSafeRm_Under` takes a path inside one named folder, for the fuzz sets, `cicd/cache/` and `make clean`. fuzz.py has its own small check. design.md says so.
-		- 2026-10-25: A `--keep-temp` run failed dednv and dedpt, since both inherited `SHCLW_KEEP_TEMP`. Both now unset it.
-		- Verified: deean passes, and fails with the own-root rule, the live-process check, the link resolving or the through-link check taken out, a test's removal put back to a bare one, or the `TMPDIR` export dropped. `--backlog-run-quick go python c` passed CLEAN, and `--backlog-run-quick cicd` passed, plain and with `--keep-temp`. A kept run folder aged 3 days went in the next run, and a folder made by hand stayed. `make clean` in the C image removed a folder under `CLEAN_UNDER` and refused one outside it. shellcheck and ruff are clean.
-		- Swept: every `rm -r`, `shutil.rmtree` and `Remove-Item -Recurse` in `cicd/`, `cicd/hooks/` and `source/c/Makefile`: cicd.bash 2, 9 test scripts, `fCache_Rm` in docker-tidy.bash, fuzz.py 2, and `clean`. No PowerShell in the repo.
-	- Decisions:
-		- The sweep takes only a folder with a `run.pid`, the run's mark and a `<stamp>_<NNN>` name. A folder made by hand in the same place has no `run.pid`, so it stays.
-		- The guard resolves links with `cd -P` and `pwd -P`, and uses `-x` where `rm` has no `--one-file-system`, since macOS has neither `realpath -e` nor that flag.
-		- `fSafeRm_Under` lets the named folder sit behind a link, as a checkout can, but nothing below it.
-		- Left alone: the Dockerfiles' `rm -rf` of apt lists and download leftovers, inside the image build, and Python's `TemporaryDirectory`, which removes only what it made.
-		- No `test_shclw_*` folders were left under the temp roots on this box, so nothing sweeps the old layout.
-	- Commit: 0f9d2ae
-	- Test case: deean, `cicd/temp-test.bash`.
-	- Closed: 20261025
-	- Verified: 2026-10-25, the round's `--backlog-run-full` passed with the C leak checks and CodeQL build, deean and the leak IDs de2xw to de2xz all PASS (run log run_20261025-194230_latest.log).
-
 - Hosted workflow, with the arm64 Mac job
 	- ID: 2026102519333240
 	- Type: Enhancement
@@ -2099,6 +2063,42 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Swept: Put, PutSyntax, Comment, and Remove in Go `shclw1` to `shclw3` and Rust `v1` to `v3`, each on the first, an inner, and the last step of a path, with the rest there and not there. 3.0 needs no check of its own, since shcl 3.0 refuses these itself, and the test walks it too. Remove takes every instance on every version, as decided. No other `Doc` or `ShclDoc` method edits the document. `Write` and `UpgradeFile` take a file path, not a document path.
 	- Closed: 20261017-11325800
 	- Acceptance signoff: Self-closed: reproduced, and its test failed before the fix and passes after. The narrowed path is what `Each` already gave.
+
+- CICD reset: temp files and safe removal
+	- ID: 2026102416400070
+	- Type: Enhancement
+	- Status: Done
+	- Needs local test suite run?: No
+	- Priority: Avg
+	- Opened: 2026-10-24 16:40
+	- Opened by: JC
+	- Related IDs: 2026101916500100
+	- Notes:
+		- 2026-10-25: `--keep-temp` is in since `533c1df` (2026102319573100).
+		- 2026-10-25: on macOS the run's scratch path has a `//`, since `$TMPDIR` ends in `/`. The guard refuses that, so build the folder from a `realpath`'d temp root.
+	- Requirements:
+		- Per `Temp files` and `Safe removal` in the shared CICD rules. Each run already makes a scratch folder of its own with an ownership mark, and removes it at exit.
+		- Sweeping override, 2026-10-24: this supersedes any earlier decision on this project that conflicts with it.
+		- The run's folder is `${HOST_TEMP}/shclwrap/<YYYYmmDD-HHMMSS>_<NNN>/`, made with a plain `mkdir`, and `TMPDIR`, `TEMP` and `TMP` point there for the whole run. Today only some tools get `TMPDIR`.
+		- `--keep-temp` keeps it and prints its path.
+		- Each run removes the project's own run folders older than 2 days whose `run.pid` names no live process. Older scratch folders are still under the temp root.
+		- A copy of the shared safe removal guard in the repo, for every recursive removal in the cicd scripts and the Makefile's `clean`. File list in the private notes.
+	- Progress log:
+		- 2026-10-25: The run's folder is `${HOST_TEMP}/shclwrap/<stamp>_<NNN>/`, from a temp root with its links resolved, so no `//` on macOS. It holds `run.pid`, and `TMPDIR`, `TEMP` and `TMP` point there, in both containers too. Each run first removes stale run folders.
+		- 2026-10-25: `cicd/utility/include/safe-rm.bash` is the guard. `fSafeRm` takes temp paths, and `fSafeRm_Under` takes a path inside one named folder, for the fuzz sets, `cicd/cache/` and `make clean`. fuzz.py has its own small check. design.md says so.
+		- 2026-10-25: A `--keep-temp` run failed dednv and dedpt, since both inherited `SHCLW_KEEP_TEMP`. Both now unset it.
+		- Verified: deean passes, and fails with the own-root rule, the live-process check, the link resolving or the through-link check taken out, a test's removal put back to a bare one, or the `TMPDIR` export dropped. `--backlog-run-quick go python c` passed CLEAN, and `--backlog-run-quick cicd` passed, plain and with `--keep-temp`. A kept run folder aged 3 days went in the next run, and a folder made by hand stayed. `make clean` in the C image removed a folder under `CLEAN_UNDER` and refused one outside it. shellcheck and ruff are clean.
+		- Swept: every `rm -r`, `shutil.rmtree` and `Remove-Item -Recurse` in `cicd/`, `cicd/hooks/` and `source/c/Makefile`: cicd.bash 2, 9 test scripts, `fCache_Rm` in docker-tidy.bash, fuzz.py 2, and `clean`. No PowerShell in the repo.
+	- Decisions:
+		- The sweep takes only a folder with a `run.pid`, the run's mark and a `<stamp>_<NNN>` name. A folder made by hand in the same place has no `run.pid`, so it stays.
+		- The guard resolves links with `cd -P` and `pwd -P`, and uses `-x` where `rm` has no `--one-file-system`, since macOS has neither `realpath -e` nor that flag.
+		- `fSafeRm_Under` lets the named folder sit behind a link, as a checkout can, but nothing below it.
+		- Left alone: the Dockerfiles' `rm -rf` of apt lists and download leftovers, inside the image build, and Python's `TemporaryDirectory`, which removes only what it made.
+		- No `test_shclw_*` folders were left under the temp roots on this box, so nothing sweeps the old layout.
+	- Commit: 0f9d2ae
+	- Test case: deean, `cicd/temp-test.bash`.
+	- Closed: 20261025
+	- Verified: 2026-10-25, the round's `--backlog-run-full` passed with the C leak checks and CodeQL build, deean and the leak IDs de2xw to de2xz all PASS (run log run_20261025-194230_latest.log).
 
 - CICD reset: CICD process gaps
 	- ID: 2026102416400080
