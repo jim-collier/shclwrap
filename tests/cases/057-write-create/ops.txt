@@ -1,3 +1,4 @@
+# Test ID: de8hr
 # Create writes only where nothing is there yet.
 write	new.shcl	create
 put	int	b	2

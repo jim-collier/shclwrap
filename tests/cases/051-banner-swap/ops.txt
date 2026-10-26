@@ -1,3 +1,4 @@
+# Test ID: de5g5
 # The upgrade swaps 2.x's info block for the current one where it sits,
 # here above the first field of a CRLF file that keeps its lines.
 upgrade	2

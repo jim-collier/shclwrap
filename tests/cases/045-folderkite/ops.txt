@@ -1,3 +1,4 @@
+# Test ID: de5cy
 # What Folderkite's own setters wrote under shcl 2.0, from its old-format
 # writer. Open upgrades it. The backslashes 2.0 wrote doubled read as 2.0
 # read them, so terminal.exec has 2 and not 4, and the tab in

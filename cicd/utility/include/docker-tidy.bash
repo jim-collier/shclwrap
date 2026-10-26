@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 
+#  shellcheck disable=1091  ## 'Not following.' The include is found at run time.
 #  shellcheck disable=2034  ## dockerNote is for the caller.
 
 ##	Purpose: Docker upkeep for a cicd run, per the container bullets of Cleanup
@@ -24,6 +25,8 @@
 ##		touched. Never rmi -f, and never docker system prune.
 ##	Copyright © 2026 Jim Collier [ID: 2უNაɘ«҂թȹɤξπ๙¿ձϖ]
 ##	SPDX-License-Identifier: MIT
+
+source "$(dirname "${BASH_SOURCE[0]}")/safe-rm.bash"
 
 cacheCap=$((2 * 1000 * 1000))   ## KB, so 2 GB
 
@@ -50,13 +53,9 @@ fBytes(){ awk -v b="$1" 'BEGIN { split("B kB MB GB TB", u, " "); i = 1; while (b
 
 ## Only a folder right under a tree's cicd/cache/, never a link or a path through one.
 fCache_Rm(){
-	local p="${1%/}" real=""
-	if ! [[ "${p}" =~ ^/.+/cicd/cache/[A-Za-z0-9_.-]+$ ]] || [[ "${p}" == *..* || -L "${p}" ]]; then
-		echo "cache-rm: refused: ${p}" >&2; return 1
-	fi
-	real="$(realpath -e -- "${p}" 2>/dev/null)" || { echo "cache-rm: refused, not there: ${p}" >&2; return 1; }
-	if [[ "${real}" != "$(realpath -e -- "${p%/*}")/${p##*/}" ]]; then echo "cache-rm: refused, a link: ${p}" >&2; return 1; fi
-	rm -rf --one-file-system -- "${p}"
+	local p="${1%/}"
+	if ! [[ "${p}" =~ ^/.+/cicd/cache/[A-Za-z0-9_.-]+$ ]]; then echo "cache-rm: refused: ${p}" >&2; return 1; fi
+	fSafeRm_Under "${p%/*}" "${p}" >/dev/null
 }
 
 fCache_Fit(){   ## fCache_Fit DIR STAMP

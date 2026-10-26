@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 ## Purpose: Runs the shared cases through the C driver, or Python's, and
 ##	compares with the want files Go writes, op by op. Every op has to match.
+##	Prints a PASS, FAIL or SKIP line per case, by the test ID on the first
+##	line of its ops.txt (2026102507142902).
 ## Copyright © 2026 Jim Collier [ID: 2უNაɘ«҂թȹɤξπ๙¿ձϖ]
 ## SPDX-License-Identifier: MIT
 
@@ -13,6 +15,15 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+
+ID_LINE = re.compile(r"# Test ID: ([0-9a-hjkmnp-tv-z]{5})\r?")
+
+
+def case_id(case: Path) -> str | None:
+	"""The test ID on the first line of the case's ops.txt, kept with the case."""
+	with open(case / "ops.txt", "rb") as f:
+		m = ID_LINE.fullmatch(f.readline().decode("utf-8").rstrip("\n"))
+	return m.group(1) if m else None
 
 
 def split_version(name: str) -> tuple[str, int]:
@@ -63,23 +74,37 @@ def blocks(lines: list[str], echoes: list[str]) -> list[list[str]] | None:
 def main() -> int:
 	ap = argparse.ArgumentParser(description="Runs the shared cases through the C or Python driver.")
 	ap.add_argument("--drive", required=True, nargs="+", help="the driver command, such as the C shclw-drive")
-	ap.add_argument("--lang", default="C", help="the driver's language, for the summary")
+	ap.add_argument("--lang", default="C", help="the driver's language, for the test lines")
 	ap.add_argument("--version", type=int, required=True, help="the shcl version it was built for")
 	ap.add_argument("--cases", required=True, type=Path)
 	args = ap.parse_args()
 
-	failures: list[str] = []
+	failures = 0
 	ran = full = 0
+
+	def fail(tid: str | None, name: str, why: str) -> None:
+		nonlocal failures
+		failures += 1
+		if tid:
+			print(f"FAIL {tid} {name}", flush=True)
+		print(f"  {why}", file=sys.stderr, flush=True)
+
 	with tempfile.TemporaryDirectory(prefix="shclw-cases-") as tmp:
 		for case in sorted(p for p in args.cases.iterdir() if p.is_dir()):
 			label = f"{case.name}/v{args.version}"
+			name = f"{args.lang} case {case.name}"
+			tid = case_id(case)
+			if not tid:
+				fail(None, name, f"{label}: no '# Test ID:' first line in ops.txt")
+				continue
 			work = Path(tmp) / case.name
 			work.mkdir()
 			if not materialize(case, work, args.version):
+				print(f"SKIP {tid} {name}, no doc for shcl v{args.version}", flush=True)
 				continue
 			want_file = case / f"want.v{args.version}.txt"
 			if not want_file.exists():
-				failures.append(f"{label}: no want file; the Go tests write them")
+				fail(tid, name, f"{label}: no want file; the Go tests write them")
 				continue
 			with open(work / "ops.txt", "rb") as script:
 				proc = subprocess.run(
@@ -89,28 +114,30 @@ def main() -> int:
 					timeout=60,
 				)
 			if proc.returncode != 0:
-				failures.append(f"{label}: driver exit {proc.returncode}: {proc.stderr.decode(errors='replace')}")
+				fail(tid, name, f"{label}: driver exit {proc.returncode}: {proc.stderr.decode(errors='replace')}")
 				continue
 			got = lines_of(proc.stdout.decode("utf-8"))
 			want = lines_of(want_file.read_text(encoding="utf-8"))
 			echoes = [line for line in got if line.startswith("> ")]
 			got_blocks, want_blocks = blocks(got, echoes), blocks(want, echoes)
 			if got_blocks is None or want_blocks is None:
-				failures.append(f"{label}: the ops echoed differ from the want file")
+				fail(tid, name, f"{label}: the ops echoed differ from the want file")
 				continue
-			wrong = 0
-			for echo, g, w in zip(echoes, got_blocks, want_blocks, strict=True):
-				if g != w:
-					wrong += 1
-					failures.append(f"{label}: {echo!r}\n  want: {w}\n  got:  {g}")
+			wrong = [
+				f"{label}: {echo!r}\n    want: {w}\n    got:  {g}"
+				for echo, g, w in zip(echoes, got_blocks, want_blocks, strict=True)
+				if g != w
+			]
 			ran += len(echoes)
-			full += wrong == 0
+			if wrong:
+				fail(tid, name, "\n  ".join(wrong))
+			else:
+				full += 1
+				print(f"PASS {tid} {name}", flush=True)
 
 	print(f"{args.lang} cases: {full} whole, {ran} ops compared")
 	if ran == 0:
-		failures.append("no op was compared")
-	for f in failures:
-		print("FAIL " + f, file=sys.stderr)
+		fail(None, "", "no op was compared")
 	return 1 if failures else 0
 
 

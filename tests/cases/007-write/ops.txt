@@ -1,3 +1,4 @@
+# Test ID: ddzvx
 put	int	a	5
 write	out.shcl
 write	../x

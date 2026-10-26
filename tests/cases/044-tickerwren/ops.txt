@@ -1,3 +1,4 @@
+# Test ID: de5cx
 # Tickerwren's sample bot config, from its shcl 1.2 days. It loads clean on
 # 3.0, so Open takes it as current.
 open	doc.shcl

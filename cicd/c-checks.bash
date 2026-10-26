@@ -84,7 +84,7 @@ if docker container inspect "${name}" >/dev/null 2>&1; then name+="-$$"; fi
 exec docker run "${rmFlag[@]}" --init --env TINI_KILL_PROCESS_GROUP=1 --user "$(id -u):$(id -g)" --network="${network}" \
 	--name "${name}" --label dev.project=shclwrap --label "dev.run=${runId}" \
 	--cpus "${cpuJobs}" --cpu-shares 256 --env SHCLW_JOBS="${cpuJobs}" --env GOMAXPROCS="${cpuJobs}" \
-	--env HOME=/home/ci \
+	--env HOME=/home/ci --env TMPDIR=/work --env TEMP=/work --env TMP=/work \
 	--mount "type=bind,src=${home},dst=/home/ci" \
 	--mount "type=bind,src=${root},dst=/src,readonly" \
 	--mount "type=bind,src=${work},dst=/work" \

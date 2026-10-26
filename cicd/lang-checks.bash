@@ -82,7 +82,7 @@ exec docker run "${rmFlag[@]}" --init --env TINI_KILL_PROCESS_GROUP=1 --user "$(
 	--cpus "${cpuJobs}" --cpu-shares 256 --env SHCLW_JOBS="${cpuJobs}" --env GOMAXPROCS="${cpuJobs}" \
 	--env RAYON_NUM_THREADS="${cpuJobs}" --env RUST_TEST_THREADS="${cpuJobs}" --env CARGO_BUILD_JOBS="${cpuJobs}" \
 	--env SHCLW_AREAS="${SHCLW_AREAS:-}" --env SHCLW_CARGO_LOCKED="${SHCLW_CARGO_LOCKED:-}" --env SHCLW_PY="${SHCLW_PY:-}" \
-	--env HOME=/home/ci --env GOPATH=/home/ci/go --env GOCACHE=/home/ci/go-build --env GOFLAGS=-modcacherw --env GOTOOLCHAIN=local \
+	--env HOME=/home/ci --env TMPDIR=/work --env TEMP=/work --env TMP=/work --env GOPATH=/home/ci/go --env GOCACHE=/home/ci/go-build --env GOFLAGS=-modcacherw --env GOTOOLCHAIN=local \
 	--env CARGO_HOME=/home/ci/cargo --env CARGO_TARGET_DIR=/home/ci/target --env RUFF_CACHE_DIR=/home/ci/ruff \
 	--mount "type=bind,src=${home},dst=/home/ci" \
 	--mount "type=bind,src=${root},dst=/src${srcMount}" \
@@ -94,3 +94,4 @@ exec docker run "${rmFlag[@]}" --init --env TINI_KILL_PROCESS_GROUP=1 --user "$(
 ##	History:
 ##		- 2026-10-25 JC: Created.
 ##		- 2026-10-25 JC: The image is labeled by run, --rm goes under --keep-temp, and stale images go at the end of the cicd.bash run.
+##		- 2026-10-25 JC: TMPDIR, TEMP and TMP point at the run's folder in the container too.

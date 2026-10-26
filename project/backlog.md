@@ -56,6 +56,38 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Test case: shared case `057-write-create` in all 4 languages, and the race tests: Go `TestCreateRace`, Rust `create_race_link` and `create_race_in_place`, Python `CreateRace`, C `test_create_raced` (8 processes).
 	- Acceptance signoff: waits on JC after the full run, for the README line.
 
+- Hosted workflow, with the arm64 Mac job
+	- ID: 2026102519333240
+	- Type: Enhancement
+	- Status: Waiting on automated testing
+	- Needs local test suite run?: No. The C tests passed in the container and on the host, and deebf covers the plain fallback.
+	- Needs external testing: The `ci` workflow on GitHub, both jobs, once `.github/workflows/ci.yml` is on main: `gitsby raw gh workflow run ci.yml --ref main`, or a pull request against main.
+	- Priority: Avg
+	- Opened: 2026-10-25 19:33
+	- Opened by: JC
+	- Parent ID: 2026102307090301
+	- Related IDs: 2026101512024174
+	- Requirements:
+		- One small workflow on push and PR against main, plus `workflow_dispatch`, runs `--merge-gate` as far as the runner can, with GitHub's free arm64 macOS job beside it.
+		- The Mac job builds, runs the tests, and smoke-tests the built drivers, since there's no CLI of its own.
+	- Progress log:
+		- 2026-10-25: `.github/workflows/ci.yml`. Its Linux job runs `--merge-gate` in the images. Its `macos-15` arm64 job runs the tests and fuzz on the host, then `cicd/utility/driver-smoke.bash`, which runs the shared cases through Go's and Rust's release drivers, C's plain one, and Python's.
+		- 2026-10-25: A host whose gcc-15 can't build or run the sanitizers, such as a Mac, builds C's tests and fuzz driver plain, and says so. design.md says so.
+		- 2026-10-25: dee8t named `/bin/true`, which macOS doesn't have. It now looks `true` and `false` up on PATH.
+		- Verified: actionlint, with its shellcheck pass, is clean. deebf passes, and fails against the old `c-in-container.bash`. `c-checks.bash test 3` passed sanitized in the container and on this host. `driver-smoke.bash` passed here, 61 cases in each language. `--backlog-run-quick cicd` passed CLEAN.
+		- 2026-10-25: On b26 (Intel, macOS 15.8, no gcc-15), the Mac job's cicd line from the working tree: Go, Rust and Python tests and shared cases passed, and so did cicd's own checks up to decc9, which needs flock, which b26 lacks and the workflow installs. The fuzz step passed alone there, C skipped. Go had to be the pinned 1.26.2, per bug 2026102519333440.
+		- Swept: every `-fsanitize` path in cicd: `c-in-container.bash` test and fuzz modes, both fixed. Its leak mode needs clang-22 and heaptrack, so a Mac skips it by name. The Makefile's `test` and `drive` are called only from those modes. No other `/bin/` path is left in cicd's Python and Bash tests.
+	- Decisions:
+		- One workflow, `ci.yml`, with both jobs, not a Mac-only file.
+		- Both jobs leave format to the local gate, since neither runner has the pinned clang-format, and the leak checks, since a cold CodeQL takes about 45 minutes. The Mac job leaves lint to the Linux job too, since lint reads the same on every box. Neither runs the profile, which nobody reads there.
+		- The Mac job runs on the host, since its runner has no docker. bash, GNU coreutils, make, flock and gcc-15 come from Homebrew, and Go and Python at the versions `cicd/tool-pins.env` pins.
+		- The Linux job installs the host tools too, so it still runs when an image won't build there and cicd falls back to the host. The images pin Debian unstable package versions, which can drop off the mirror.
+		- The repo is public, so the Mac job runs on every trigger.
+	- Branch: r1025
+	- Commit: 5b699a9
+	- Test case: deebf, `cicd/c-nosan-test.bash`. The workflow itself is the `ci` run on GitHub.
+	- 2026-10-25: still waits on the first hosted run, which needs ci.yml on main. The round merges into dev only.
+
 - shcl 4 adapters
 	- ID: 2026101512024163
 	- Type: Feature
@@ -84,110 +116,6 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- The tag is spelled with no dot, per shcl's own backlog.
 		- shcl's Go module path is still `.../v2`, and Go won't take a v3 tag on it. Go stays on a commit until that changes.
 		- Quillroute plans to have its release refuse a commit pin. The same check would fit here.
-
-- CICD reset: containers
-	- ID: 2026102416400010
-	- Type: Enhancement
-	- Status: Queued
-	- Priority: High
-	- Opened: 2026-10-24 16:40
-	- Opened by: JC
-	- Notes:
-		- 2026-10-25: `--no-container` is in since `533c1df` (2026102319573100).
-	- Requirements:
-		- Per `Containers` in the shared CICD rules. The C checks already run in a pinned image.
-		- Sweeping override, 2026-10-24: this supersedes any earlier decision on this project that conflicts with it.
-		- Go, Rust, and Python build and test in a pinned image too, from a recipe in `cicd/`.
-		- With docker missing or an image that won't build, the run falls back to the host and says so in one line. Today a missing docker fails the C checks.
-		- `--no-container` runs on the host on purpose.
-		- A test whose point is the real OS, such as Windows file behavior, stays on the host or a test box.
-	- Progress log:
-		- 2026-10-25: Split into 2026102507474935 (C falls back to the host) and 2026102507474940 (Go, Rust and Python in a pinned image).
-		- 2026-10-25: 2026102507474935 is Done. C runs on the host with docker missing, a C image that won't build, or `--no-container`.
-
-- CICD reset: a test for every Done item
-	- ID: 2026102416400050
-	- Type: Enhancement
-	- Status: Queued
-	- Priority: High
-	- Opened: 2026-10-24 16:40
-	- Opened by: JC
-	- Related IDs: 2026102416400060
-	- Prereq IDs: 2026102416400060
-		- 2026-10-25: the Done items name test IDs, which that item gives out.
-	- Requirements:
-		- Per the regression bullet in `Testing` in the shared CICD rules. Most closed items already have a `Test case:` row.
-		- Sweeping override, 2026-10-24: this supersedes any earlier decision on this project that conflicts with it.
-		- Each Done feature and bug names its test's ID, or says in a few words why it has none. Many rows name a file or shared case only.
-		- A Done item with no test where one could exist and would make sense gets one.
-
-- CICD reset: test IDs
-	- ID: 2026102416400060
-	- Type: Enhancement
-	- Status: Queued
-	- Priority: High
-	- Opened: 2026-10-24 16:40
-	- Opened by: JC
-	- Requirements:
-		- Per the ID and per-test line bullets in `Testing` in the shared CICD rules. Some cicd checks already have IDs.
-		- Sweeping override, 2026-10-24: this supersedes any earlier decision on this project that conflicts with it.
-		- Overrides the private notes' rule that test IDs count seconds since 2000.
-		- Every CI test gets an ID in the shared scheme, the Go, Rust, Python and C tests and the shared cases included. The existing ones convert once, from the time each gives. An ID never changes after that.
-		- The run prints one line per regression and fuzz test: `PASS`, `FAIL` or `SKIP`, then the ID and the name.
-	- Progress log:
-		- 2026-10-25: Too big for one go, so split into 2026102507142900 (cicd's own checks), 2026102507142902 (shared cases), 2026102507142905 (Go, Rust, Python and C tests) and 2026102507142907 (fuzz). Closes with the last of them.
-
-- Test IDs: shared cases
-	- ID: 2026102507142902
-	- Type: Enhancement
-	- Status: Queued
-	- Priority: High
-	- Opened: 2026-10-25 07:14
-	- Opened by: JC
-	- Parent ID: 2026102416400060
-	- Prereq IDs: 2026102507142900
-	- Requirements:
-		- Each case under `tests/cases/` gets an ID from its first commit, kept with the case.
-		- The Go, Rust, Python and C case runs print one line per case, with the language in the name.
-	- Note: `go test` shows a passing test's output only with `-v`, and cargo captures it, so Go's and Rust's lines may have to come from `go test -json` and cargo's own per-test lines, as in 2026102507142905. C and Python go through `cicd/c_cases.py`.
-
-- Test IDs: Go, Rust, Python and C tests
-	- ID: 2026102507142905
-	- Type: Enhancement
-	- Status: Queued
-	- Priority: High
-	- Opened: 2026-10-25 07:14
-	- Opened by: JC
-	- Parent ID: 2026102416400060
-	- Prereq IDs: 2026102507142900
-	- Requirements:
-		- Each test function gets an ID from its first commit, about 100 across the 4 languages. Split per language if it won't fit.
-		- The run prints one line per test, skips included.
-
-- Test IDs: fuzz
-	- ID: 2026102507142907
-	- Type: Enhancement
-	- Status: Queued
-	- Priority: High
-	- Opened: 2026-10-25 07:14
-	- Opened by: JC
-	- Parent ID: 2026102416400060
-	- Prereq IDs: 2026102507142900
-	- Requirements:
-		- The generated fuzz in `fuzz.py`, each language against Go, and Go's own fuzzer each get an ID and print one line per run.
-
-- `--list` names the test IDs a run would run
-	- ID: 2026102507433885
-	- Type: Enhancement
-	- Status: Queued
-	- Priority: High
-	- Opened: 2026-10-25 07:43
-	- Opened by: JC
-	- Parent ID: 2026102319573100
-	- Prereq IDs: 2026102507142902, 2026102507142905, 2026102507142907
-	- Requirements:
-		- Per `--list` in `CICD style guide` in the shared CICD rules: print the steps and test IDs the other flags given would run, and run nothing.
-		- Today `--list` is another name for `--dry-run`, which lists the steps only. Most tests have no ID yet.
 
 - Run the tests on Windows and macOS
 	- ID: 2026101512024174
@@ -222,36 +150,22 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Possible cause [Bug]: `CreateHardLink` on FAT gives `ERROR_INVALID_FUNCTION` (1). Go's `ErrUnsupported` takes only `ERROR_NOT_SUPPORTED`, `ERROR_CALL_NOT_IMPLEMENTED` and a few errnos, and Rust doesn't call it `Unsupported` either. Python sees errno 22 with winerror 1. exFAT and network shares may give other codes, not tried.
 	- Test case: none yet. CI has no FAT volume. On vm925w `win-go-fat.ps1` makes one and runs the 3 languages' race tests and shared cases on it.
 
-- CICD reset: temp files and safe removal
-	- ID: 2026102416400070
-	- Type: Enhancement
+- Go 1.27 prints a float32 halfway value differently
+	- ID: 2026102519333440
+	- Type: Bug
 	- Status: Queued
-	- Priority: Avg
-	- Opened: 2026-10-24 16:40
+	- Severity: Avg
+	- Opened: 2026-10-25 19:33
 	- Opened by: JC
-	- Related IDs: 2026101916500100
-	- Notes:
-		- 2026-10-25: `--keep-temp` is in since `533c1df` (2026102319573100).
-		- 2026-10-25: on macOS the run's scratch path has a `//`, since `$TMPDIR` ends in `/`. The guard refuses that, so build the folder from a `realpath`'d temp root.
-	- Requirements:
-		- Per `Temp files` and `Safe removal` in the shared CICD rules. Each run already makes a scratch folder of its own with an ownership mark, and removes it at exit.
-		- Sweeping override, 2026-10-24: this supersedes any earlier decision on this project that conflicts with it.
-		- The run's folder is `${HOST_TEMP}/shclwrap/<YYYYmmDD-HHMMSS>_<NNN>/`, made with a plain `mkdir`, and `TMPDIR`, `TEMP` and `TMP` point there for the whole run. Today only some tools get `TMPDIR`.
-		- `--keep-temp` keeps it and prints its path.
-		- Each run removes the project's own run folders older than 2 days whose `run.pid` names no live process. Older scratch folders are still under the temp root.
-		- A copy of the shared safe removal guard in the repo, for every recursive removal in the cicd scripts and the Makefile's `clean`. File list in the private notes.
-
-- CICD reset: CICD process gaps
-	- ID: 2026102416400080
-	- Type: Enhancement
-	- Status: Queued
-	- Priority: Avg
-	- Opened: 2026-10-24 16:40
-	- Opened by: JC
-	- Requirements:
-		- What else in the shared CICD rules' `CICD process` shclwrap doesn't do yet. The Go, Rust and Python leak checks are 2026101711245585, and the commit and publish stage is 2026101512024171.
-		- Sweeping override, 2026-10-24: this supersedes any earlier decision on this project that conflicts with it.
-		- A profiling step that `--quick` skips, with flamegraphs under `cicd/artifacts/profiling/` and `flame-report.py`.
+	- Related IDs: 2026102519333240
+	- Steps to reproduce [Bug]:
+		- In `source/go`, run `GOTOOLCHAIN=go1.27.3 go test -count=1 -run TestPutFloat32 ./shclw/`.
+	- Incorrect behavior [Bug]:
+		- `v3 0.00024414062: read back Good 0.00024414062, want 0.00024414063`.
+	- Expected behavior [Bug]:
+		- It passes, as it does on the pinned go1.26.2. Float ties print by Go's rule in every language, so a Go program built with 1.27 would write a value Rust, C and Python don't.
+	- Reproduced [Bug]: 2026-10-25, with go1.27.3 on b23 (linux/amd64) and on b26 (darwin/amd64). go1.26.2 passes on both.
+	- Possible cause [Bug]: Go 1.27 changed how `strconv` rounds a float32 halfway case. Not looked into yet.
 
 - Comment doesn't stack, and leaves the user's own notes
 	- ID: 2026101513330022
@@ -514,35 +428,21 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- Both local Macs are Intel, so this is the only Apple Silicon run.
 		- 2026-10-24: JC wants a hosted workflow for this.
 		- 2026-10-24, CICD reset: per `macOS builds on GitHub` and `Merge gate` in the shared CICD rules. One small workflow on push and PR against main, plus `workflow_dispatch`, runs `--merge-gate` as far as the runner can, with the arm64 macOS job beside it. cicd.bash flags picked by how long the job takes start it. It's free while the repo is public.
+		- 2026-10-25: Split into 2026102519333240, the workflow, and 2026102519333340, cicd.bash starting it.
 
-- The docs check flags the backlog template and a quoted clang message
-	- ID: 2026102411444751
-	- Type: Bug
+- cicd.bash starts the hosted workflow and waits for it
+	- ID: 2026102519333340
+	- Type: Enhancement
 	- Status: Queued
-	- Severity: Low
-	- Opened: 2026-10-24 11:44
-	- Steps to reproduce [Bug]:
-		- Run the markdown check on `project/backlog.md`.
-	- Incorrect behavior [Bug]:
-		- It reports 4 ellipses, all in the template's placeholder rows, and an ordinal written as digits inside clang's own warning text, quoted on a closed item.
-	- Expected behavior [Bug]:
-		- Placeholders in the template and quoted tool output pass, so a round's docs gate on the backlog is clean.
-	- Reproduced [Bug]: 2026-10-24, on dev and on round-1024, with the same hits.
-
-- lint-report flags a full run because of a CodeQL query's file name
-	- ID: 2026102509580000
-	- Type: Bug
-	- Status: Queued
-	- Severity: Low
-	- Opened: 2026-10-25 09:58
+	- Priority: Avg
+	- Opened: 2026-10-25 19:33
 	- Opened by: JC
-	- Related IDs: 2026102319573100
-	- Steps to reproduce [Bug]:
-		- `cicd/cicd.bash --backlog-run-full`, then `bash cicd/utility/lint-report.bash`.
-	- Incorrect behavior [Bug]: `FLAG ... (4 warning line(s))`, and every line it lists is CodeQL's progress output for `Diagnostics/ExtractionWarnings.ql`.
-	- Expected behavior [Bug]: CLEAN, since all 21 tests passed and nothing warned.
-	- Reproduced [Bug]: 2026-10-25, on the full run at `2a034a0`.
-	- Possible cause [Bug]: lint-report matches "warning" anywhere in a line, query paths included.
+	- Parent ID: 2026102307090301
+	- Prereq IDs: 2026102519333240
+	- Requirements:
+		- cicd.bash flags picked by how long the job takes start the `ci` workflow, per the parent's CICD reset note.
+		- A run that starts it waits for its result at the end. Anything short of a finished run that failed is a `SKIP`, as for a test box that doesn't answer. `--no-remote` skips it.
+	- Note: zuid does this for its full run, `--backlog-run-full` and `--merge-gate`, in `fStage_Hosted_Start` and `fStage_Hosted_Result` in its cicd.bash, tests dedwh, dedwj, dedwk and dedwm. GitHub runs only what's pushed, and `workflow_dispatch` works only once the workflow is on the default branch.
 
 - Say which layer a read came from
 	- ID: 2026102114101028
@@ -748,7 +648,7 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Verified: `bash cicd/c-checks.bash lint 3 WORK` passed with the probe, and printed shcl's counts: 1 and 15 in 3.0, 0 and 8 in 2.0, the same as clang 19 on the host. On that run's probe output, the old match failed both clang reports and the new one passed all 4. clang-22 without `-analyzer-opt-analyze-headers` reports nothing, so the probe still fails without it. `cicd.bash --ci --quick -y` and shellcheck passed.
 	- Swept: the leak and null probes in leakcheck mode match on `LeakSanitizer` and the check name, not message text. The analyze-shcl counts match ` warning: `, which both clang versions print.
 	- Branch: round-1023
-	- Test case: vFKcU, the analyze-shcl probe in `cicd/c-in-container.bash` lint mode.
+	- Test case: de7zp, the analyze-shcl probe in `cicd/c-in-container.bash` lint mode.
 	- Acceptance signoff: Self-closed: the probe failed before the fix and passes after, under the container's tools.
 	- Closed: 2026-10-23
 
@@ -803,7 +703,7 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Actual fix: After shcl's upgrade, each value with an escape in it is set again, so 3.0 reads what 2.0 read, and every path 2.0 reads one value at is read back against 2.0. A value that still reads differently, or a name 2.0 read with an escape resolved, is `Refused` with its line. A file naming format 1 keeps its names as typed, as 1.2 read them. A file shcl leaves alone but which has escapes gets the info block, so a second upgrade doesn't read them twice.
 	- Branch: upesc
 	- Commit: 2ca2f67, 11d80f4
-	- Test case: tests/cases/047-upgrade-escapes (a tab escape, a doubled pair, a lone backslash before a letter, quoted and bare values, an array, a repeated key, a raw body), 048-upgrade-escaped-name, 049-upgrade-1x-name, and the corrected want files of 034, 035, 039, and 045. All 7 fail in Go, Rust, and C without the fix and pass with it. With the sets turned off, the read-back against 2.0 refuses 045 and 047 in all 3.
+	- Test case: tests/cases/047-upgrade-escapes, de5eq (a tab escape, a doubled pair, a lone backslash before a letter, quoted and bare values, an array, a repeated key, a raw body), 048-upgrade-escaped-name (de5er), 049-upgrade-1x-name (de5es), and the corrected want files of 034 (de5b9), 035 (de5ba), 039 (de5cr), and 045 (de5cy). All 7 fail in Go, Rust, and C without the fix and pass with it. With the sets turned off, the read-back against 2.0 refuses 045 and 047 in all 3.
 	- Swept: Upgrade, UpgradeFile, and Open in Go, Rust, and C, which all go through Upgrade. Values, array elements, repeated keys, names, and raw bodies. InfoBlock and StampFormat change no values. The ops runners, `fuzz.py`, and `c_cases.py` only compare outputs.
 	- Verified: `cicd/cicd.bash --quick` and `cicd/cicd.bash --ci --no-sync` pass, with the C clang-tidy, analyzers, and sanitized cases. The full `cicd/cicd.bash` passed on `oldmark` at `9ae45eb`, with CodeQL, clang CTU, the heaptrack soak, and the fuzz.
 	- Acceptance signoff: Self-closed: its tests failed before the fix and pass after, and the full run passes. Its 2 CodeQL findings are fixed, see 2026101914200000.
@@ -832,7 +732,7 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Verified: the gate and a 20 second fuzz, Go against Rust, with no difference.
 	- Branch: upgrade
 	- Commit: 18041cf
-	- Test case: tests/cases/013-upgrade-raw, Go `TestUpgradeRefusesOldErrors`, Rust `upgrade_refuses_old_errors`. They failed before the fix in Go and Rust, and pass after.
+	- Test case: tests/cases/013-upgrade-raw (de001), Go `TestUpgradeRefusesOldErrors` (de003), Rust `upgrade_refuses_old_errors` (de004). They failed before the fix in Go and Rust, and pass after.
 	- Swept: `Upgrade` and `UpgradeFile` in Go `shclw3` and Rust `v3`. The 1.2 and 2.0 adapters convert nothing. 17 files ending in an open block, with `from` 0 and 2, were all refused or `Ambiguous`, the same in Go and Rust.
 	- Closed: 20261017-11325800
 	- Acceptance signoff: Self-closed: the 2.0 check is now required in every build, per 2026101613005800, and the test failed before the fix and passes after.
@@ -862,10 +762,187 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Verified: the gate and a 20 second fuzz, Go against Rust, with no difference.
 	- Branch: upgrade
 	- Commit: 18041cf
-	- Test case: tests/cases/014-upgrade-errors, Go `TestUpgradeRefusesOldErrors`, Rust `upgrade_refuses_old_errors`. They failed before the fix in Go and Rust, and pass after.
+	- Test case: tests/cases/014-upgrade-errors (de002), Go `TestUpgradeRefusesOldErrors` (de003), Rust `upgrade_refuses_old_errors` (de004). They failed before the fix in Go and Rust, and pass after.
 	- Swept: `Upgrade` and `UpgradeFile` in Go `shclw3` and Rust `v3`. The 1.2 and 2.0 adapters convert nothing. A format 3 file passed with `from` 2 that 2.0 has errors on, such as `tags: [a, b]`, is still left alone.
 	- Closed: 20261017-11325800
 	- Acceptance signoff: Self-closed: the 2.0 check is now required in every build, per 2026101613005800, and the test failed before the fix and passes after.
+
+- CICD reset: containers
+	- ID: 2026102416400010
+	- Type: Enhancement
+	- Status: Done
+	- Priority: High
+	- Opened: 2026-10-24 16:40
+	- Opened by: JC
+	- Notes:
+		- 2026-10-25: `--no-container` is in since `533c1df` (2026102319573100).
+	- Requirements:
+		- Per `Containers` in the shared CICD rules. The C checks already run in a pinned image.
+		- Sweeping override, 2026-10-24: this supersedes any earlier decision on this project that conflicts with it.
+		- Go, Rust, and Python build and test in a pinned image too, from a recipe in `cicd/`.
+		- With docker missing or an image that won't build, the run falls back to the host and says so in one line. Today a missing docker fails the C checks.
+		- `--no-container` runs on the host on purpose.
+		- A test whose point is the real OS, such as Windows file behavior, stays on the host or a test box.
+	- Progress log:
+	- Test case: dednv (C on the host) and dedpt (Go, Rust and Python on the host), per its 2 children.
+	- Closed: 20261025
+		- 2026-10-25: Split into 2026102507474935 (C falls back to the host) and 2026102507474940 (Go, Rust and Python in a pinned image).
+		- 2026-10-25: 2026102507474935 is Done. C runs on the host with docker missing, a C image that won't build, or `--no-container`.
+	- 2026-10-25: Closed with its 2 children, 2026102507474935 and 2026102507474940, both Done.
+
+- CICD reset: a test for every Done item
+	- ID: 2026102416400050
+	- Type: Enhancement
+	- Status: Done
+	- Priority: High
+	- Opened: 2026-10-24 16:40
+	- Opened by: JC
+	- Related IDs: 2026102416400060
+	- Prereq IDs: 2026102416400060
+		- 2026-10-25: the Done items name test IDs, which that item gives out.
+	- Requirements:
+		- Per the regression bullet in `Testing` in the shared CICD rules. Most closed items already have a `Test case:` row.
+		- Sweeping override, 2026-10-24: this supersedes any earlier decision on this project that conflicts with it.
+		- Each Done feature and bug names its test's ID, or says in a few words why it has none. Many rows name a file or shared case only.
+		- A Done item with no test where one could exist and would make sense gets one.
+	- Progress log:
+		- 2026-10-25: Every Done item's Test case row now names its tests by ID, or says why it has none. Each named case, test function and fuzz check got its ID beside it, and the old base 62 IDs on those rows became their new ones.
+		- The leak run's leak, null and heap growth probes and the heaptrack soak had no IDs, so 2026101619042485 couldn't name them. They're now de2xw, de2xx, de2xy and de2xz, dated from the commit that added them, and print their own lines.
+		- 3 Done items had no Test case row and got one: 2026102416400010, 2026101512024159 and 2026101512024148.
+	- Decisions:
+		- No new test for the 6 Done items left without an ID. A rename, a repo setting and a clang-tidy cast fix have nothing for a test to add. The CodeQL cache bug fails the full run's CodeQL step if it comes back. md-check.py lives outside the repo, and the Rust scratch folders go after the test ends.
+		- A row naming a whole set, such as every shared case through the Python driver, says so rather than listing each case's ID.
+		- Done items only. Open items get their IDs as they close.
+	- Branch: r1025
+	- Test case: de2xw, de2xx, de2xy and de2xz, the new lines in `cicd/c-in-container.bash` leak mode. The rest is backlog text.
+	- Verified: every ID on a Done item's Test case row is in the tree, and none is an old base 62 one. `cicd/c-checks.bash leakcheck` and `leakcheck-resume` printed PASS for all 5 leak IDs in the container, and with the null probe broken it printed FAIL de2xx. On the host under `SHCLW_C_HOST=1` it printed a SKIP for each by name. dedm7, dee8t, shellcheck, and `--backlog-run-quick cicd` with `lint-report.bash` (CLEAN) passed.
+	- Swept: all 85 Done items' Test case rows. The other checks in leak mode, CodeQL and CTU, are gates over our code with deb9f as the CTU probe. Lint mode's probes already had IDs. The Makefile's `names` check, named on 2026101516111033, has none, so it's filed as 2026102518381781. `make pick`, named on 2026101516111070, went with the 3.0 floor.
+	- Acceptance signoff: Self-closed: mechanical, with every named ID checked against the tree and the new test lines watched to fail.
+	- Closed: 2026-10-25 18:37
+
+- CICD reset: test IDs
+	- ID: 2026102416400060
+	- Type: Enhancement
+	- Status: Done
+	- Priority: High
+	- Opened: 2026-10-24 16:40
+	- Opened by: JC
+	- Requirements:
+		- Per the ID and per-test line bullets in `Testing` in the shared CICD rules. Some cicd checks already have IDs.
+		- Sweeping override, 2026-10-24: this supersedes any earlier decision on this project that conflicts with it.
+		- Overrides the private notes' rule that test IDs count seconds since 2000.
+		- Every CI test gets an ID in the shared scheme, the Go, Rust, Python and C tests and the shared cases included. The existing ones convert once, from the time each gives. An ID never changes after that.
+		- The run prints one line per regression and fuzz test: `PASS`, `FAIL` or `SKIP`, then the ID and the name.
+	- Progress log:
+		- 2026-10-25: Too big for one go, so split into 2026102507142900 (cicd's own checks), 2026102507142902 (shared cases), 2026102507142905 (Go, Rust, Python and C tests) and 2026102507142907 (fuzz). Closes with the last of them.
+		- 2026-10-25: Closed with its last child, 2026102507142905. All 4 children are Done, and nothing of its own is left.
+	- Test case: dedm7 (cicd's checks) and dee8t (the cases, the language tests and the fuzz).
+	- Closed: 2026-10-25 18:26
+	- Acceptance signoff: Self-closed: every CI test prints its line by its own ID, per its 4 children.
+
+- Test IDs: shared cases
+	- ID: 2026102507142902
+	- Type: Enhancement
+	- Status: Done
+	- Priority: High
+	- Opened: 2026-10-25 07:14
+	- Opened by: JC
+	- Parent ID: 2026102416400060
+	- Prereq IDs: 2026102507142900
+	- Requirements:
+		- Each case under `tests/cases/` gets an ID from its first commit, kept with the case.
+		- The Go, Rust, Python and C case runs print one line per case, with the language in the name.
+	- Note: `go test` shows a passing test's output only with `-v`, and cargo captures it, so Go's and Rust's lines may have to come from `go test -json` and cargo's own per-test lines, as in 2026102507142905. C and Python go through `cicd/c_cases.py`.
+	- Progress log:
+		- 2026-10-25: Each case's ID is the first line of its `ops.txt`, as `# Test ID: <id>`, from the folder's first commit, same-minute ones taking the next free minute. 001-reads is `ddzvq` and 061-commented-defaults `decg2`.
+		- Each language prints `PASS|FAIL|SKIP <id> <Lang> case <name>`, and a case with no ID fails. Go's lines come from `go test -json` through `cicd/go_test_lines.py`. Rust's case runner is its own harness, so it prints its own lines, and still takes a name filter and `--list`. C and Python print theirs from `c_cases.py`.
+		- Verified: `cicd/cicd.bash --ci --quick -y` passed twice, CLEAN, with 61 case lines each in Go, Rust, C and Python. `c-checks.bash test 3` printed 61 sanitized C case lines. With a want file broken and one case's ID line taken out, Go, Rust and Python each printed a FAIL line for the first and named the second.
+		- Swept: every runner of the shared cases: Go's `TestCases`, Rust's `tests/cases.rs`, `c_cases.py` for C and Python, and what reads their output in cicd and the round tools.
+	- Decisions:
+		- One ID per case, shared by the 4 languages, which the language in the name tells apart.
+	- Branch: r1025
+	- Commit: 349e436
+	- Test case: dee8t, `cicd/test_lines_test.py`: every case has its own ID, and `c_cases.py` and `go_test_lines.py` print the lines. It failed with 2 cases sharing an ID, with c_cases' PASS line taken out, and with Go's line renamed.
+	- Closed: 2026-10-25 18:04
+	- Acceptance signoff: Self-closed: every case prints its line by its ID in all 4 languages, and dee8t covers it.
+
+- Test IDs: Go, Rust, Python and C tests
+	- ID: 2026102507142905
+	- Type: Enhancement
+	- Status: Done
+	- Priority: High
+	- Opened: 2026-10-25 07:14
+	- Opened by: JC
+	- Parent ID: 2026102416400060
+	- Prereq IDs: 2026102507142900
+	- Requirements:
+		- Each test function gets an ID from its first commit, about 100 across the 4 languages. Split per language if it won't fit.
+		- The run prints one line per test, skips included.
+	- Progress log:
+		- 2026-10-25: 95 tests got IDs: Go 29, Rust 26, Python 14 and C 26. Each is from the oldest commit that adds the test, same-minute ones taking the next free minute. Go, Rust and Python keep it on a `Test ID:` comment just above the test, and C in a table in `api_test.c`'s `main`.
+		- Each prints `PASS|FAIL|SKIP <id> <Lang> <name>`, such as `PASS ddzw5 Go TestOpen`. Go's come from `go test -json` through `go_test_lines.py`, Rust's from libtest's own lines through the new `rust_test_lines.py`, and Python's from the new `py_tests.py`. `api_test.c` prints its own, as `C++` in its C++ build, and its 2 memory tests say `SKIP` under ASan. A test with no ID fails the run. `cicd/test_ids.py` finds the tests and their IDs.
+		- Rust's tests run with `--tests` now, which leaves out the one doc example. It was `ignore` anyway.
+		- Verified: `cicd/cicd.bash --backlog-run-quick go rust python c cicd` passed, CLEAN, with a line for every test in all 4 languages. `c-checks.bash test 3` printed 26 C++ lines, 24 ASan PASS lines and 2 SKIPs. `c-checks.bash lint 3` passed. A planted failure in `test_nul` printed its FAIL line and exit 1.
+		- Swept: every place the Go, Rust, Python and C tests run in cicd (`lang-in-container.bash`, `c-in-container.bash` quick and test modes, the Makefile's `test`), what reads their output (`lint-report.bash`), and the case ID tool, which now skips these IDs too.
+	- Decisions:
+		- Each language's copy of a test gets its own ID, since each is its own function. A Go subtest is part of its function's line.
+		- Go's `TestCases` has no ID, since each case has its own. Go's `FuzzRun` run on its seeds under `go test` is `ddzw4`, apart from `ddzw3`, the fuzzer.
+		- A Rust test can't mark itself skipped once it runs, so `save_refused_by_folder` says `PASS` when the folder takes files anyway. design.md says so.
+	- Branch: r1025
+	- Commit: d5792d0
+	- Test case: dee8t, `cicd/test_lines_test.py`, class LangIds: every Go, Rust, Python and C test has its own ID, apart from the cases' and cicd's, C's table holds every test function, and the 3 line printers print the lines and fail on a test with no ID. It failed with TestOpen's ID taken out, with a Python test given a C test's ID, and with one given a case's.
+	- Closed: 2026-10-25 18:26
+	- Acceptance signoff: Self-closed: every test prints its line by its own ID in all 4 languages, and dee8t covers it.
+
+- Test IDs: fuzz
+	- ID: 2026102507142907
+	- Type: Enhancement
+	- Status: Done
+	- Priority: High
+	- Opened: 2026-10-25 07:14
+	- Opened by: JC
+	- Parent ID: 2026102416400060
+	- Prereq IDs: 2026102507142900
+	- Requirements:
+		- The generated fuzz in `fuzz.py`, each language against Go, and Go's own fuzzer each get an ID and print one line per run.
+	- Progress log:
+		- 2026-10-25: `fuzz.py` ends with a line for `ddzw1`, a Go crash, the checks on Go's output and the generator judge, then `ddzw2`, `de57g` and `de8ed` for Rust, C and Python against Go. A driver not in the run is `SKIP`. Go's fuzzer is `ddzw3`. With the fuzz off, all 5 say `SKIP` with the flag, and `ddzw3` says `--quick` under it.
+		- Times from `fuzz.py`'s first commit, and from the commits that added C and Python to it.
+		- A failing seed's line now starts `fuzz: seed`, not `FAIL seed`, so it isn't read as a test line.
+		- Verified: `cicd/cicd.bash --ci --quick -y` passed with all 4 fuzz.py lines PASS, through the C container. `lang-checks.bash gofuzz` printed `PASS ddzw3`, and `--backlog-run-quick cicd` the 5 SKIP lines.
+		- Swept: every fuzz.py caller, in `c-in-container.bash`, `lang-in-container.bash` and cicd.bash, and every branch of cicd's fuzz step.
+	- Branch: r1025
+	- Commit: 349e436
+	- Test case: dee8t, `cicd/test_lines_test.py`, class FuzzLines: a Rust driver that fails is Rust's FAIL alone, a Go crash is Go's, and `--skip` names all 4. It failed with the blame taken out.
+	- Closed: 2026-10-25 18:04
+	- Acceptance signoff: Self-closed: each fuzz test prints its line by its ID, and dee8t covers the blame.
+
+- `--list` names the test IDs a run would run
+	- ID: 2026102507433885
+	- Type: Enhancement
+	- Status: Done
+	- Priority: High
+	- Opened: 2026-10-25 07:43
+	- Opened by: JC
+	- Parent ID: 2026102319573100
+	- Prereq IDs: 2026102507142902, 2026102507142905, 2026102507142907
+	- Requirements:
+		- Per `--list` in `CICD style guide` in the shared CICD rules: print the steps and test IDs the other flags given would run, and run nothing.
+		- Today `--list` is another name for `--dry-run`, which lists the steps only. Most tests have no ID yet.
+	- Progress log:
+		- 2026-10-25: `--list` prints the first section as `--dry-run` does, then a section per step that's on, with one `<id> <name>` line per test that step would run, or `(none)`. `--dry-run` stays the step list.
+		- cicd's own tests and debab moved into `fCicdTests` and `fLint_Tests`, which the run and `--list` both call. Under `fTest_ListOnly 1`, `fTest` prints the ID and name and runs nothing. The language tests and cases come from `test_ids.py tests|cases`, the fuzz from `fuzz.py --list`, and the C container's from `c-tests.bash`.
+		- Verified: deea7 passed, and failed with the leak IDs left out, with the names check left out, with `--dry-run` listing, with Go's tests listed outside their area, and with the analyzer probes listed under `--quick`. dedm7 failed with `fTest` running its command under `fTest_ListOnly`. de7yv, dee8t, shellcheck and ruff passed. `cicd/cicd.bash --backlog-run-quick cicd c` passed, and `lint-report.bash` said CLEAN. With a `.PHONY` name planted, debab still printed its FAIL line and failed Lint.
+		- Swept: every caller of `--dry-run` or `--list` (`flags-test.bash`, `cpu-cap-test.bash`, `steps-test.bash`, the round's `mac-dryrun.bash`, design.md), and every place a test line is printed: cicd.bash, `c-in-container.bash`, `lang-in-container.bash`, `fuzz.py`, the 3 line printers, `api_test.c` and the cases. deea7 checks that the default run's list holds every ID found in the tree. The 4 bindings don't read cicd flags.
+	- Decisions:
+		- One line per ID. A shared case is one line with the languages it runs in, and a C test is one line though it also runs as C++.
+		- It lists by the flags given and probes nothing, so a box missing a tool or a cached pin still skips some at run time. `--help` says so.
+		- Only what would run is listed. A step that's off has no section, and a test the flags skip, such as the analyzer probes under `--quick`, isn't listed.
+	- Branch: r1025
+	- Commit: 527271e
+	- Test case: deea7, `cicd/list-test.bash`, and dedm7 for `fTest_ListOnly` and `fStep_Each`.
+	- Closed: 2026-10-25 18:53
+	- Acceptance signoff: Self-closed: does what the shared rule asks, and deea7 was watched to fail 5 ways.
 
 - Sort shcl's analyzer and CodeQL findings
 	- ID: 2026102321270143
@@ -885,7 +962,7 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- 2026-10-24: JC said to add the draft to shcl's backlog, but shcl's dev already has it. `arena_panic` is noreturn and the `shcl_read_file` compare uses a saved `want`, both since `5c462c07` (2026-10-17), which is newer than our `ea0998fa` pin. The `volatile` owners stay on purpose, with gcc's leak report turned off around all 16. Nothing filed. A pin past `5c462c07` should drop the `arena_panic` findings, and the known list then needs remaking.
 	- Decisions:
 		- 3.0's two stream findings at 13605 are harmless, not false. A failed read does loop for one more `fread`, but the file is refused after it.
-	- Test case: the lists are what 2026102321270148's gate matches against.
+	- Test case: none of its own, since the lists are data. 2026102321270148's gate matches against them, and deb8c tests that gate.
 	- Verified: `cicd/shcl_known.py` matched the saved reports and `codeql.sarif` against both lists exactly, and so did a fresh container lint with clang-22.
 	- Closed: 2026-10-25 10:16
 	- Acceptance signoff: Self-closed: every finding has its reason in the pin's list, and the gate fails on a new or a gone one. None is a bug in effect, and shcl's dev already has the noreturn fix, so a pin bump clears most of them.
@@ -947,7 +1024,7 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- 2026-10-23: The full run at `7b2b21e` passed: a fresh CodeQL with the new `shclw3.c` line and no finding of ours, CTU with 10 shcl findings matching 3.0's list and 0 for 2.0, and the heaptrack soak.
 	- Swept: the leak run's CTU step is the only CTU pass in the repo. The Makefile's `.PHONY` names an `analyze-ctu` target that has no rule. `analyzer` and `codeql` compare only their own tool's lines, so `ctu` lines don't reach them. `check_old` is the only `shclw_i_v2_elem` callback, and the other `values[i]` reads in `shclw3.c` loop over the array's own count. The CTU pass is C only; Go, Rust and Python index with bounds checks.
 	- Branch: round-1023
-	- Test case: vGBSI, in `cicd/c-in-container.bash` leak mode: a planted null dereference in a stand-in `shcl.h`, reached only through our call, must show, fail unlisted, pass listed, and fail on a finding of ours.
+	- Test case: deb9f, in `cicd/c-in-container.bash` leak mode: a planted null dereference in a stand-in `shcl.h`, reached only through our call, must show, fail unlisted, pass listed, and fail on a finding of ours.
 	- Closed: 2026-10-25 10:16
 	- Acceptance signoff: Self-closed: vGBSI (now deb9f) covers it. The use after free sits on a path `arena_panic` never returns from, which shcl's dev now marks noreturn.
 
@@ -1051,7 +1128,7 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- 2026-10-23: The full run at `7b2b21e` passed. CodeQL counted 14 findings in 3.0's `shcl.h` and 8 in 2.0's, each matching its pin's list, and none of ours. The analyzers matched 1 and 15 in 3.0, 0 and 8 in 2.0, and CTU 10 in 3.0. The fuzz and Go's fuzzer passed.
 	- Swept: the sanitized, plain and C++ test builds, the fuzz drivers, and the heaptrack soak all link both shcl versions. The cross-file (CTU) pass reads our files only, noted on 2026102113393169. clang-tidy and `strict` read ours only, as style lints.
 	- Branch: round-1023, from `wip/round-1021-2026101916500102`.
-	- Test case: vFKcU, the analyze-shcl probe in `cicd/c-in-container.bash` lint mode.
+	- Test case: de7zp, the analyze-shcl probe in `cicd/c-in-container.bash` lint mode.
 	- Closed: 2026-10-25 10:16
 	- Acceptance signoff: Self-closed: its last open child, 2026102113393169, is Done, and the full run passed.
 
@@ -1075,7 +1152,7 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Progress log:
 		- 2026-10-23: Split into 2026102321270143 (the triage), 2026102321270148 (the lists made fatal), 2026102321270154 (CTU into shcl), and 2026102321270159 (gcc at `-O0`).
 		- 2026-10-25: All 4 children are Done.
-	- Test case: as its children, deb9f and the known lists' gate.
+	- Test case: as its children, deb9f and the known lists' gate, deb8c.
 	- Closed: 2026-10-25 10:16
 	- Acceptance signoff: Self-closed: all 4 children are Done.
 
@@ -1258,7 +1335,7 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- It doesn't fetch anything. If a pinned `shcl.h` isn't cached, C is skipped with a warning.
 		- No flags now runs the leak checks too. `--no-leakcheck` skips them, and `--leakcheck` adds them to `--ci` or `--quick`.
 	- Branch: ci-flags
-	- Test case: `cicd/flags-test.bash`, 14 flag mixes against `--dry-run`, since b098cf0.
+	- Test case: de7yv, `cicd/flags-test.bash`, 14 flag mixes against `--dry-run`, since b098cf0.
 	- Acceptance signoff: Self-closed: the flag test covers every mix the requirements name.
 	- Closed: 2026-10-24
 
@@ -1281,7 +1358,7 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- Added `--dry-run`, which shows the stages a mix of flags picks and stops.
 	- Verified: `cicd/flags-test.bash` passes on 14 flag mixes, and fails with either flag broken. `--quick --leakcheck` fetched a missing header, and `--quick` alone still skipped it.
 	- Branch: round-1021
-	- Test case: vFKCk, `cicd/flags-test.bash`, run in the tests stage.
+	- Test case: de7yv, `cicd/flags-test.bash`, run in the tests stage.
 	- Acceptance signoff: Self-closed: the flags were in, and now have a regression test.
 	- Closed: 2026-10-21
 
@@ -1302,7 +1379,7 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- This reverses 2026101916500102's "shcl's findings report rather than fail for now", as this item asked.
 	- Verified: `bash cicd/c-checks.bash lint 3 WORK` passed with gcc-15 and clang-22, both pins matching their lists, probe vGAuM included. `leakcheck-resume` over the saved `codeql.sarif` passed CodeQL, CTU and the heaptrack soak, and failed naming the finding with one line taken out of 3.0's list. The compare also failed on a dropped, an added, and a doubled line, and on a pin with no list. `cicd/cicd.bash --ci --quick -y`, `cicd/flags-test.bash`, ruff and shellcheck passed.
 	- Swept: every reader of shcl's findings: `make analyze-shcl`, the lint probe, the CodeQL split, and the lint stage's line in `cicd.bash`. The CTU pass reads our files only until 2026102321270154.
-	- Test case: vGAuM, in `cicd/c-in-container.bash` lint mode.
+	- Test case: deb8c, in `cicd/c-in-container.bash` lint mode.
 	- Acceptance signoff: Self-closed: the gate was watched to fail both ways, and passes on both pins.
 	- Closed: 2026-10-23 21:53
 
@@ -1344,7 +1421,7 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- 20261019: 037-open-refused now refuses a file marked by 2.x's block and one marked by a Format 2 line. Its old file and its 2-ways file, both of which 2.0 has errors on, now open as current, and a 2-ways file 2.0 reads clean is the ambiguous one. `upgrade` with `from` 0 in 013 and 014 now leaves their files as current. 038 to 046 read as before.
 	- Branch: floor3, openup, oldmark
 	- Commit: 3754832, 326ccf9, 6b18859, ba5d92e, b5e2128, 5a800e6
-	- Test case: tests/cases/034-upgrade-1x-written and 035-upgrade-2x-written, from files the old adapters wrote. 034 fails when the upgrade skips a format 1 file. Every existing 3.0 case and API test still passes.
+	- Test case: tests/cases/034-upgrade-1x-written (de5b9) and 035-upgrade-2x-written (de5ba), from files the old adapters wrote. 034 fails when the upgrade skips a format 1 file. Every existing 3.0 case and API test still passes.
 		- Part 2: tests/cases/036-open-upgrade and 037-open-refused, the real files in 038 to 046, and the Open tests in Go's files_test.go, Rust's tests/files.rs, and C's test_open_upgrade. They fail in all 3 languages with the upgrade in Open turned off, and again with the backup in Write turned off. The fuzz opens the file and saves over it in a quarter of its scripts.
 		- Errors on both: tests/cases/052-open-fails-both, the changed 013, 014, and 037, the 3 tests whose old inputs are back, and Go's TestOpenFailsBoth, Rust's open_fails_both, and C's test_open_fails_both. They fail in all 3 with the change turned off, and pass with it.
 	- Swept: Go, Rust, and C for the helpers only 1.2 and 2.0 used (the step-count edit check, the path splitter for `Each`, the 1.2 save, the 1.2 and 2.0 info block text, and the Format line reader), all removed. Comments, cicd, `c_cases.py`, `fuzz.py`, design.md, and README for 1.2 and 2.0 mentions.
@@ -1373,6 +1450,7 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- 20261016: core, read memory, walking and writes, and string lengths are Done. Format and upgrade, and 1.2 and 2.0, wait on signoff. Fuzzing is next.
 		- 20261017: format and upgrade, and 1.2 and 2.0, are Done. Fuzzing is what's left.
 		- 20261019: fuzzing is Done, so this closes.
+	- Test case: as its 5 parts: the C API tests in `source/c/tests/api_test.c` and the shared cases, each by its own ID, and de57g in the fuzz.
 	- Closed: 20261019-073500
 	- Acceptance signoff: Self-closed: all 5 parts are Done.
 
@@ -1393,7 +1471,7 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- Without the pinned C headers, as under `--quick` with an empty cache, it fuzzes Go against Rust alone.
 	- Verified: 1,030 cases in 30s, none failed. A count capped at 1 on 2.0 failed 12 of 558 cases, and a leak in 3.0's `has` failed 26. `--quick` and a full run pass.
 	- Branch: c-fuzz
-	- Test case: the fuzz stage of `cicd/cicd.bash`.
+	- Test case: de57g, C against Go in the fuzz stage of `cicd/cicd.bash`.
 	- Closed: 20261019-073500
 	- Acceptance signoff: Self-closed: built as asked, and watched to fail on 2 planted faults.
 
@@ -1424,7 +1502,7 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Verified: the gate passes. About 1,300 generated 3.0 cases, cut to the ops C has, gave the same output from the C and Go drivers, and so did 34,000 floats with every power of 2 among them.
 	- Branch: c-core
 	- Commit: 22da342
-	- Test case: `source/c/tests/api_test.c`, and the shared cases through `cicd/c_cases.py`. New case `029-load-save` covers text, canonical, and write with no edits, and `011-floats` has 2 new float lines.
+	- Test case: `test_reads` (de04q), `test_errors` (de04m) and `test_fallbacks` (de04n) in `source/c/tests/api_test.c`, and the shared cases through `cicd/c_cases.py`. New case `029-load-save` (de04k) covers text, canonical, and write with no edits, and `011-floats` (ddzzk) has 2 new float lines.
 	- Acceptance signoff: 20261016, JC. C reads stay without the "as typed" text. A request for a C call that gives it is written up for shcl.
 	- Closed: 20261016-123500
 
@@ -1445,7 +1523,7 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Swept: all 13 places in `shclw3.c` that read through shcl give the memory back, Write's 2 included. The other reads go through those.
 	- Branch: c-core
 	- Commit: 22da342
-	- Test case: `test_reads_give_back` in `source/c/tests/api_test.c`. 200,000 reads keep under 64 KB. With the give-back taken out they kept 44 MB and the test failed.
+	- Test case: `test_reads_give_back` (de04r) in `source/c/tests/api_test.c`. 200,000 reads keep under 64 KB. With the give-back taken out they kept 44 MB and the test failed.
 	- Acceptance signoff: 20261016, JC. The caller owns and frees what a read gives.
 	- Closed: 20261016-123500
 
@@ -1476,7 +1554,7 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Verified: the gate passes. C's float digits match Go's on 400,000 doubles and 600,000 float32 values, with every power of 2 and its neighbors among them. Each new test failed with its rule taken out: the compaction, float32 digits, both tie rules, the read-back, the several-instances refusal, the order of instances a put made, and the name dedupe.
 	- Branch: c-walk
 	- Commit: 78d6b88
-	- Test case: `test_walk`, `test_first_last`, `test_puts`, `test_verify_put`, `test_put_float32`, `test_shortest`, `test_several`, `test_saves_give_back`, and `test_compact` in `source/c/tests/api_test.c`. New case `030-edit-after-save`, and the shared cases through `cicd/c_cases.py`.
+	- Test case: `test_walk` (de05r), `test_first_last` (de05h), `test_puts` (de05k), `test_verify_put` (de05q), `test_put_float32` (de05j), `test_shortest` (de05p), `test_several` (de05n), `test_saves_give_back` (de05m), and `test_compact` (de19d) in `source/c/tests/api_test.c`. New case `030-edit-after-save` (de05g), and the shared cases through `cicd/c_cases.py`.
 	- Swept: every new read in `shclw3.c` gives shcl's read memory back. The setter status map has every `shcl_set_status`, as Go's has. `run.c`'s float prints and `shclw_put_float32` share the one digits helper.
 	- Acceptance signoff: 20261016, JC. A put per type, plus `shclw_put_float32`, and compacting after a good save, with `shclw_compact` for the rest.
 	- Closed: 20261016-123500
@@ -1497,7 +1575,7 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- 20261015: built, with `Inner()` for the rest of shcl and `Run` for ops scripts. The calls are listed in design.md.
 		- 20261015: design.md lists where shcl versions behave differently and what the wrapper does instead.
 	- Branch: go-rust
-	- Test case: tests/cases 001 to 010, Go `api_test.go` and `inner_test.go`, Rust `tests/api.rs`
+	- Test case: tests/cases 001 to 010 (ddzvq, ddzvr, ddzvs, ddzvt, ddzvv, ddzvw, ddzvx, ddzvy, ddzvz, ddzw0), Go `api_test.go` and `inner_test.go`, Rust `tests/api.rs`. From those files, Go `TestOpen` (ddzw5), `TestVerifyPut` (ddzw6) and `TestInner` (ddzwk), and Rust `open` (ddzw7), `verify` (ddzw8) and `inner` (ddzwm).
 	- Closed: 20261017-11325800
 	- Acceptance signoff: Self-closed: built as asked, and every shared case and API test passes. The 1.2 and 2.0 parts go with 2026101613005800.
 
@@ -1516,7 +1594,7 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- 20261015: Go and Rust read the same want files, so they can't drift.
 		- 20261015: 15,000 fuzz cases in 90 seconds, Go against Rust, with no difference left.
 	- Branch: go-rust
-	- Test case: n/a, it's the test runner. The pre-push hook runs it on every push.
+	- Test case: n/a, it's the test runner. The pre-push hook runs it on every push. Its Go and Rust fuzz is ddzw1 and ddzw2.
 	- Closed: 20261017-11325800
 	- Acceptance signoff: Self-closed: built as asked for Go and Rust. C fuzzing is 2026101516111107, and Python's is in 2026101512024161.
 
@@ -1541,7 +1619,7 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Verified: the gate, and a 20 second fuzz with Go against Rust and no difference. With all cores loaded, Go's edit-while-upgrading test passed 3 times and Rust's once.
 	- Branch: upgrade-file
 	- Commit: efcf6b5
-	- Test case: Go `TestUpgradeFileEditedMeanwhile` and `TestReplaceRead`, Rust `upgrade_file_edited_meanwhile` and `replace_read_*` in tests/files.rs. The edit-while-upgrading test failed before the fix in Go and Rust, and passes after.
+	- Test case: Go `TestUpgradeFileEditedMeanwhile` (de00w) and `TestReplaceRead` (de00r), Rust `upgrade_file_edited_meanwhile` (de017) and `replace_read_*` (de010, de00z, de00y, de011) in tests/files.rs. The edit-while-upgrading test failed before the fix in Go and Rust, and passes after.
 	- Swept: `UpgradeFile` in Go `shclw1` to `shclw3` and Rust `v1` to `v3`. 1.2 and 2.0 read once and never write. No other call reads a file and then writes it.
 	- Closed: 20261017-11325800
 	- Acceptance signoff: Self-closed: the original survives every failure tested, and `ErrIO` is what shcl already reports. 2026101613005800 builds on it.
@@ -1568,7 +1646,7 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Verified: the gate, and a 20 second fuzz with Go against Rust and no difference. Before the change the 2 new cases failed in Go and Rust, with no want files and the op unknown. With the 3.0 `New` put back as it was, the new API test failed in Go and Rust.
 	- Branch: rewrote
 	- Commit: 4537b3c
-	- Test case: tests/cases 017-rewrites and 018-rewrites-canonical, Go `TestRewritesNew`, Rust `rewrites_new` in tests/api.rs.
+	- Test case: tests/cases 017-rewrites (de012) and 018-rewrites-canonical (de013), Go `TestRewritesNew` (de019), Rust `rewrites_new` (de01a) in tests/api.rs.
 	- Swept: `Write`, `Text`, and `New` in Go `shclw1` to `shclw3` and Rust `v1` to `v3`, both ops runners, and fuzz.py's op list. `UpgradeFile` writes text it made itself, not a document, so it has no fallback to report.
 	- Closed: 20261017-11325800
 	- Acceptance signoff: Self-closed: did what the item asked, and its tests failed before and pass after.
@@ -1597,7 +1675,7 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Verified: the gate and a 20 second fuzz pass, Go against Rust, with no difference. With the sort by line taken out, the new case failed in Go and Rust, and so did both API tests. With `Last` giving back the path, or the first instance, the fuzz check failed.
 	- Branch: first-last
 	- Commit: 08e831b
-	- Test case: tests/cases/019-first-last, Go `TestFirstLast`, Rust `first_last` in tests/api.rs, and the fuzz check.
+	- Test case: tests/cases/019-first-last (de01e), Go `TestFirstLast` (de01f), Rust `first_last` (de01g) in tests/api.rs, and the fuzz check, ddzw1.
 	- Swept: Go `shclw1` to `shclw3` each have the 3 calls, held to it by the `shclw.Doc` interface. Rust has them once, on the `ShclDoc` trait. Both ops runners and fuzz.py's op list have the new ops.
 	- Closed: 20261017-11325800
 	- Acceptance signoff: Self-closed: the names and the order by line are what a person reading the file would expect, and the tests failed before and pass after.
@@ -1634,7 +1712,7 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Verified: the gate, and a 20 second fuzz with 10 seconds of Go fuzzing, with no failures. Before the change the new cases printed `error unknownop`, and 3.0 kept the old block above the first field. Each new check failed with its rule taken out of the code.
 	- Branch: info-block
 	- Commit: 6e4627c
-	- Test case: tests/cases/021 to 027. Go `TestInfoTextIsGenBanner`, `TestInfoOldSpellings`, `TestInfoMatchesSetBanner`, and `TestInfoWriteRefused`. Rust `info_text_is_gen_banner`, `info_old_spellings`, and `info_write_refused`. The fuzz info check.
+	- Test case: tests/cases/021 to 027: de02y, de02z, de030, de031, de032, de033 and de034. Go `TestInfoTextIsGenBanner`, `TestInfoOldSpellings` (de036), `TestInfoMatchesSetBanner` (de035), and `TestInfoWriteRefused` (de037). Rust `info_text_is_gen_banner`, `info_old_spellings` (de038), and `info_write_refused` (de039). The fuzz info check, ddzw1. `TestInfoTextIsGenBanner` and `info_text_is_gen_banner` are off since the 3.0 floor took out `InfoText`.
 	- Swept: `Text`, `Canonical`, `Write`, and `Rewrites` in Go `shclw1` to `shclw3` and Rust `v1` to `v3`, the `Doc` interface and `ShclDoc` trait, both ops runners, and design.md's API, ops, and "evens out" sections.
 	- Note: 2026101513330010 and 2026101513330011 can reuse the block finder in `shclw/info.go` and `src/info.rs`, which already finds 2.x's `#` block.
 	- Closed: 20261017-11325800
@@ -1664,7 +1742,7 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Verified: the gate passes, with all 33 shared cases whole and 345 ops compared in C. Each new check failed with its rule taken out: the 2.0 refusal, the `From` fix, the restore after a failed replace, the hint drop, the raw body check in the info block, a second read of the file during the upgrade, and a 2.0 name left unrenamed.
 	- Branch: c-format
 	- Commit: c71ca83
-	- Test case: `test_replace_read`, `test_upgrade`, `test_upgrade_file`, `test_upgrade_raced`, `test_info`, `test_rewrites`, and `test_check` in `source/c/tests/api_test.c`, the Makefile's `names` check, and the shared cases through `cicd/c_cases.py`.
+	- Test case: `test_replace_read` (de07j), `test_upgrade` (de07m), `test_upgrade_file` (de07n), `test_upgrade_raced` (de07p), `test_info` (de07h), `test_rewrites` (de07k), and `test_check` (de07g) in `source/c/tests/api_test.c`, the Makefile's `names` check, and the shared cases through `cicd/c_cases.py`.
 	- Swept: every op in design.md's ops table has a C function in `run.c`. Every C call that hands back an upgrade sets it on a failure too, as Go does. design.md's C notes on layout, sharing the code, and the ops runner.
 	- Closed: 20261017-11325800
 	- Acceptance signoff: Self-closed: matches Go and Rust, and each check failed with its rule taken out.
@@ -1702,7 +1780,7 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Note: no test reaches the temp file cleanup after a failed 1.2 save, since every failure that can be set up comes before the temp file exists.
 	- Branch: c-old
 	- Commit: c003a9f
-	- Test case: `make pick`, `test_save`, and the 1.2 and 2.0 sides of `test_errors`, `test_upgrade`, `test_info`, and `test_rewrites` in `source/c/tests/api_test.c`. The shared cases on all 3 versions through `cicd/c_cases.py`.
+	- Test case: `make pick`, `test_save` (de08j), and the 1.2 and 2.0 sides of `test_errors` (de04m), `test_upgrade` (de07m), `test_info` (de07h), and `test_rewrites` (de07k) in `source/c/tests/api_test.c`. The shared cases on all 3 versions through `cicd/c_cases.py`.
 	- Swept: every row of design.md's "evens out" table has a case or an API test that runs on C 1.2 and 2.0, but the 2.x upgrade refusal, which is 3.0's alone. Every call `shclw3.c` defines is in `shclw1.c` and `shclw2.c`, which each link checks. The notes in `shclw.h` and design.md that hold only on 3.0 now say so.
 	- Closed: 20261017-11325800
 	- Acceptance signoff: Self-closed: every shared case passes on all 3 versions. The memory growth goes away with 1.2 and 2.0, in 2026101613005800.
@@ -1757,7 +1835,7 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Decisions:
 		- LF for every text file, not only the cases, since gofmt, bash and the 2.0 copy's sha256 need it too. A Windows editor set to CRLF still gets LF.
 	- Commit: 88e56c1
-	- Test case: vGSLJ, `cicd/eol-test.bash`, in the tests stage. It checks out every tracked file with `core.autocrlf=true` and compares each to what's committed. It failed on 269 files without `.gitattributes`, and passes with it.
+	- Test case: decb9, `cicd/eol-test.bash`, in the tests stage. It checks out every tracked file with `core.autocrlf=true` and compares each to what's committed. It failed on 269 files without `.gitattributes`, and passes with it.
 	- Acceptance signoff: Self-closed: its test failed before the fix and passes after, the full run passed, and a default Windows clone passes its cases.
 	- Closed: 2026-10-24
 
@@ -1789,7 +1867,7 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- On mingw only, `shclw_adapter.h` maps the 4 to gcc's builtins, as glibc does, so the call sites stay plain C. Not for C++, where `<cmath>` replaces them.
 	- Actual fix [Bug]: the builtins on mingw, and a `mingw` Makefile target that the container's lint and quick modes run, with mingw-w64 pinned in the C image.
 	- Commit: 3698622
-	- Test case: vGSU9, `make mingw`, in the container's lint and quick modes. Fails on HEAD's header, passes with the fix.
+	- Test case: decbj, `make mingw`, in the container's lint and quick modes. Fails on HEAD's header, passes with the fix.
 	- Acceptance signoff: Self-closed: its test failed before the fix and passes after, and Windows builds clean.
 	- Closed: 2026-10-24
 
@@ -1816,7 +1894,7 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Verified: with gcc switched off, the planted leak passed `make analyze` before the fix and failed it after, on the host's clang 19 and in the container's clang-22. `bash cicd/c-checks.bash lint 3 WORK` passed with the new probe, and failed at it with the flag taken out. `make analyze` over our files on the host passed. `cicd/cicd.bash --ci --quick -y`, `lint-report.bash` and shellcheck passed.
 	- Swept: `analyze-shcl`'s clang line only writes a report, which `shcl_known.py` judges, so it stays without the flag. The CTU pass and its probe judge their logs the same way. clang-tidy's `clang-analyzer-*` checks fail through `WarningsAsErrors: '*'`. gcc's analyzer lines fail through `-Werror`, per vGBqv. Go, Rust and Python have no clang analyzer pass.
 	- Branch: round-1024
-	- Test case: vGS64, in `cicd/c-in-container.bash` lint mode: with gcc switched off, vGBqv's leak must fail `make analyze` with clang's `unix.Malloc`.
+	- Test case: decas, in `cicd/c-in-container.bash` lint mode: with gcc switched off, deba8's leak must fail `make analyze` with clang's `unix.Malloc`.
 	- Acceptance signoff: Self-closed: a mechanical fix with a regression test watched both ways, and nothing in our code is reported.
 	- Closed: 2026-10-24 09:00
 
@@ -1844,7 +1922,7 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Swept: no other cast through `void *` to a typed pointer is left in the C tree, apart from `free` and `qsort` arguments. The diagnostics' pointer in the same block is a plain cast from the result's own type.
 	- Branch: round-1023, from `wip/round-1021-2026101513330012`.
 	- Commit: 2cb7404
-	- Test case: the C lint stage's clang-tidy, which failed on the old cast and passes now.
+	- Test case: none of its own, since clang-tidy in the C lint stage is the check. It failed on the old cast and passes now.
 	- Acceptance signoff: Self-closed: a mechanical fix, and the lint that failed passes.
 	- Closed: 2026-10-23 20:18
 
@@ -1866,7 +1944,7 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Actual fix: A float32 goes in as its own shortest digits, read as a float64.
 	- Branch: floats
 	- Commit: 9b835f5
-	- Test case: Go `TestPutFloat32`, Rust `put_f32`. Both failed before the fix and pass after. The ops scripts have no float32 type.
+	- Test case: Go `TestPutFloat32` (ddzzn), Rust `put_f32` (ddzzp). Both failed before the fix and pass after. The ops scripts have no float32 type.
 	- Swept: Go `Normalize` is the only float32 path. Rust has only `From<f32>`. Neither takes a float32 slice.
 	- Closed: 20261015-140716
 	- Acceptance signoff: Self-closed: did what the item asked, and its test failed before and passes after.
@@ -1893,7 +1971,7 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Verified: the gate and a 20 second fuzz, Go against Rust, with no difference. No existing want file changed.
 	- Branch: formatof
 	- Commit: 909d0c6
-	- Test case: tests/cases/028-format-raw, and Go `TestOpen` and Rust `open` with a Format line in a raw body, and a real one after it. They failed before the fix on 1.2 and 2.0 in Go and Rust, and pass after.
+	- Test case: tests/cases/028-format-raw (de03n), and Go `TestOpen` (ddzw5) and Rust `open` (ddzw7) with a Format line in a raw body, and a real one after it. They failed before the fix on 1.2 and 2.0 in Go and Rust, and pass after.
 	- Swept: `Open`, `OpenWith`, `Upgrade`, and `UpgradeFile` in Go `shclw1` to `shclw3` and Rust `v1` to `v3` all go through that version's `FormatOf`, and so does the `format` op. 3.0's is shcl's own, which already skips raw bodies.
 	- Acceptance signoff: 20261016, JC left the wider read to judgement. It stays, since every version now gives the same answer for the same file.
 	- Closed: 20261016-112928
@@ -1919,7 +1997,7 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- 20261015: the check also catches `[a, b]` on 1.2 and 2.0, which sets `"[a", "b]"` while a file line `k: [a, b]` reads another way. design.md lists both.
 	- Branch: floats
 	- Commit: 9b835f5
-	- Test case: tests/cases/012-syntax. It failed before the fix in Go and Rust on every version, and passes after.
+	- Test case: tests/cases/012-syntax (ddzzm). It failed before the fix in Go and Rust on every version, and passes after.
 	- Swept: PutSyntax in Go `shclw1` to `shclw3` and Rust `v1` to `v3`. Comment has the same several-instances gap on 1.2 and 2.0, logged as 2026101514071600.
 	- Closed: 20261017-11325800
 	- Acceptance signoff: Self-closed: reproduced, and its test failed before the fix and passes after. The wider check is the same read-back Put has.
@@ -1948,7 +2026,7 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- 20261015: the fuzzer now makes these values and checks that no `Good` float read gives one.
 	- Branch: floats
 	- Commit: 9b835f5
-	- Test case: tests/cases/011-floats, plus the NaN and infinity half of Go `TestPutFloat32` and Rust `put_f32`. They failed before the fix on 1.2 and 2.0 in both languages, and pass after. On 3.0 only Go's 011 failed, on the ops parser, since 3.0 already refused these.
+	- Test case: tests/cases/011-floats (ddzzk), plus the NaN and infinity half of Go `TestPutFloat32` (ddzzn) and Rust `put_f32` (ddzzp). They failed before the fix on 1.2 and 2.0 in both languages, and pass after. On 3.0 only Go's 011 failed, on the ops parser, since 3.0 already refused these.
 	- Swept: GetFloat, GetFloats, Float, and Floats in Go `shclw1` to `shclw3` and Rust `v1` to `v3`. Put for float, float32, and float slices in both. Ints have no such value.
 	- Closed: 20261017-11325800
 	- Acceptance signoff: Self-closed: reproduced, and its test failed before the fix and passes after. Refusing the put matches 3.0.
@@ -1980,11 +2058,73 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Verified: the gate, and a 20 second fuzz with Go against Rust and no difference. Before the fix, the new case failed on all 3 versions in Go and Rust, the Go and Rust edit tests failed, and the new fuzz check failed. They all pass after.
 	- Branch: several
 	- Commit: 1c33f90
-	- Test case: tests/cases/020-several, Go `TestDocMethodsSorted`, `TestEditsRefuseSeveral`, `TestEditsOnOneInstance`, and `TestRemoveTakesAll` in edits_test.go, Rust `several` in tests/api.rs, and the fuzz check that an edit saying ok found one instance at every step.
+	- Test case: tests/cases/020-several (de021), Go `TestDocMethodsSorted` (de022), `TestEditsRefuseSeveral` (de025), `TestEditsOnOneInstance` (de024), and `TestRemoveTakesAll` (de026) in edits_test.go, Rust `several` (de027) in tests/api.rs, and the fuzz check that an edit saying ok found one instance at every step (ddzw1).
 	- Sweep: Put, PutSyntax, and Comment in Go `shclw1` and `shclw2`, and Rust `v1` and `v2`.
 	- Swept: Put, PutSyntax, Comment, and Remove in Go `shclw1` to `shclw3` and Rust `v1` to `v3`, each on the first, an inner, and the last step of a path, with the rest there and not there. 3.0 needs no check of its own, since shcl 3.0 refuses these itself, and the test walks it too. Remove takes every instance on every version, as decided. No other `Doc` or `ShclDoc` method edits the document. `Write` and `UpgradeFile` take a file path, not a document path.
 	- Closed: 20261017-11325800
 	- Acceptance signoff: Self-closed: reproduced, and its test failed before the fix and passes after. The narrowed path is what `Each` already gave.
+
+- CICD reset: temp files and safe removal
+	- ID: 2026102416400070
+	- Type: Enhancement
+	- Status: Done
+	- Needs local test suite run?: No
+	- Priority: Avg
+	- Opened: 2026-10-24 16:40
+	- Opened by: JC
+	- Related IDs: 2026101916500100
+	- Notes:
+		- 2026-10-25: `--keep-temp` is in since `533c1df` (2026102319573100).
+		- 2026-10-25: on macOS the run's scratch path has a `//`, since `$TMPDIR` ends in `/`. The guard refuses that, so build the folder from a `realpath`'d temp root.
+	- Requirements:
+		- Per `Temp files` and `Safe removal` in the shared CICD rules. Each run already makes a scratch folder of its own with an ownership mark, and removes it at exit.
+		- Sweeping override, 2026-10-24: this supersedes any earlier decision on this project that conflicts with it.
+		- The run's folder is `${HOST_TEMP}/shclwrap/<YYYYmmDD-HHMMSS>_<NNN>/`, made with a plain `mkdir`, and `TMPDIR`, `TEMP` and `TMP` point there for the whole run. Today only some tools get `TMPDIR`.
+		- `--keep-temp` keeps it and prints its path.
+		- Each run removes the project's own run folders older than 2 days whose `run.pid` names no live process. Older scratch folders are still under the temp root.
+		- A copy of the shared safe removal guard in the repo, for every recursive removal in the cicd scripts and the Makefile's `clean`. File list in the private notes.
+	- Progress log:
+		- 2026-10-25: The run's folder is `${HOST_TEMP}/shclwrap/<stamp>_<NNN>/`, from a temp root with its links resolved, so no `//` on macOS. It holds `run.pid`, and `TMPDIR`, `TEMP` and `TMP` point there, in both containers too. Each run first removes stale run folders.
+		- 2026-10-25: `cicd/utility/include/safe-rm.bash` is the guard. `fSafeRm` takes temp paths, and `fSafeRm_Under` takes a path inside one named folder, for the fuzz sets, `cicd/cache/` and `make clean`. fuzz.py has its own small check. design.md says so.
+		- 2026-10-25: A `--keep-temp` run failed dednv and dedpt, since both inherited `SHCLW_KEEP_TEMP`. Both now unset it.
+		- Verified: deean passes, and fails with the own-root rule, the live-process check, the link resolving or the through-link check taken out, a test's removal put back to a bare one, or the `TMPDIR` export dropped. `--backlog-run-quick go python c` passed CLEAN, and `--backlog-run-quick cicd` passed, plain and with `--keep-temp`. A kept run folder aged 3 days went in the next run, and a folder made by hand stayed. `make clean` in the C image removed a folder under `CLEAN_UNDER` and refused one outside it. shellcheck and ruff are clean.
+		- Swept: every `rm -r`, `shutil.rmtree` and `Remove-Item -Recurse` in `cicd/`, `cicd/hooks/` and `source/c/Makefile`: cicd.bash 2, 9 test scripts, `fCache_Rm` in docker-tidy.bash, fuzz.py 2, and `clean`. No PowerShell in the repo.
+	- Decisions:
+		- The sweep takes only a folder with a `run.pid`, the run's mark and a `<stamp>_<NNN>` name. A folder made by hand in the same place has no `run.pid`, so it stays.
+		- The guard resolves links with `cd -P` and `pwd -P`, and uses `-x` where `rm` has no `--one-file-system`, since macOS has neither `realpath -e` nor that flag.
+		- `fSafeRm_Under` lets the named folder sit behind a link, as a checkout can, but nothing below it.
+		- Left alone: the Dockerfiles' `rm -rf` of apt lists and download leftovers, inside the image build, and Python's `TemporaryDirectory`, which removes only what it made.
+		- No `test_shclw_*` folders were left under the temp roots on this box, so nothing sweeps the old layout.
+	- Commit: 0f9d2ae
+	- Test case: deean, `cicd/temp-test.bash`.
+	- Closed: 20261025
+	- Verified: 2026-10-25, the round's `--backlog-run-full` passed with the C leak checks and CodeQL build, deean and the leak IDs de2xw to de2xz all PASS (run log run_20261025-194230_latest.log).
+
+- CICD reset: CICD process gaps
+	- ID: 2026102416400080
+	- Type: Enhancement
+	- Status: Done
+	- Priority: Avg
+	- Opened: 2026-10-24 16:40
+	- Opened by: JC
+	- Requirements:
+		- What else in the shared CICD rules' `CICD process` shclwrap doesn't do yet. The Go, Rust and Python leak checks are 2026101711245585, and the commit and publish stage is 2026101512024171.
+		- Sweeping override, 2026-10-24: this supersedes any earlier decision on this project that conflicts with it.
+		- A profiling step that `--quick` skips, with flamegraphs under `cicd/artifacts/profiling/` and `flame-report.py`.
+	- Progress log:
+		- 2026-10-25: A Profile step, last in the run. Go's `BenchmarkCases` runs every shared case through `Run` for 5 seconds with a CPU profile. `cicd/utility/pprof2flame.py` makes the flamegraph, which is rotated in `cicd/artifacts/profiling/`, and `cicd/utility/flame-report.py` prints its summary. Both scripts are copied from zuid. `--quick`, `--backlog-run-quick` and `--no-profile` leave it out. design.md says so.
+		- 2026-10-25: dedm7's turned-off lists for `--quick`, `--ci --quick`, `--quick --no-sync` and `--backlog-run-quick` now end with the Profile step, which they didn't have before.
+		- Verified: the step passed alone in the language image and on the host with `--no-container`, and the second flamegraph rotated the first. deeap passes, and fails with plain mode writing the marker or the flamegraph dropping a frame. de7yv's new profile rows fail with `--quick` leaving the step on. `--backlog-run-quick go cicd` passed CLEAN.
+		- Swept: the gap list in the private notes' CICD reset findings names only the profiling step, beside the 2 items above.
+		- The first profile puts about half the time in `Commented`, through `fieldsOf` and shcl's `ReadFields`.
+	- Decisions:
+		- Go only. It's the reference implementation and has a profiler built in, and `perf` can't record on this box, so Rust and C would need an in-process sampler as new dependencies.
+		- The benchmark runs the shared cases, so the profile follows what the tests cover, with no workload of its own to keep up.
+		- The step fails only when the benchmark does. A flamegraph that won't convert, or a summary that won't parse, is a warning.
+	- Commit: a2c78dd
+	- Test case: deeap, `cicd/profile-test.bash`, for the flamegraph and its summary, and de7yv for which runs leave the step out.
+	- Closed: 2026-10-25 19:16
+	- Acceptance signoff: Self-closed: deeap and de7yv cover it, and the step adds nothing a person has to judge.
 
 - Layered loading
 	- ID: 2026101512024156
@@ -2010,7 +2150,7 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- A missing file is skipped. Any other error stops the load, as `Open` does.
 		- `Diag.Layer` is the layer's place in the list, from 1, not a name.
 	- Commit: 21cc72c
-	- Test case: shared case `053-layers`, in all 3 languages.
+	- Test case: shared case `053-layers` (de8dq), in all 3 languages.
 	- Closed: 2026-10-25 10:16
 	- Acceptance signoff: Self-closed: `053-layers` covers it in every language. It uses shcl's own merge, as Cobblevale already does.
 
@@ -2038,7 +2178,7 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Swept: as on 2026101513330012. The lost check sits beside the 2.0 read-back in each language, so it sees the same paths.
 	- Branch: round-1023
 	- Commit: 2cb7404
-	- Test case: tests/cases/059-upgrade-lines, a 2.x comma list with a line under it.
+	- Test case: tests/cases/059-upgrade-lines (debk6), a 2.x comma list with a line under it.
 	- Closed: 2026-10-25 10:16
 	- Acceptance signoff: Self-closed: `059-upgrade-lines` covers it. A `C:\new` break is carried as 2.0 read it, so listing it as lost would be wrong.
 
@@ -2067,7 +2207,7 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- `Open` succeeds and `Write` refuses, rather than `Open` giving the document beside an `ErrTooNew`. design.md, Decisions, says why.
 		- `Write` refuses with `ErrTooNew`, not a new kind.
 	- Commit: 12dcaaa
-	- Test case: shared case `055-open-newer`, and the newer-file parts of `037-open-refused` and `053-layers`, in all 4 languages.
+	- Test case: shared case `055-open-newer` (de8h0), and the newer-file parts of `037-open-refused` (de5cp) and `053-layers` (de8dq), in all 4 languages.
 	- Closed: 2026-10-25 10:16
 	- Acceptance signoff: Self-closed: `055-open-newer` covers it in all 4 languages, and Windows passed. Reading a newer file and refusing to save over it is what Folderkite already does by hand.
 
@@ -2098,7 +2238,7 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- On by default. `Force` is a field on `WriteOpts`, where create-only and a file mode can go later.
 		- `ErrChanged` is its own kind, for `Write` and the upgrade's backup alike.
 	- Commit: 12dcaaa
-	- Test case: shared case `056-write-changed` in all 4 languages, and Go's `TestWriteChangedOtherName`.
+	- Test case: shared case `056-write-changed` (de8h1) in all 4 languages, and Go's `TestWriteChangedOtherName` (de8h2).
 	- Closed: 2026-10-25 10:16
 	- Acceptance signoff: Self-closed: `056-write-changed` covers it in all 4 languages, and Windows passed. The reversed row gives one error kind for one cause, in `Write` and the upgrade alike.
 
@@ -2127,7 +2267,7 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- Exact, not masked by the umask, and only on a file the `Write` creates. design.md, Decisions, says why.
 		- In Go and C 0 means no mode. Rust takes `Option<u32>`, and Python `None`.
 	- Commit: fabafb8
-	- Test case: shared case `058-write-mode` in all 4 languages, which reads modes back with the new `mode` op.
+	- Test case: shared case `058-write-mode` (de8hs) in all 4 languages, which reads modes back with the new `mode` op.
 	- Closed: 2026-10-25 10:16
 	- Acceptance signoff: Self-closed: `058-write-mode` covers it, and Windows passed. An exact mode on a new file is what a caller asking for 0600 expects, and a file that's there keeps its own.
 
@@ -2156,7 +2296,7 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- The copy is the upgrade's backup name with format 3. In C the field goes last in `shclw_write_opts`, so positional setups still build.
 	- Branch: round-1024
 	- Commit: 4c1ec59
-	- Test case: shared case `060-write-backup` in all 4 languages.
+	- Test case: shared case `060-write-backup` (decep) in all 4 languages.
 	- Closed: 2026-10-25 10:16
 	- Acceptance signoff: Self-closed: `060-write-backup` covers it in all 4 languages, and Windows passed. Opt in keeps copies from piling up for programs that never look for them.
 
@@ -2188,7 +2328,7 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- The text is parsed again with the line filled in, since shcl has no call for it. `Diags` stay the load's, and keys earlier puts added get their real lines.
 	- Branch: round-1024
 	- Commit: a18e5f5
-	- Test case: shared case `061-commented-defaults` and new lines in `041-wovenshell`, in all 4 languages, plus the `commented` op in the fuzz.
+	- Test case: shared case `061-commented-defaults` (decg2) and new lines in `041-wovenshell` (de5ct), in all 4 languages, plus the `commented` op in the fuzz (ddzw1, ddzw2, de57g, de8ed).
 	- Closed: 2026-10-25 10:16
 	- Acceptance signoff: Self-closed: `061-commented-defaults` and `041-wovenshell` cover it in all 4 languages, plus the fuzz, and Windows passed.
 
@@ -2217,7 +2357,7 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- It costs about a load per commented line. Wovenshell's file has about 70.
 	- Branch: round-1024
 	- Commit: a18e5f5
-	- Test case: shared case `061-commented-defaults` and new lines in `041-wovenshell`, in all 4 languages, plus the `commented` op in the fuzz.
+	- Test case: shared case `061-commented-defaults` (decg2) and new lines in `041-wovenshell` (de5ct), in all 4 languages, plus the `commented` op in the fuzz (ddzw1, ddzw2, de57g, de8ed).
 	- Closed: 2026-10-25 10:16
 	- Acceptance signoff: Self-closed: `061-commented-defaults` and `041-wovenshell` cover it in all 4 languages, plus the fuzz, and Windows passed.
 
@@ -2244,7 +2384,7 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- `put` takes a list or tuple. An empty one writes an empty array, which reads back the same for every type.
 		- No pip install anywhere. Tests point `PYTHONPATH` at the cached `shcl.py`.
 	- Commit: a4909af
-	- Test case: shared cases, all 53, through the Python driver; `source/python/tests/test_shclw.py`; the fuzz.
+	- Test case: shared cases, all 53, through the Python driver, each by its case's ID; `source/python/tests/test_shclw.py`, `Api` (de8ee, de8ef, de8eg, de8eh, de8ej, de8ek, de8em) and `FindsShcl` (de8ep, de8eq, de8es); the fuzz, de8ed.
 	- Acceptance signoff: JC, 2026-10-24.
 	- Closed: 2026-10-24
 
@@ -2271,7 +2411,7 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Swept: `Upgrade` and `UpgradeFile` in Go `shclw3`, Rust `v3`, C `shclw3.c` and Python, all four ops runners, and fuzz.py, which compares the op output as is. `Open` doesn't show the lists, as it doesn't show `Unsure`.
 	- Branch: round-1023
 	- Commit: 2cb7404
-	- Test case: tests/cases/059-upgrade-lines, plus the new line in every upgrade case's want file. C `test_upgrade_file` checks the lists survive `shclw_upgrade_file`'s copy.
+	- Test case: tests/cases/059-upgrade-lines (debk6), plus the new line in every upgrade case's want file. C `test_upgrade_file` (de07n) checks the lists survive `shclw_upgrade_file`'s copy.
 	- Acceptance signoff: Self-closed: the full run it waited on passed, and it has its shared case. The `C:\new` call waits on JC under 2026101513330013.
 	- Closed: 2026-10-23 23:00
 
@@ -2300,7 +2440,7 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Swept: all 4 languages and runners, and fuzz.py, as in 2026101513330009.
 	- Branch: round-1021
 	- Commit: 56aedbc
-	- Test case: tests/cases/054-merged-unused, and the fuzz op.
+	- Test case: tests/cases/054-merged-unused (de8g6), and the fuzz op (ddzw1, ddzw2, de57g, de8ed).
 	- Acceptance signoff: Self-closed: the full run it waited on passed, and it has its shared case and fuzz op.
 	- Closed: 2026-10-23 23:00
 
@@ -2325,7 +2465,7 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Verified: `bash cicd/c-checks.bash lint 3 WORK` passed in 171s, with gcc-15 at `-O0` clean on our files, both pins matching their lists, and the new probe. On the host, the probe's leak failed `make analyze` with gcc's `analyzer-malloc-leak`, and with `GCC_ANALYZE` set back to `-O1` the target passed. `cicd/cicd.bash --ci --quick -y`, `lint-report.bash`, `flags-test.bash` and shellcheck passed.
 	- Swept: every gcc `-fanalyzer` line. `make analyze` and `analyze-shcl` use `GCC_ANALYZE`. The leak mode's null probe still calls gcc-15 at `-O1` itself, since it checks the tool, not the gate's flags. Go, Rust and Python have no gcc analyzer pass.
 	- Branch: round-1023
-	- Test case: vGBqv, in `cicd/c-in-container.bash` lint mode: a leak `-O1` optimizes away must fail `make analyze` with gcc's check name.
+	- Test case: deba8, in `cicd/c-in-container.bash` lint mode: a leak `-O1` optimizes away must fail `make analyze` with gcc's check name.
 	- Acceptance signoff: Self-closed: has a regression test, finds nothing new in our code, and costs little. It departs from the wording by changing the gate as well.
 	- Closed: 2026-10-23 22:38
 
@@ -2356,7 +2496,7 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- 2026-10-23: every packed result block in the C tree. `shclw_i_copy_strs`, `shclw_i_copy_nodes`, and `shclw_i_copy_diags` put only `char` text after their array, and the other `?:` allocations in `shclw3.c` each hold one type.
 	- Branch: round-1021, and round-1023 for the CodeQL fix.
 	- Commit: 56aedbc
-	- Test case: tests/cases/054-merged-unused, the fuzz op, and the leak run's CodeQL step.
+	- Test case: tests/cases/054-merged-unused (de8g6), the fuzz op (ddzw1, ddzw2, de57g, de8ed), and the leak run's CodeQL step.
 	- Acceptance signoff: Self-closed: the CodeQL finding was all that was left, and the leak run that failed on it passes.
 	- Closed: 2026-10-23 20:43
 
@@ -2377,7 +2517,7 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- 20261019: A CRLF file shcl writes out again with LF gets its CRLF back, unless that changes a value, whether it had a block or not. A file shcl leaves alone keeps its own lines.
 	- Branch: banner
 	- Commit: 566cef5, 12beb27
-	- Test case: tests/cases/051-banner-swap (a block at the top of a CRLF file shcl leaves alone, one in the middle of a CRLF file shcl writes out again, a CRLF file with no block, and a file with a line like the swap's own mark). It fails without the change in Go, Rust, and C, and passes with it. In Go it also fails with the in-place step or the CRLF step turned off.
+	- Test case: tests/cases/051-banner-swap, de5g5 (a block at the top of a CRLF file shcl leaves alone, one in the middle of a CRLF file shcl writes out again, a CRLF file with no block, and a file with a line like the swap's own mark). It fails without the change in Go, Rust, and C, and passes with it. In Go it also fails with the in-place step or the CRLF step turned off.
 	- Swept: `Upgrade` in Go, Rust, and C, which `Open` and `UpgradeFile` go through. The swap reuses `InfoBlock`'s block finder in `shclw/info.go`, `src/info.rs`, and `info.c`. Files with a BOM, no final newline, 2 blocks, an indented block, a Format 3 line, and 2.0 errors gave the same output from all 3 drivers.
 	- Verified: `cicd/cicd.bash --quick` and `cicd/cicd.bash --ci --no-sync` pass, with the C clang-tidy, analyzers, and sanitized cases. The full `cicd/cicd.bash` passed on `oldmark` at `9ae45eb`, with CodeQL, clang CTU, the heaptrack soak, and the fuzz.
 	- Acceptance signoff: Self-closed: it does what the item asked, its test failed before the change and passes after, and the full run passes.
@@ -2406,7 +2546,7 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- 20261019, JC left it to the project's goals: bring the rule back, and have `Write` swap 2.x's block for the current one, with its Format line, when the text has no Format line. Real 2.x files from Quillroute read wrong through Open without the rule. With the swap, a file the wrapper saves says what it is, as the upgrade's swap in 2026101513330011 does, and the next Open reads what the program had. Only programs off the wrapper keep the risk, and none is known.
 	- Branch: banner, oldmark
 	- Commit: 765f524, reverted in 907e496, back in 52cdaa3, 5a800e6
-	- Test case: tests/cases/050-banner-2x, and the corrected want file of 039-quillroute. Both fail without the change in Go, Rust, and C, and pass with it.
+	- Test case: tests/cases/050-banner-2x (de5k2), and the corrected want file of 039-quillroute (de5cr). Both fail without the change in Go, Rust, and C, and pass with it.
 		- The save's swap: 050's last `Open`, and Go's TestWriteSwapsOldBlock, Rust's write_swaps_old_block, and C's test_write_swaps_old_block (a CRLF file with the block in the middle, a block's text in a raw body, and a block with a Format line). They fail in all 3 with the swap turned off, and pass with it.
 	- Swept: `Upgrade` in Go, Rust, and C, which `Open` and `UpgradeFile` go through, and the doc comments on all 3. design.md's Open, Format and upgrade, and Decisions, and README's note on old files. The ops runners, `fuzz.py`, and `c_cases.py` only compare outputs.
 		- The swap: `Write`, `Text`, and `Canonical` in all 3, which share one save step, and the `Write` doc comments. design.md's Loading and saving, the evens-out table, and Decisions, and README.
@@ -2447,7 +2587,7 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- 2026-10-19: the slow checks now run by default, per 2026101816214270. `--leakcheck` adds them to `--ci` or `--quick`.
 	- Branch: c-leaks
 	- Commit: 90b409c, dbc9f62
-	- Test case: C API tests and 33 shared cases with 345 operations, over shcl 1-3.
+	- Test case: de2xw (LeakSanitizer), de2xx (gcc's analyzer) and de2xy (heaptrack), the planted fault probes in `cicd/c-in-container.bash` leak mode, de2xz for the soak, plus deba8 and decas for `make analyze`. The gates run over the C API tests and 33 shared cases with 345 operations, over shcl 1-3.
 	- Verified: `cicd/cicd.bash --gate --no-sync -y` passed locally and in the push hook. The pinned slow gate passed CodeQL, CTU, the leak, null, and heap-growth probes, and heaptrack soak on all 3 versions.
 	- Closed: 20261019-060000
 	- Acceptance signoff: Self-closed: each gate was watched to fail on a planted fault, and the merged tree passed.
@@ -2466,7 +2606,7 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Swept: `shclw.h` has no call that hands back or takes a value without its length. Diagnostics, array items, and fallbacks have one too.
 	- Branch: c-core
 	- Commit: 22da342
-	- Test case: `test_nul` and the fallback lines in `test_fallbacks`, in `source/c/tests/api_test.c`. A value holding a NUL, and text and a save holding one, keep every byte. With copies cut at the first NUL, 3 checks failed.
+	- Test case: `test_nul` (de04p) and the fallback lines in `test_fallbacks` (de04n), in `source/c/tests/api_test.c`. A value holding a NUL, and text and a save holding one, keep every byte. With copies cut at the first NUL, 3 checks failed.
 	- Acceptance signoff: 20261016, JC. Strings come back with their length and a NUL after it.
 	- Closed: 20261016-123500
 
@@ -2483,7 +2623,7 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Verified: the gate. The read-only folder refused the writes here, so those tests ran and didn't skip.
 	- Branch: upgrade-file
 	- Commit: efcf6b5
-	- Test case: tests/cases/016-write-refused, Go `TestSaveRefusedByFolder`, `TestSaveRefusedOverFile`, `TestUpgradeBackupTaken`, and `TestUpgradeRealFile`, Rust `save_refused_by_folder`, `save_refused_over_file`, `upgrade_backup_taken`, and `upgrade_real_file`.
+	- Test case: tests/cases/016-write-refused (de00q), Go `TestSaveRefusedByFolder` (de00s), `TestSaveRefusedOverFile` (de00t), `TestUpgradeBackupTaken` (de00v), and `TestUpgradeRealFile` (de00x), Rust `save_refused_by_folder` (de014), `save_refused_over_file` (de015), `upgrade_backup_taken` (de016), and `upgrade_real_file` (de018).
 	- Acceptance signoff: Self-closed: tests only, and "refused save" is covered under both readings.
 	- Closed: 20261015-144411
 
@@ -2501,7 +2641,56 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- Private at first, then public the same day (JC, 2026-10-15).
 	- Progress log:
 		- 20261015: public, with secret scanning on. A plain `go get` works with no settings.
+	- Test case: none, since it's a repo setting.
 	- Closed: 2026-10-15
+
+- The docs check flags the backlog template and a quoted clang message
+	- ID: 2026102411444751
+	- Type: Bug
+	- Status: Done
+	- Severity: Low
+	- Opened: 2026-10-24 11:44
+	- Steps to reproduce [Bug]:
+		- Run the markdown check on `project/backlog.md`.
+	- Incorrect behavior [Bug]:
+		- It reports 4 ellipses, all in the template's placeholder rows, and an ordinal written as digits inside clang's own warning text, quoted on a closed item.
+	- Expected behavior [Bug]:
+		- Placeholders in the template and quoted tool output pass, so a round's docs gate on the backlog is clean.
+	- Reproduced [Bug]: 2026-10-24, on dev and on round-1024, with the same hits.
+	- Actual cause [Bug]: md-check.py checked the whole line, so a placeholder row of a lone ellipsis and text inside double quotes counted as prose.
+	- Actual fix [Bug]: md-check.py skips a placeholder row of a lone ellipsis, and leaves code spans and double-quoted text out of the character, ordinal and word checks.
+	- Progress log:
+		- 2026-10-25: md-check.py now passes the backlog. Over every tracked .md and the private notes, the only change in its output is those 5 lines.
+		- The shared markdown check still lists the template's ellipses, the lines quoting an accented letter, and a "4th", though it exits 0. That check isn't this repo's, so a patch for it is drafted under the private upstream folder, `2026102411444751/`.
+	- Branch: r1025
+	- Test case: None in CI, since md-check.py lives outside the repo. `private/claude_simple/tools/md-check-test.bash` failed 5 of 11 cases on the old check, and passes now.
+	- Verified: `md-check.py project/backlog.md` printed `md-check: clean`, and the test passed.
+	- Swept: md-check.py is the only docs check in the tree. Its ordinal, character and word checks all use the same prose text now.
+	- Acceptance signoff: Self-closed: the test covers each case, and the backlog passes. Departs from the wording in one way: the shared check's own hits wait on the upstream draft.
+	- Closed: 2026-10-25 17:45
+
+- lint-report flags a full run because of a CodeQL query's file name
+	- ID: 2026102509580000
+	- Type: Bug
+	- Status: Done
+	- Severity: Low
+	- Opened: 2026-10-25 09:58
+	- Opened by: JC
+	- Related IDs: 2026102319573100
+	- Steps to reproduce [Bug]:
+		- `cicd/cicd.bash --backlog-run-full`, then `bash cicd/utility/lint-report.bash`.
+	- Incorrect behavior [Bug]: `FLAG ... (4 warning line(s))`, and every line it lists is CodeQL's progress output for `Diagnostics/ExtractionWarnings.ql`.
+	- Expected behavior [Bug]: CLEAN, since all 21 tests passed and nothing warned.
+	- Reproduced [Bug]: 2026-10-25, on the full run at `2a034a0`.
+	- Possible cause [Bug]: lint-report matches "warning" anywhere in a line, query paths included.
+	- Actual cause [Bug]: As above. The match ran on the whole line, so a path with "warning" in it counted.
+	- Actual fix [Bug]: lint-report drops every word with a `/` in it before matching, so a path or file name can't count, while a warning on a line that names a file still does.
+	- Branch: r1025
+	- Test case: dee8b, `cicd/lint-report-test.bash`, in the tests stage. It failed on the 3 CodeQL lines with the old lint-report, and passes now.
+	- Verified: lint-report on the full run's log, `run_20261025-091803`, now says CLEAN. Over every saved run log, that's the only verdict that changed, and the host run's WARNING lines still FLAG. `--backlog-run-quick cicd` passed, CLEAN, and shellcheck passed.
+	- Swept: lint-report.bash is the only warning matcher over run logs here. The `warning:` greps in `c-in-container.bash` match one planted probe line. shcl's own lint-report has the same match, so a note for it is drafted under the private upstream folder, `2026102509580000/`.
+	- Acceptance signoff: Self-closed: dee8b covers it, and the full run's own log reads CLEAN.
+	- Closed: 2026-10-25 17:45
 
 - Python test reads a file in the locale's encoding
 	- ID: 2026102323122726
@@ -2530,7 +2719,7 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- Byte compares rather than `encoding="utf-8"` on the reads, so a CRLF the library wrote on Windows fails the test.
 		- `EncodingWarning` set through the environment, so the driver and the tests' child processes get it too. ruff's PLW1514 is preview only and found 4 of the 7 test calls, so it stays off.
 	- Commit: 94bf156
-	- Test case: vGTH7, the Python tests and shared cases in cicd's tests stage with `EncodingWarning` as an error. Fails on the old tests, passes now.
+	- Test case: decd4, the Python tests and shared cases in cicd's tests stage with `EncodingWarning` as an error. Fails on the old tests, passes now.
 	- Acceptance signoff: Self-closed: its test failed before the fix and passes after, and the tests pass on Windows without UTF-8 mode.
 	- Closed: 2026-10-24
 
@@ -2562,7 +2751,7 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Decisions:
 		- Threads on Windows rather than starting the test program again, since there's no `fork`. Python's race test uses threads too, and C's temp names already differ between threads.
 	- Commit: 94bf156
-	- Test case: vGSU9, `make mingw`, now with `api_test.c`. The Windows runs are `win-tests.ps1` on vm925w.
+	- Test case: decbj, `make mingw`, now with `api_test.c`. The Windows runs are `win-tests.ps1` on vm925w.
 	- Acceptance signoff: Self-closed: its test failed before the fix and passes after, and the C tests run on Windows.
 	- Closed: 2026-10-24
 
@@ -2590,7 +2779,7 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- Verified: test vGTf8 passes, and fails with the old naming put back (4 runs, 1 log). It passes with no `flock` on PATH too. shellcheck is clean, and `cicd.bash --ci --quick -y` passes.
 		- Swept: `stamp` in `cicd.bash` also names the scratch folder, the fuzz failure folder and the sync stash, which now follow the claimed stamp. `c-checks.bash` and the pre-push hook write no run log, and nothing else reads the log names but `lint-report.bash` and the rotation.
 	- Branch: round-1024
-	- Test case: vGTf8, `cicd/log-name-test.bash`, in the tests stage.
+	- Test case: decdx, `cicd/log-name-test.bash`, in the tests stage.
 	- Acceptance signoff: Self-closed: build tooling only, with a test watched to fail.
 	- Closed: 2026-10-24 10:40
 
@@ -2615,7 +2804,7 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- Swept: every `read_text` in `cicd/` and `source/python/`. `c_cases.py` copies the docs with `shutil.copyfile`, and its want files have no CR. Go's `FuzzRun` seeds come from `os.ReadFile`. Both fuzzers' `doc*.shcl` glob leaves out 051's `middle.shcl` and `crlf.shcl`, which are layer files.
 		- C wasn't in the fuzz run, since it needs the container. The end-of-round full run covers it.
 	- Branch: round-1024
-	- Test case: vGTig, `cicd/fuzz_test.py`, in the tests stage.
+	- Test case: dece1, `cicd/fuzz_test.py`, in the tests stage.
 	- Acceptance signoff: Self-closed: build tooling only, with a test watched to fail.
 	- Closed: 2026-10-24 10:40
 
@@ -2641,7 +2830,7 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Verified: two `cicd.bash --ci --quick -y` runs started together in one tree both passed, and the second waited for the first. Two `c-checks.bash quick` runs alone did the same, with the lock held through the container. Test vGSqu passed, and failed with the lock made a no-op, with the pass-through removed, with the helper missing, and with `c-checks.bash` not calling it. shellcheck is clean.
 	- Swept: `cicd.bash` and `c-checks.bash` are the only scripts that write `cicd/artifacts/` or `cicd/cache/` from the host. `c-in-container.bash` runs only under `c-checks.bash`, `flags-test.bash` only calls `--dry-run`, and the pre-push hook goes through `cicd.bash`.
 	- Branch: round-1024
-	- Test case: vGSqu, `cicd/lock-test.bash`, in the tests stage.
+	- Test case: decc9, `cicd/lock-test.bash`, in the tests stage.
 	- Acceptance signoff: Self-closed: build tooling only, with a test watched to fail.
 	- Closed: 2026-10-24 09:55
 
@@ -2664,7 +2853,7 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Verified: the new check passed on the fixed Makefile, and failed naming `analyze-ctu` on the one before the fix. It also failed on a Makefile with no `.PHONY` line. `cicd/cicd.bash --ci --quick -y` passed with it.
 	- Swept: `source/c/Makefile` is the only Makefile in the repo, and the check walks all 14 of its `.PHONY` names.
 	- Branch: round-1023
-	- Test case: vGBt9, in `cicd/cicd.bash` Lint.
+	- Test case: debab, in `cicd/cicd.bash` Lint.
 	- Acceptance signoff: Self-closed: a mechanical fix, and its check was watched to fail.
 	- Closed: 2026-10-23 22:38
 
@@ -2693,7 +2882,7 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Verified: the leak run passed (CodeQL, CTU with all 6 logs empty, the heaptrack soak). With the old `shclw.c` and the new check, the same run failed on this finding. Also the C container lint, the sanitized C tests, and `cicd.bash --ci --quick -y`.
 	- Swept: every function in `source/c` that returns a `shclw_kind` from an `shclw_error`. `too_new` and `not_finite` have no branches, and `set_err` maps a status. All 6 CTU logs are empty.
 	- Branch: round-1023
-	- Test case: the leak run's CTU step, which now fails on any finding.
+	- Test case: the leak run's CTU step, which now fails on any finding of ours, as deb9f checks.
 	- Acceptance signoff: Self-closed: a false report, and the new check was watched to fail on it.
 	- Closed: 2026-10-23 21:20
 
@@ -2715,7 +2904,7 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Verified: the gate and a 20 second fuzz run pass.
 	- Branch: comment-fix
 	- Commit: 0e246a3
-	- Test case: tests/cases/015-comment. It failed on 1.2 and 2.0 in Go and Rust before the fix, and passes after.
+	- Test case: tests/cases/015-comment (de00a). It failed on 1.2 and 2.0 in Go and Rust before the fix, and passes after.
 	- Swept: Put, PutSyntax, Comment, and Remove in Go `shclw1` to `shclw3` and Rust `v1` to `v3`. 3.0 needs no change, since shcl 3.0 refuses these itself. Remove takes out every instance and counts them on every version, as design.md says, so it stays as is. A table written twice reads as one instance on every version, so a comment on it is fine.
 	- Acceptance signoff: Self-closed: matches what Put already does.
 	- Closed: 20261015-143031
@@ -2740,7 +2929,7 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Verified: the gate and a 20 second fuzz, Go against Rust, with no difference.
 	- Branch: small-bugs
 	- Commit: f1ff7a9
-	- Test case: tests/cases/031-names-case. It failed in Go before the fix on 1.2, 2.0, and 3.0, and passes after. Rust and C pass it.
+	- Test case: tests/cases/031-names-case (de06k). It failed in Go before the fix on 1.2, 2.0, and 3.0, and passes after. Rust and C pass it.
 	- Swept: Go `DedupeNames` and `kids`. Rust's `dedupe_names` and `kids` and C's `shclw_i_dedupe_names` already fold ASCII only. No other case folding in the 3 wrappers.
 	- Acceptance signoff: Self-closed: reproduced, and its test failed before the fix and passes after.
 	- Closed: 20261015-175500
@@ -2765,7 +2954,7 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Verified: the gate and a 20 second fuzz, Go against Rust, with no difference.
 	- Branch: small-bugs
 	- Commit: f1ff7a9
-	- Test case: tests/cases/033-upgrade-no-format, and the 3.0 want of 028-format-raw, which had pinned `from 2`. Both failed before the fix in Go and Rust, and pass after.
+	- Test case: tests/cases/033-upgrade-no-format (de06n), and the 3.0 want of 028-format-raw (de03n), which had pinned `from 2`. Both failed before the fix in Go and Rust, and pass after.
 	- Swept: `Upgrade` in Go `shclw3` and Rust `v3`, which `UpgradeFile` goes through. 1.2 and 2.0 already say their own format. C has no upgrade yet.
 	- Acceptance signoff: Self-closed: reproduced, and its test failed before the fix and passes after.
 	- Closed: 20261015-175500
@@ -2814,7 +3003,7 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Verified: the gate, and a 20 second fuzz with no difference. Before the fix the new case and the Go and Rust wildcard tests failed on every version, and the fuzz first and last check failed once wildcards were in its paths.
 	- Branch: several
 	- Commit: 1c33f90
-	- Test case: tests/cases/020-several, Go `TestEachWildcard`, Rust `several` in tests/api.rs, and the fuzz first and last check, which now makes wildcard paths.
+	- Test case: tests/cases/020-several (de021), Go `TestEachWildcard` (de023), Rust `several` (de027) in tests/api.rs, and the fuzz first and last check (ddzw1), which now makes wildcard paths.
 	- Swept: `Each` in Go `shclw1` to `shclw3` and Rust `v1` to `v3`, and what uses it: `Names` on 1.2 and 2.0, `Lines`, `First`, `Last`, and the `each` and `eachget` ops.
 	- Closed: 20261017-11325800
 	- Acceptance signoff: Self-closed: reproduced, and its test failed before the fix and passes after. Expanding matches 3.0's own field list.
@@ -2849,10 +3038,32 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- Every finite float32 goes in as the same float64 in Go and Rust. Before the fix it didn't.
 	- Branch: small-bugs
 	- Commit: f1ff7a9
-	- Test case: tests/cases/032-float-ties, Go `TestPutFloat32`, Rust `put_f32`. The case and `put_f32` failed in Rust before the fix, and pass after. C passes the case.
+	- Test case: tests/cases/032-float-ties (de06m), Go `TestPutFloat32` (ddzzn), Rust `put_f32` (ddzzp). The case and `put_f32` failed in Rust before the fix, and pass after. C passes the case.
 	- Swept: every place Rust turns a float into text, `format_float` and `From<f32>`. Go's and C's already follow Go's rule. No other float-to-text site in the 3 wrappers.
 	- Closed: 20261017-11325800
 	- Acceptance signoff: Self-closed: reproduced, and its test failed before the fix and passes after. Go's rule needed no change to any want file.
+
+- C's 2.0 names check has no test ID
+	- ID: 2026102518381781
+	- Type: Enhancement
+	- Status: Done
+	- Priority: Low
+	- Opened: 2026-10-25 18:38
+	- Related IDs: 2026102416400050, 2026101516111033
+	- Requirements:
+		- The Makefile's `names` check, which fails when a shcl 2.0 name leaks past `shclw3_v2_names.h`, prints a test line with its own ID, per `Testing` in the shared CICD rules. Today it runs inside `make test` with no line of its own.
+	- Progress log:
+		- 2026-10-25: The check is de07q, from c71ca83, its first commit, taking the next free minute after the C tests from that commit. `c-in-container.bash` runs `make names` on its own line in test and quick modes, and a host with no gcc-15 prints its SKIP line.
+		- Verified: `c-checks.bash test 3` and the quick gate printed `PASS de07q`. With one `#define` taken out of `shclw3_v2_names.h`, quick mode printed `FAIL de07q` and exited 2.
+		- Swept: `make test` is the only target that ran `names`, and the container's test mode the only caller. Quick mode now runs it too. Go, Rust and Python take 2.0 as a module, a crate and a file of their own, so there's no name to leak.
+	- Decisions:
+		- `make test` still depends on `names`, so a hand run keeps the check. In the container it runs twice, a fraction of a second.
+		- Quick mode runs it as well, since it's cheap.
+	- Branch: r1025
+	- Commit: 527271e
+	- Test case: de07q, in `cicd/c-in-container.bash` test and quick modes.
+	- Closed: 2026-10-25 18:53
+	- Acceptance signoff: Self-closed: mechanical, and the line was watched to fail.
 
 - Python: run from a copied file
 	- ID: 2026101513330050
@@ -2869,7 +3080,7 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Decisions:
 		- The copy beside the wrapper wins over the installed one, since bundling it is a choice. JC OK'd it on 2026-10-24.
 	- Commit: a4909af
-	- Test case: `source/python/tests/test_shclw.py`, `test_copied` and `test_none`.
+	- Test case: `source/python/tests/test_shclw.py`, `test_copied` (de8en) and `test_none` (de8er).
 	- Acceptance signoff: JC, 2026-10-24.
 	- Closed: 2026-10-24
 

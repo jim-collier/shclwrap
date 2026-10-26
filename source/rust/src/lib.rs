@@ -1921,11 +1921,13 @@ mod create_tests {
 		}
 	}
 
+	// Test ID: de8hz
 	#[test]
 	fn create_race_link() {
 		race("create-link", create_new);
 	}
 
+	// Test ID: de8hy
 	#[test]
 	fn create_race_in_place() {
 		race("create-inplace", create_in_place);

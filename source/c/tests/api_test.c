@@ -46,6 +46,14 @@
 #endif
 
 static int failures;
+// Set by a test that can't run in this build, as the SKIP line's reason.
+static const char *skip_why;
+
+#ifdef __cplusplus
+#define LANG "C++"
+#else
+#define LANG "C"
+#endif
 
 // 3.0 writes an array in brackets.
 #define LIST(items) "[" items "]"
@@ -226,7 +234,7 @@ static void test_reads_give_back(void) {
 	CHECK(grew <= (size_t)64 * 1024);
 	shclw_free(d);
 #else
-	(void)puts("api: memory over many reads isn't measured in this build");
+	skip_why = "memory over many reads isn't measured in this build";
 #endif
 }
 
@@ -736,7 +744,7 @@ static void test_saves_give_back(void) {
 	free(value);
 	shclw_free(d);
 #else
-	(void)puts("api: memory over many saves isn't measured in this build");
+	skip_why = "memory over many saves isn't measured in this build";
 #endif
 }
 
@@ -1624,32 +1632,52 @@ int main(void) {
 		return 2;
 	}
 #endif
-	test_reads();
-	test_fallbacks();
-	test_nul();
-	test_reads_give_back();
-	test_errors();
-	test_walk();
-	test_first_last();
-	test_puts();
-	test_verify_put();
-	test_put_float32();
-	test_shortest();
-	test_several();
-	test_saves_give_back();
-	test_compact();
-	test_save();
-	test_replace_read();
-	test_upgrade();
-	test_upgrade_file();
-	test_upgrade_raced();
-	test_create_raced();
-	test_open_upgrade();
-	test_write_swaps_old_block();
-	test_open_fails_both();
-	test_info();
-	test_rewrites();
-	test_check();
+	static const struct {
+		const char *id;
+		const char *name;
+		void (*run)(void);
+	} tests[] = {
+		{"de04q", "test_reads", test_reads},
+		{"de04n", "test_fallbacks", test_fallbacks},
+		{"de04p", "test_nul", test_nul},
+		{"de04r", "test_reads_give_back", test_reads_give_back},
+		{"de04m", "test_errors", test_errors},
+		{"de05r", "test_walk", test_walk},
+		{"de05h", "test_first_last", test_first_last},
+		{"de05k", "test_puts", test_puts},
+		{"de05q", "test_verify_put", test_verify_put},
+		{"de05j", "test_put_float32", test_put_float32},
+		{"de05p", "test_shortest", test_shortest},
+		{"de05n", "test_several", test_several},
+		{"de05m", "test_saves_give_back", test_saves_give_back},
+		{"de19d", "test_compact", test_compact},
+		{"de08j", "test_save", test_save},
+		{"de07j", "test_replace_read", test_replace_read},
+		{"de07m", "test_upgrade", test_upgrade},
+		{"de07n", "test_upgrade_file", test_upgrade_file},
+		{"de07p", "test_upgrade_raced", test_upgrade_raced},
+		{"de8ht", "test_create_raced", test_create_raced},
+		{"de5d6", "test_open_upgrade", test_open_upgrade},
+		{"de5kk", "test_write_swaps_old_block", test_write_swaps_old_block},
+		{"de5kj", "test_open_fails_both", test_open_fails_both},
+		{"de07h", "test_info", test_info},
+		{"de07k", "test_rewrites", test_rewrites},
+		{"de07g", "test_check", test_check},
+	};
+	for (size_t i = 0; i < sizeof tests / sizeof tests[0]; i++) {
+		int before = failures;
+		skip_why = NULL;
+		tests[i].run();
+		const char *status = "PASS";
+		if (failures > before) {
+			status = "FAIL";
+		} else if (skip_why) {
+			status = "SKIP";
+		}
+		(void)printf("%s %s " LANG " %s%s%s\n", status, tests[i].id, tests[i].name, skip_why ? ", " : "",
+		             skip_why ? skip_why : "");
+		(void)fflush(stdout);
+	}
 	cleanup();
 	if (failures) {
 		(void)fprintf(stderr, "api: %d failed\n", failures);

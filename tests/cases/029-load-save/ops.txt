@@ -1,3 +1,4 @@
+# Test ID: de04k
 text
 canonical
 write	out.shcl

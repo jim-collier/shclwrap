@@ -1,3 +1,4 @@
+# Test ID: de8hs
 # A mode goes on a file the Write creates, exactly, past the umask.
 write	secret.shcl	mode=0600
 mode	secret.shcl

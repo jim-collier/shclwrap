@@ -85,6 +85,7 @@ func readOnlyDir(t *testing.T, files map[string]string) string {
 	return dir
 }
 
+// Test ID: de00r
 func TestReplaceRead(t *testing.T) {
 	const was, now = "a: 1\n", "a: 2\n"
 	boom := errors.New("boom")
@@ -167,6 +168,7 @@ func TestReplaceRead(t *testing.T) {
 // An edit made while UpgradeFile runs must not get past the 2.0 check. The
 // file flips between a clean 2.x text adn one 2.0 has errors on, so a backup
 // holding the bad text means that text was converted unchecked.
+// Test ID: de00w
 func TestUpgradeFileEditedMeanwhile(t *testing.T) {
 	const bad = "x: [ab]\ny: 1\n"
 	root := t.TempDir()
@@ -214,6 +216,7 @@ func TestUpgradeFileEditedMeanwhile(t *testing.T) {
 	}
 }
 
+// Test ID: de00x
 func TestUpgradeRealFile(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "c.shcl")
@@ -249,6 +252,7 @@ func TestUpgradeRealFile(t *testing.T) {
 
 // Something already at the backup's name is never written over, and the
 // file stays as it was.
+// Test ID: de00v
 func TestUpgradeBackupTaken(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "c.shcl")
@@ -282,6 +286,7 @@ func TestUpgradeBackupTaken(t *testing.T) {
 
 // A save the folder won't take is ErrIO, and the file there stays as it
 // was, on every version. So does an upgrade, which then leaves no backup.
+// Test ID: de00s
 func TestSaveRefusedByFolder(t *testing.T) {
 	const text = "a: 1\n"
 	dir := readOnlyDir(t, map[string]string{"c.shcl": text, "u.shcl": clean2x})
@@ -303,6 +308,7 @@ func TestSaveRefusedByFolder(t *testing.T) {
 
 // A save that would drop lines the load couldn't use is refused, and the
 // file it was read from stays as it was.
+// Test ID: de00t
 func TestSaveRefusedOverFile(t *testing.T) {
 	for _, c := range []struct {
 		n    int
@@ -332,6 +338,7 @@ func TestSaveRefusedOverFile(t *testing.T) {
 // Open upgrades a 2.x file in memory and writes nothing. The first Write
 // over it, by any name for the same file, backs up the original, and later
 // ones don't.
+// Test ID: de5d2
 func TestOpenUpgradesInMemory(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "c.shcl")
@@ -370,6 +377,7 @@ func TestOpenUpgradesInMemory(t *testing.T) {
 }
 
 // A file that changed since Open read it is left alone, with no backup.
+// Test ID: de5d1
 func TestOpenUpgradeEditedMeanwhile(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "c.shcl")
@@ -389,6 +397,7 @@ func TestOpenUpgradeEditedMeanwhile(t *testing.T) {
 
 // Something already at the backup's name is never written over. The save
 // is ErrBackupTaken and the file stays as it was.
+// Test ID: de5d0
 func TestOpenUpgradeBackupTaken(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "c.shcl")
@@ -429,6 +438,7 @@ const block2x = "#\r\n# This config file format is SHCL.\r\n# \"Simple Hierarchi
 // A save of a file with 2.x's block and no Format line puts the current block
 // where it sat, with its Format line, so the next Open reads what was put
 // rather than take the file as 2.x (2026101513330010).
+// Test ID: de5kn
 func TestWriteSwapsOldBlock(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "c.shcl")
@@ -469,6 +479,7 @@ func TestWriteSwapsOldBlock(t *testing.T) {
 // A file with no Format line or 2.x block that has errors on 3.0 and 2.0
 // alike is current, with 3.0's errors in Diags. One marked as 2.x is still
 // refused (2026101613005800).
+// Test ID: de5km
 func TestOpenFailsBoth(t *testing.T) {
 	const both = "a: 1\nb: ```\nraw line\nc: 2\n"
 	dir := t.TempDir()
@@ -512,6 +523,7 @@ func TestOpenFailsBoth(t *testing.T) {
 }
 
 // A save through another name for the file Open read is checked too.
+// Test ID: de8h2
 func TestWriteChangedOtherName(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "c.shcl")

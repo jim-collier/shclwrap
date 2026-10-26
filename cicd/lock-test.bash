@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 
+#  shellcheck disable=1091  ## 'Not following.' The include is found at run time.
 #  shellcheck disable=2016  ## The grep looks for a literal "${root}".
 
 ##	Purpose: Test decc9. Two cicd runs in one tree must not overlap, since they
@@ -13,10 +14,11 @@ set -Eeuo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 lib="${here}/utility/include/run-lock.bash"
 [[ -f "${lib}" ]] || { echo "decc9: no ${lib}" >&2; exit 1; }
+source "${here}/utility/include/safe-rm.bash"
 scratch="$(mktemp -d "${TMPDIR:-/tmp}/test_shclw_lock_XXXXXX")"
 touch "${scratch}/.shclw-lock-owned"
 fCleanup(){
-	if [[ -f "${scratch}/.shclw-lock-owned" ]]; then rm -rf -- "${scratch}"; fi
+	if [[ -f "${scratch}/.shclw-lock-owned" ]]; then fSafeRm "${scratch}" >/dev/null; fi
 	return 0
 }
 trap fCleanup EXIT

@@ -1,3 +1,4 @@
+# Test ID: de8g6
 # Copies with the same name and value fold into the first, next to each
 # other or apart, and every level of a folded block says so. A dotted line
 # that only reopens a block, and a repeated key with another value, aren't

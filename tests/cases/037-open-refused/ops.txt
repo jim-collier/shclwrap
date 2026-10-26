@@ -1,3 +1,4 @@
+# Test ID: de5cp
 # 2.x's info block marks this file as 2.x, and shcl 2.0 reports errors on
 # it, so Open refuses it with 2.0's errors, gives an empty document, and
 # writes nothing.

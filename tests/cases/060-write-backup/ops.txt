@@ -1,3 +1,4 @@
+# Test ID: decep
 # A save that would lose lines is refused. Backup copies the file Open read
 # aside first, and then writes.
 open	doc.shcl

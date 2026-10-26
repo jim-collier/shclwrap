@@ -52,6 +52,7 @@ func infoOn(t *testing.T, n int, lib shclw.Lib, text string) string {
 
 // Each old spelling, above the first field, between two, and at the end,
 // becomes one block at the end, and every version leaves the same text.
+// Test ID: de036
 func TestInfoOldSpellings(t *testing.T) {
 	for i, old := range oldBlocks {
 		for _, at := range []string{"%sa: 1\nb: 2\n", "a: 1\n%sb: 2\n", "a: 1\nb: 2\n\n%s"} {
@@ -74,6 +75,7 @@ func TestInfoOldSpellings(t *testing.T) {
 
 // Where shcl 3.0's own SetBanner finds the old block, the wrapper writes
 // what it writes.
+// Test ID: de035
 func TestInfoMatchesSetBanner(t *testing.T) {
 	for _, text := range []string{
 		"a: 1\nb: 2\n",
@@ -112,6 +114,7 @@ func TestInfoMatchesSetBanner(t *testing.T) {
 
 // An edit after InfoBlock that names an older format leaves Text without
 // the block, and Write refuses, writing nothing.
+// Test ID: de037
 func TestInfoWriteRefused(t *testing.T) {
 	dir := t.TempDir()
 	for _, v := range libs {

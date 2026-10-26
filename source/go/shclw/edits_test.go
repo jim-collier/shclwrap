@@ -41,6 +41,7 @@ var edits = map[string]func(d shclw.Doc, path string) error{
 	"Comment":   func(d shclw.Doc, p string) error { return d.Comment(p, "c") },
 }
 
+// Test ID: de022
 func TestDocMethodsSorted(t *testing.T) {
 	typ := reflect.TypeOf((*shclw.Doc)(nil)).Elem()
 	seen := map[string]bool{}
@@ -67,6 +68,7 @@ const severalDoc = "tv: one\n\tg: 1\ntv: two\nn: 1\nn: 2\nu:\n\tv: 1\n\tv: 2\n\t
 
 // Every edit refuses a path that reaches several instances at any step, as
 // 3.0 does, and changes nothing. 1.2 and 2.0 took the first one.
+// Test ID: de025
 func TestEditsRefuseSeveral(t *testing.T) {
 	paths := []string{"n", "n.x", "tv", "tv.g", "tv.h", "tv.g.h", "u.v", "u.v.w", "u.v.w.x"}
 	for _, v := range libs {
@@ -85,6 +87,7 @@ func TestEditsRefuseSeveral(t *testing.T) {
 
 // A path from Each, First, or Last names one instance at every step, so an
 // edit takes it and changes that one alone.
+// Test ID: de024
 func TestEditsOnOneInstance(t *testing.T) {
 	for _, v := range libs {
 		for name, edit := range edits {
@@ -121,6 +124,7 @@ func TestEditsOnOneInstance(t *testing.T) {
 
 // Remove takes every instance, wherever the path repeats, the same on every
 // version.
+// Test ID: de026
 func TestRemoveTakesAll(t *testing.T) {
 	for _, v := range libs {
 		for _, p := range []string{"n", "tv.g", "u.v", "u.v.w"} {
@@ -135,6 +139,7 @@ func TestRemoveTakesAll(t *testing.T) {
 
 // Each on a wildcard lists the nodes it reaches, each read alone and with
 // its line. A slot that reaches no node is left out, as 3.0 leaves it.
+// Test ID: de023
 func TestEachWildcard(t *testing.T) {
 	doc := "a:\n\tx:\n\t\tb: 1\n\tz:\n\t\tb: 2\n\ty:\n\t\tc: 3\n\tx: again\n\t\tb: 4\n"
 	for _, v := range libs {
