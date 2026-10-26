@@ -88,7 +88,7 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 - CICD reset: containers
 	- ID: 2026102416400010
 	- Type: Enhancement
-	- Status: Queued
+	- Status: Done
 	- Priority: High
 	- Opened: 2026-10-24 16:40
 	- Opened by: JC
@@ -102,8 +102,10 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- `--no-container` runs on the host on purpose.
 		- A test whose point is the real OS, such as Windows file behavior, stays on the host or a test box.
 	- Progress log:
+	- Closed: 20261025
 		- 2026-10-25: Split into 2026102507474935 (C falls back to the host) and 2026102507474940 (Go, Rust and Python in a pinned image).
 		- 2026-10-25: 2026102507474935 is Done. C runs on the host with docker missing, a C image that won't build, or `--no-container`.
+	- 2026-10-25: Closed with its 2 children, 2026102507474935 and 2026102507474940, both Done.
 
 - CICD reset: a test for every Done item
 	- ID: 2026102416400050
