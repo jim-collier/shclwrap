@@ -323,6 +323,7 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- Go only. It's the reference implementation and has a profiler built in, and `perf` can't record on this box, so Rust and C would need an in-process sampler as new dependencies.
 		- The benchmark runs the shared cases, so the profile follows what the tests cover, with no workload of its own to keep up.
 		- The step fails only when the benchmark does. A flamegraph that won't convert, or a summary that won't parse, is a warning.
+	- Commit: a2c78dd
 	- Test case: deeap, `cicd/profile-test.bash`, for the flamegraph and its summary, and de7yv for which runs leave the step out.
 	- Closed: 2026-10-25 19:16
 	- Acceptance signoff: Self-closed: deeap and de7yv cover it, and the step adds nothing a person has to judge.
