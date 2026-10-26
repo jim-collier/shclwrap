@@ -118,6 +118,23 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- Quillroute plans to have its release refuse a commit pin. The same check would fit here.
 		- 2026-10-25: Until the beta, the pin follows shcl's newest dev commit, not an old one. `cicd/bump-shcl.bash` moves every 3.0 pin at once. Moved from `ea0998fa` to `a65eceb8`.
 
+- Follow shcl's newest dev commit
+	- ID: 2026102616480100
+	- Type: Task
+	- Status: Queued
+	- Priority: High
+	- Opened: 2026-10-26 16:48
+	- Opened by: JC
+	- Branch: shcl-dev-pin
+	- Related IDs: 2026101512024165
+	- Requirements:
+		- The 3.0 pin moves to shcl's newest dev commit in all 4 languages, with `cicd/bump-shcl.bash`.
+		- Upgrades of 2.x files follow shcl's new migrate rules, and the shared cases pass.
+		- The analyzer known list is made for the new pin.
+	- Notes:
+		- Tallowbase's move to shcl 3 waits on this.
+		- 2026-10-25: branch `shcl-dev-pin` moved the pin to `a65eceb8`. It builds, with a refusal for shcl's new `errors_left` in all 4 languages. 8 shared cases fail. 2.x upgrades that used to work come back `ambiguous` or `refused`, with W002 from the wrapper's own check after the conversion.
+
 - Run the tests on Windows and macOS
 	- ID: 2026101512024174
 	- Type: Task
