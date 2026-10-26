@@ -515,35 +515,6 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- 2026-10-24: JC wants a hosted workflow for this.
 		- 2026-10-24, CICD reset: per `macOS builds on GitHub` and `Merge gate` in the shared CICD rules. One small workflow on push and PR against main, plus `workflow_dispatch`, runs `--merge-gate` as far as the runner can, with the arm64 macOS job beside it. cicd.bash flags picked by how long the job takes start it. It's free while the repo is public.
 
-- The docs check flags the backlog template and a quoted clang message
-	- ID: 2026102411444751
-	- Type: Bug
-	- Status: Queued
-	- Severity: Low
-	- Opened: 2026-10-24 11:44
-	- Steps to reproduce [Bug]:
-		- Run the markdown check on `project/backlog.md`.
-	- Incorrect behavior [Bug]:
-		- It reports 4 ellipses, all in the template's placeholder rows, and an ordinal written as digits inside clang's own warning text, quoted on a closed item.
-	- Expected behavior [Bug]:
-		- Placeholders in the template and quoted tool output pass, so a round's docs gate on the backlog is clean.
-	- Reproduced [Bug]: 2026-10-24, on dev and on round-1024, with the same hits.
-
-- lint-report flags a full run because of a CodeQL query's file name
-	- ID: 2026102509580000
-	- Type: Bug
-	- Status: Queued
-	- Severity: Low
-	- Opened: 2026-10-25 09:58
-	- Opened by: JC
-	- Related IDs: 2026102319573100
-	- Steps to reproduce [Bug]:
-		- `cicd/cicd.bash --backlog-run-full`, then `bash cicd/utility/lint-report.bash`.
-	- Incorrect behavior [Bug]: `FLAG ... (4 warning line(s))`, and every line it lists is CodeQL's progress output for `Diagnostics/ExtractionWarnings.ql`.
-	- Expected behavior [Bug]: CLEAN, since all 21 tests passed and nothing warned.
-	- Reproduced [Bug]: 2026-10-25, on the full run at `2a034a0`.
-	- Possible cause [Bug]: lint-report matches "warning" anywhere in a line, query paths included.
-
 - Say which layer a read came from
 	- ID: 2026102114101028
 	- Type: Enhancement
@@ -2502,6 +2473,54 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Progress log:
 		- 20261015: public, with secret scanning on. A plain `go get` works with no settings.
 	- Closed: 2026-10-15
+
+- The docs check flags the backlog template and a quoted clang message
+	- ID: 2026102411444751
+	- Type: Bug
+	- Status: Done
+	- Severity: Low
+	- Opened: 2026-10-24 11:44
+	- Steps to reproduce [Bug]:
+		- Run the markdown check on `project/backlog.md`.
+	- Incorrect behavior [Bug]:
+		- It reports 4 ellipses, all in the template's placeholder rows, and an ordinal written as digits inside clang's own warning text, quoted on a closed item.
+	- Expected behavior [Bug]:
+		- Placeholders in the template and quoted tool output pass, so a round's docs gate on the backlog is clean.
+	- Reproduced [Bug]: 2026-10-24, on dev and on round-1024, with the same hits.
+	- Actual cause [Bug]: md-check.py checked the whole line, so a placeholder row of a lone ellipsis and text inside double quotes counted as prose.
+	- Actual fix [Bug]: md-check.py skips a placeholder row of a lone ellipsis, and leaves code spans and double-quoted text out of the character, ordinal and word checks.
+	- Progress log:
+		- 2026-10-25: md-check.py now passes the backlog. Over every tracked .md and the private notes, the only change in its output is those 5 lines.
+		- The shared markdown check still lists the template's ellipses, the lines quoting an accented letter, and a "4th", though it exits 0. That check isn't this repo's, so a patch for it is drafted under the private upstream folder, `2026102411444751/`.
+	- Branch: r1025
+	- Test case: None in CI, since md-check.py lives outside the repo. `private/claude_simple/tools/md-check-test.bash` failed 5 of 11 cases on the old check, and passes now.
+	- Verified: `md-check.py project/backlog.md` printed `md-check: clean`, and the test passed.
+	- Swept: md-check.py is the only docs check in the tree. Its ordinal, character and word checks all use the same prose text now.
+	- Acceptance signoff: Self-closed: the test covers each case, and the backlog passes. Departs from the wording in one way: the shared check's own hits wait on the upstream draft.
+	- Closed: 2026-10-25 17:45
+
+- lint-report flags a full run because of a CodeQL query's file name
+	- ID: 2026102509580000
+	- Type: Bug
+	- Status: Done
+	- Severity: Low
+	- Opened: 2026-10-25 09:58
+	- Opened by: JC
+	- Related IDs: 2026102319573100
+	- Steps to reproduce [Bug]:
+		- `cicd/cicd.bash --backlog-run-full`, then `bash cicd/utility/lint-report.bash`.
+	- Incorrect behavior [Bug]: `FLAG ... (4 warning line(s))`, and every line it lists is CodeQL's progress output for `Diagnostics/ExtractionWarnings.ql`.
+	- Expected behavior [Bug]: CLEAN, since all 21 tests passed and nothing warned.
+	- Reproduced [Bug]: 2026-10-25, on the full run at `2a034a0`.
+	- Possible cause [Bug]: lint-report matches "warning" anywhere in a line, query paths included.
+	- Actual cause [Bug]: As above. The match ran on the whole line, so a path with "warning" in it counted.
+	- Actual fix [Bug]: lint-report drops every word with a `/` in it before matching, so a path or file name can't count, while a warning on a line that names a file still does.
+	- Branch: r1025
+	- Test case: dee8b, `cicd/lint-report-test.bash`, in the tests stage. It failed on the 3 CodeQL lines with the old lint-report, and passes now.
+	- Verified: lint-report on the full run's log, `run_20261025-091803`, now says CLEAN. Over every saved run log, that's the only verdict that changed, and the host run's WARNING lines still FLAG. `--backlog-run-quick cicd` passed, CLEAN, and shellcheck passed.
+	- Swept: lint-report.bash is the only warning matcher over run logs here. The `warning:` greps in `c-in-container.bash` match one planted probe line. shcl's own lint-report has the same match, so a note for it is drafted under the private upstream folder, `2026102509580000/`.
+	- Acceptance signoff: Self-closed: dee8b covers it, and the full run's own log reads CLEAN.
+	- Closed: 2026-10-25 17:45
 
 - Python test reads a file in the locale's encoding
 	- ID: 2026102323122726
