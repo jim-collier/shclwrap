@@ -7,7 +7,7 @@
 ##			format-check  the same, changing nothing
 ##			lint          go vet, staticcheck, clippy, ruff
 ##			test          the Go, Rust and Python tests, and Python's shared cases,
-##			              a test line per shared case in each
+##			              a test line per test function and shared case in each
 ##			drivers       the Go and Rust fuzz drivers, into WORK/bin
 ##			gofuzz SECS   Go's own fuzzer
 ##			fuzz ARGS...  fuzz.py, Rust and Python against Go, with no C
@@ -85,13 +85,15 @@ case "${mode}" in
 		;;
 	test)
 		if fArea go; then
-			## go test hides a passing test's output, so the case lines come from its JSON.
+			## go test hides a passing test's output, so the test lines come from its JSON.
 			(cd "${root}/source/go" && TMPDIR="${work}" go test -json -p "${jobs}" ./...) \
 				| PYTHONPYCACHEPREFIX="${work}/pycache" python3 "${here}/go_test_lines.py" --cases "${root}/tests/cases"
 			fEcho "OK: Go tests"
 		fi
 		if fArea rust; then
-			(cd "${root}/source/rust" && TMPDIR="${work}" cargo test --quiet "${cargoLocked[@]}" -j "${jobs}" --all-features)
+			## --tests leaves out the doc examples, which aren't tests. Pretty gives a line per test.
+			(cd "${root}/source/rust" && TMPDIR="${work}" cargo test --quiet "${cargoLocked[@]}" -j "${jobs}" --all-features --tests -- --format pretty) \
+				| PYTHONPYCACHEPREFIX="${work}/pycache" python3 "${here}/rust_test_lines.py"
 			fEcho "OK: Rust tests"
 		fi
 		if ! fArea python; then
@@ -100,7 +102,7 @@ case "${mode}" in
 			## A text read or write left to the locale's encoding fails here, not first on Windows.
 			fTest_Start decd4 "Python tests and shared cases, encoding warnings as errors"
 			export PYTHONWARNDEFAULTENCODING=1 PYTHONWARNINGS=error::EncodingWarning PYTHONPATH="${pyPath}" PYTHONPYCACHEPREFIX="${work}/pycache"
-			(cd "${root}/source/python" && TMPDIR="${work}" python3 -m unittest discover -q -s tests)
+			(cd "${root}/source/python" && TMPDIR="${work}" python3 "${here}/py_tests.py" tests)
 			python3 "${here}/c_cases.py" --lang Python --version 3 --cases "${root}/tests/cases" \
 				--drive python3 "${root}/source/python/shclw_drive.py"
 			unset PYTHONWARNDEFAULTENCODING PYTHONWARNINGS PYTHONPATH
@@ -132,3 +134,4 @@ esac
 ##	History:
 ##		- 2026-10-25 JC: Created, from cicd.bash's Go, Rust and Python commands.
 ##		- 2026-10-25 JC: A test line per shared case in Go, and one for Go's fuzzer.
+##		- 2026-10-25 JC: A test line per Go, Rust and Python test function.

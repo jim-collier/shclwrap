@@ -20,6 +20,7 @@ fn check_verify<L: Lib>(n: u32) {
 	assert_eq!(e.kind, ErrKind::NoReadBack, "v{n}: missing array");
 }
 
+// Test ID: ddzw8
 #[test]
 fn verify() {
 	check_verify::<shclw::v3::Version>(3);
@@ -70,11 +71,13 @@ fn check_f32<L: Lib>(n: u32) {
 	}
 }
 
+// Test ID: ddzzp
 #[test]
 fn put_f32() {
 	check_f32::<shclw::v3::Version>(3);
 }
 
+// Test ID: ddzw7
 #[test]
 fn open() {
 	let scratch = Scratch::new("api");
@@ -117,6 +120,7 @@ fn check_inner<D: ShclDoc>(n: u32, d: &D, paths: &[String]) {
 	assert!(d.text().contains("set inside"), "v{n}: text() misses the inner edit");
 }
 
+// Test ID: ddzwm
 #[test]
 fn inner() {
 	let mut d3 = shclw::v3::parse("a: 1\n");
@@ -135,6 +139,7 @@ fn inner() {
 
 /// A 2.x file the old shcl reported errors on is refused, and `upgrade_file`
 /// leaves it as it was, with no backup. A clean one still goes.
+// Test ID: de004
 #[test]
 fn upgrade_refuses_old_errors() {
 	let scratch = Scratch::new("upgrade");
@@ -177,6 +182,7 @@ fn check_rewrites_new<L: Lib>(n: u32, mut fresh: L::Doc) {
 	);
 }
 
+// Test ID: de01a
 #[test]
 fn rewrites_new() {
 	check_rewrites_new::<shclw::v3::Version>(3, shclw::v3::new());
@@ -204,6 +210,7 @@ fn check_first_last<L: Lib>(n: u32) {
 	assert_eq!(d.last("nope"), "nope", "v{n}: last of a missing path");
 }
 
+// Test ID: de01g
 #[test]
 fn first_last() {
 	check_first_last::<shclw::v3::Version>(3);
@@ -278,6 +285,7 @@ fn check_several<L: Lib>(n: u32) {
 	assert_eq!(d.int(&d.last("a.*.b"), 0), 4, "v{n}: last of a.*.b");
 }
 
+// Test ID: de027
 #[test]
 fn several() {
 	check_several::<shclw::v3::Version>(3);
@@ -327,6 +335,7 @@ fn check_old_spellings<L: Lib>(n: u32) {
 	}
 }
 
+// Test ID: de038
 #[test]
 fn info_old_spellings() {
 	check_old_spellings::<shclw::v3::Version>(3);
@@ -345,6 +354,7 @@ fn check_info_write_refused<L: Lib>(n: u32, dir: &std::path::Path) {
 	assert!(!path.exists(), "v{n}: write left a file");
 }
 
+// Test ID: de039
 #[test]
 fn info_write_refused() {
 	let scratch = Scratch::new("info");

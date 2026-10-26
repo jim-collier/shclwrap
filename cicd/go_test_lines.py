@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 ## Purpose: Reads `go test -json` on stdin and prints a PASS, FAIL or SKIP line
-##	per shared case, by the case's test ID (2026102507142902). A failed test's
+##	per shared case, by the case's test ID (2026102507142902), and per test
+##	function, by the ID on its comment (2026102507142905). A failed test's
 ##	output and each package's ok line come through as go test prints them.
-##	Exits 1 when any test or build failed.
+##	Exits 1 when any test or build failed, or a test has no ID.
 ## Copyright © 2026 Jim Collier [ID: 2უNაɘ«҂թȹɤξπ๙¿ձϖ]
 ## SPDX-License-Identifier: MIT
 
@@ -15,6 +16,7 @@ import sys
 from pathlib import Path
 
 from c_cases import case_id
+from test_ids import RUNNERS, ids
 
 CASE_TEST = re.compile(r"TestCases/([^/]+)/v\d+")
 SKIP_WHY = re.compile(r"^\s+\S+_test\.go:\d+: (.+)$")
@@ -26,6 +28,7 @@ def main() -> int:
 	args = ap.parse_args()
 
 	said: dict[tuple[str, str], list[str]] = {}
+	go_ids = ids("Go")
 	failed = False
 	for raw in sys.stdin:
 		try:
@@ -42,13 +45,23 @@ def main() -> int:
 			continue
 		lines = said.pop(key, [])
 		m = CASE_TEST.fullmatch(test)
-		tid = case_id(args.cases / m.group(1)) if m else None
-		if m and not tid:
-			print(f"  {m.group(1)}: no '# Test ID:' first line in ops.txt", file=sys.stderr, flush=True)
+		name = f"case {m.group(1)}" if m else test
+		## A subtest rolls up into its function's line.
+		if m:
+			tid = case_id(args.cases / m.group(1))
+			if not tid:
+				print(f"  {m.group(1)}: no '# Test ID:' first line in ops.txt", file=sys.stderr, flush=True)
+		elif test and "/" not in test and test not in RUNNERS:
+			tid = go_ids.get(test)
+			if not tid:
+				print(f"  {test}: no '// Test ID:' line just above it", file=sys.stderr, flush=True)
+		else:
+			name = ""
+		if name and not tid:
 			failed = True
-		elif m:
+		elif name:
 			why = next((w.group(1) for w in map(SKIP_WHY.match, lines) if w), "") if action == "skip" else ""
-			print(f"{action.upper()} {tid} Go case {m.group(1)}{', ' + why if why else ''}", flush=True)
+			print(f"{action.upper()} {tid} Go {name}{', ' + why if why else ''}", flush=True)
 		if action in ("fail", "build-fail"):
 			failed = True
 			sys.stderr.write("".join(lines))

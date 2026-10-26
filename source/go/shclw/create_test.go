@@ -15,6 +15,7 @@ import (
 
 // Of several creates of one name at once, exactly one wins, and the file is
 // all of the winner's text.
+// Test ID: de8hv
 func TestCreateRace(t *testing.T) {
 	for name, create := range map[string]func(path, data string) error{
 		"link":    func(path, data string) error { return CreateNew(path, data, 0o600) },

@@ -32,6 +32,7 @@ func innerSeen(t *testing.T, n int, d shclw.Doc, paths []string) {
 	}
 }
 
+// Test ID: ddzwk
 func TestInner(t *testing.T) {
 	d3 := shclw3.Parse("a: 1\n")
 	if d3.Inner().SetEmpty("a") != s3.SetOk || d3.Inner().SetString("b", "set inside") != s3.SetOk {

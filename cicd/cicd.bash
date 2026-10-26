@@ -448,7 +448,7 @@ if fStep_On "Tests"; then
 		fTest -q de7yv "cicd flag mixes" bash "${here}/flags-test.bash"
 		fTest dece1 "fuzz corpus keeps its bytes" env PYTHONPYCACHEPREFIX="${work}/pycache" PYTHONWARNDEFAULTENCODING=1 PYTHONWARNINGS=error::EncodingWarning python3 "${here}/fuzz_test.py" -q LoadCorpus
 		fTest dedph "fuzz judges the generator only from enough cases" env TMPDIR="${work}" PYTHONPYCACHEPREFIX="${work}/pycache" PYTHONWARNDEFAULTENCODING=1 PYTHONWARNINGS=error::EncodingWarning python3 "${here}/fuzz_test.py" -q Judge
-		fTest dee8t "shared cases and fuzz print a test line each, by their own IDs" env TMPDIR="${work}" PYTHONPYCACHEPREFIX="${work}/pycache" PYTHONWARNDEFAULTENCODING=1 PYTHONWARNINGS=error::EncodingWarning python3 "${here}/test_lines_test.py" -q
+		fTest dee8t "shared cases, language tests and fuzz print a test line each, by their own IDs" env TMPDIR="${work}" PYTHONPYCACHEPREFIX="${work}/pycache" PYTHONWARNDEFAULTENCODING=1 PYTHONWARNINGS=error::EncodingWarning python3 "${here}/test_lines_test.py" -q
 		fTest -q decc9 "one cicd run per tree at a time" env TMPDIR="${work}" bash "${here}/lock-test.bash"
 		fTest -q decdx "runs started in the same second get their own logs" env TMPDIR="${work}" bash "${here}/log-name-test.bash"
 		fTest -q dee8b "lint-report doesn't read a path as a warning" env TMPDIR="${work}" bash "${here}/lint-report-test.bash"

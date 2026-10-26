@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-## Purpose: Test dee8t. Every shared case has its own test ID, and the case
-##	and fuzz runs print one PASS, FAIL or SKIP line per test by it
-##	(2026102507142902, 2026102507142907).
+## Purpose: Test dee8t. Every shared case and every Go, Rust, Python and C
+##	test has its own test ID, and the runs print one PASS, FAIL or SKIP line
+##	per test by it (2026102507142902, 2026102507142905, 2026102507142907).
 ## Copyright © 2026 Jim Collier [ID: 2უNაɘ«҂թȹɤξπ๙¿ձϖ]
 ## SPDX-License-Identifier: MIT
 
@@ -20,13 +20,30 @@ sys.path.insert(0, str(here))
 
 import c_cases  # noqa: E402
 import fuzz  # noqa: E402
+import test_ids  # noqa: E402
 
 CASES = here.parent / "tests" / "cases"
 TEST_ID = re.compile(r"[0-9a-hjkmnp-tv-z]{5}")
 
 
-def run(*cmd: str, stdin: str = "") -> subprocess.CompletedProcess[str]:
-	return subprocess.run(cmd, input=stdin, capture_output=True, text=True, encoding="utf-8", check=False)
+def run(*cmd: str, stdin: str = "", cwd: str | None = None) -> subprocess.CompletedProcess[str]:
+	return subprocess.run(cmd, input=stdin, capture_output=True, text=True, encoding="utf-8", check=False, cwd=cwd)
+
+
+def cicd_ids() -> set[str]:
+	taken = {tid for tid, _ in fuzz.TESTS.values()}
+	bash = "\n".join(
+		p.read_text(encoding="utf-8") for p in [*here.glob("*.bash"), *here.glob("utility/include/*.bash")]
+	)
+	taken |= {
+		a or b
+		for a, b in re.findall(r"(?:fTest(?: -q)?|fTest_Start|fTest_Skip) ([0-9a-z]{5}) |\[([0-9a-z]{5})\]=", bash)
+	}
+	return taken
+
+
+def case_ids() -> set[str]:
+	return {str(c_cases.case_id(p)) for p in CASES.iterdir() if p.is_dir()}
 
 
 class CaseIds(unittest.TestCase):
@@ -38,15 +55,109 @@ class CaseIds(unittest.TestCase):
 			self.assertNotIn(tid, seen, f"{case.name} and {seen.get(str(tid))} share {tid}")
 			seen[str(tid)] = case.name
 		self.assertGreater(len(seen), 50)
-		taken = {tid for tid, _ in fuzz.TESTS.values()}
-		bash = "\n".join(
-			p.read_text(encoding="utf-8") for p in [*here.glob("*.bash"), *here.glob("utility/include/*.bash")]
+		self.assertFalse(cicd_ids() & seen.keys(), "a case ID is also a cicd or fuzz test's")
+
+
+class LangIds(unittest.TestCase):
+	def test_each_test_has_its_own(self) -> None:
+		tests = test_ids.all_tests()
+		for lang, least in (("Go", 20), ("Rust", 20), ("Python", 10), ("C", 20)):
+			self.assertGreaterEqual(sum(t.lang == lang for t in tests), least, f"too few {lang} tests found")
+		seen: dict[str, str] = {}
+		for t in tests:
+			self.assertIsNotNone(t.tid, f"{t.lang} {t.name} ({t.where}) has no test ID")
+			self.assertTrue(TEST_ID.fullmatch(str(t.tid)), t.tid)
+			self.assertNotIn(t.tid, seen, f"{t.lang} {t.name} and {seen.get(str(t.tid))} share {t.tid}")
+			seen[str(t.tid)] = f"{t.lang} {t.name}"
+		self.assertFalse((cicd_ids() | case_ids()) & seen.keys(), "a test's ID is also a case's, or cicd's")
+
+	def test_c_table_has_every_test(self) -> None:
+		api = here.parent / "source" / "c" / "tests" / "api_test.c"
+		defs = set(re.findall(r"^static void (test_\w+)\(void\) \{", api.read_text(encoding="utf-8"), re.M))
+		self.assertEqual({t.name for t in test_ids.scan("C", api)}, defs)
+
+	def test_go_json(self) -> None:
+		go = test_ids.ids("Go")
+		events = [
+			{"Action": "pass", "Package": "p", "Test": "TestCreateRace/link"},
+			{"Action": "pass", "Package": "p", "Test": "TestCreateRace"},
+			{"Action": "pass", "Package": "p", "Test": "TestCases"},
+			{
+				"Action": "output",
+				"Package": "p",
+				"Test": "TestSaveRefusedByFolder",
+				"Output": "    files_test.go:83: a read-only folder still takes new files here\n",
+			},
+			{"Action": "skip", "Package": "p", "Test": "TestSaveRefusedByFolder"},
+			{"Action": "fail", "Package": "p", "Test": "TestOpen"},
+			{"Action": "pass", "Package": "p", "Test": "TestNoSuchThing"},
+		]
+		p = run(
+			sys.executable,
+			str(here / "go_test_lines.py"),
+			"--cases",
+			str(CASES),
+			stdin="".join(json.dumps(e) + "\n" for e in events),
 		)
-		taken |= {
-			a or b
-			for a, b in re.findall(r"(?:fTest(?: -q)?|fTest_Start|fTest_Skip) ([0-9a-z]{5}) |\[([0-9a-z]{5})\]=", bash)
-		}
-		self.assertFalse(taken & seen.keys(), "a case ID is also a cicd or fuzz test's")
+		self.assertEqual(
+			p.stdout.splitlines(),
+			[
+				f"PASS {go['TestCreateRace']} Go TestCreateRace",
+				f"SKIP {go['TestSaveRefusedByFolder']} Go TestSaveRefusedByFolder, "
+				"a read-only folder still takes new files here",
+				f"FAIL {go['TestOpen']} Go TestOpen",
+			],
+		)
+		self.assertIn("TestNoSuchThing: no '// Test ID:' line", p.stderr)
+		self.assertEqual(p.returncode, 1)
+
+	def test_rust(self) -> None:
+		rust = test_ids.ids("Rust")
+		out = (
+			"\nrunning 4 tests\n"
+			"test create_tests::create_race_link ... ok\n"
+			"test open ... FAILED\n"
+			"test inner ... ignored, needs a FAT volume\n"
+			"PASS ddzvq Rust case 001-reads\n"
+			"test no_such_thing ... ok\n"
+			"\ntest result: FAILED. 2 passed; 1 failed; 1 ignored\n"
+		)
+		p = run(sys.executable, str(here / "rust_test_lines.py"), stdin=out)
+		self.assertEqual(
+			p.stdout.splitlines(),
+			[
+				f"PASS {rust['create_race_link']} Rust create_race_link",
+				f"FAIL {rust['open']} Rust open",
+				f"SKIP {rust['inner']} Rust inner, needs a FAT volume",
+				"PASS ddzvq Rust case 001-reads",
+				"test result: FAILED. 2 passed; 1 failed; 1 ignored",
+			],
+		)
+		self.assertIn("no_such_thing: no '// Test ID:' line", p.stderr)
+		self.assertEqual(p.returncode, 1)
+
+	def test_python(self) -> None:
+		with tempfile.TemporaryDirectory() as tmp:
+			(Path(tmp) / "tests").mkdir()
+			(Path(tmp) / "tests" / "test_x.py").write_text(
+				"import unittest\n\n\nclass X(unittest.TestCase):\n"
+				"\t# Test ID: aaab1\n\tdef test_good(self):\n\t\tpass\n\n"
+				"\t# Test ID: aaab2\n\tdef test_bad(self):\n\t\tself.fail('no')\n\n"
+				"\t# Test ID: aaab3\n\t@unittest.skip('not here')\n\tdef test_skipped(self):\n\t\tpass\n\n"
+				"\tdef test_no_id(self):\n\t\tpass\n",
+				encoding="utf-8",
+			)
+			p = run(sys.executable, str(here / "py_tests.py"), "tests", cwd=tmp)
+		self.assertEqual(
+			p.stdout.splitlines(),
+			[
+				"FAIL aaab2 Python X.test_bad",
+				"PASS aaab1 Python X.test_good",
+				"SKIP aaab3 Python X.test_skipped, not here",
+			],
+		)
+		self.assertIn("X.test_no_id: no '# Test ID:' line", p.stderr)
+		self.assertEqual(p.returncode, 1)
 
 
 class CaseLines(unittest.TestCase):

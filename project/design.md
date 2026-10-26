@@ -31,6 +31,7 @@ Status: draft, 2026-10-15. Go, Rust, C, and Python are built over shcl 3.0, with
 - [Ops scripts](#ops-scripts)
 - [Testing](#testing)
 	- [Shared cases](#shared-cases)
+	- [Each language's own tests](#each-languages-own-tests)
 	- [Fuzzing](#fuzzing)
 - [Sharing the code](#sharing-the-code)
 - [Decisions](#decisions)
@@ -448,6 +449,16 @@ An ops script is one op per line, with fields split by tabs. `\t`, `\n`, `\r`, a
 - C runs the same cases through its driver with `cicd/c_cases.py`, op by op against the same want files. Python runs them the same way, with `--lang Python` and its driver, `source/python/shclw_drive.py`.
 
 - Each case's test ID is the first line of its `ops.txt`, as `# Test ID: <id>`, given once from the case's first commit. Each language prints one line per case, such as `PASS ddzvq Go case 001-reads`, with `Rust`, `C` or `Python` in place of `Go`. A case with no ID fails. Go's lines come from `go test -json` through `cicd/go_test_lines.py`, since `go test` hides a passing test's output, and Rust's case runner is its own harness for the same reason.
+
+### Each language's own tests
+
+- Each Go, Rust and Python test function has its test ID on a `Test ID: <id>` comment just above it, given once from the commit that added it. C's sit in the table in `api_test.c`'s `main`.
+
+- Each test prints one line, such as `PASS ddzw5 Go TestOpen`, `PASS ddzw7 Rust open`, `PASS de8ej Python Api.test_reads` or `PASS de04q C test_reads`. The C++ build of the C tests says `C++`. A skipped test says `SKIP` and why. A test with no ID fails the run.
+
+- Go's lines come from `go test -json` through `cicd/go_test_lines.py`, Rust's from libtest's own per-test lines through `cicd/rust_test_lines.py`, and Python's from `cicd/py_tests.py`, which runs the tests as `unittest discover` does. A Go subtest is part of its function's line. Go's `TestCases` has no ID, since each case has its own.
+
+- A Rust test can't mark itself skipped once it runs, so one that returns early, such as on a folder the user can still write to, says `PASS`.
 
 ### Fuzzing
 

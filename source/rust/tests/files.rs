@@ -120,6 +120,7 @@ fn plain(path: &str, data: &str) -> Result<(), Error> {
 	fs::write(path, data).map_err(|e| io_err(&e.to_string()))
 }
 
+// Test ID: de010
 #[test]
 fn replace_read_ok() {
 	let t = setup("replace-ok");
@@ -134,6 +135,7 @@ fn replace_read_ok() {
 	assert_eq!(names(&t.dir), ["c.shcl"]);
 }
 
+// Test ID: de00z
 #[test]
 fn replace_read_changed() {
 	let t = setup("replace-changed");
@@ -165,6 +167,7 @@ fn replace_read_changed() {
 	assert_eq!(names(&t.dir), ["c.shcl"]);
 }
 
+// Test ID: de00y
 #[test]
 fn replace_read_backup_fails() {
 	let t = setup("replace-backupfails");
@@ -173,6 +176,7 @@ fn replace_read_backup_fails() {
 	assert_eq!(read(Path::new(&t.path)), WAS);
 }
 
+// Test ID: de011
 #[test]
 fn replace_read_write_fails() {
 	let t = setup("replace-writefails");
@@ -207,6 +211,7 @@ fn replace_read_write_fails() {
 /// An edit made while `upgrade_file` runs must not get past the 2.0 check.
 /// The file flips between a clean 2.x text and one 2.0 has errors on, so a
 /// backup holding the bad text means that text was converted unchecked.
+// Test ID: de017
 #[test]
 fn upgrade_file_edited_meanwhile() {
 	const BAD: &str = "x: [ab]\ny: 1\n";
@@ -253,6 +258,7 @@ fn upgrade_file_edited_meanwhile() {
 	assert!(upgraded > 0, "no round got as far as an upgrade");
 }
 
+// Test ID: de018
 #[test]
 fn upgrade_real_file() {
 	let scratch = Scratch::new("upgrade-real");
@@ -287,6 +293,7 @@ fn upgrade_real_file() {
 
 /// Something already at the backup's name is never written over, and the
 /// file stays as it was.
+// Test ID: de016
 #[test]
 fn upgrade_backup_taken() {
 	let scratch = Scratch::new("upgrade-taken");
@@ -318,6 +325,7 @@ fn upgrade_backup_taken() {
 
 /// A save the folder won't take is `Io`, and the file there stays as it
 /// was, on every version. So does an upgrade, which then leaves no backup.
+// Test ID: de014
 #[cfg(unix)]
 #[test]
 fn save_refused_by_folder() {
@@ -340,6 +348,7 @@ fn save_refused_by_folder() {
 
 /// A save that would drop lines the load couldn't use is refused, and the
 /// file it was read from stays as it was.
+// Test ID: de015
 #[test]
 fn save_refused_over_file() {
 	let scratch = Scratch::new("save-refused");
@@ -360,6 +369,7 @@ fn save_refused_over_file() {
 /// `open` upgrades a 2.x file in memory and writes nothing. The first write
 /// over it, by any name for the same file, backs up the original, and later
 /// ones don't.
+// Test ID: de5d5
 #[test]
 fn open_upgrades_in_memory() {
 	let scratch = Scratch::new("open-upgrade");
@@ -394,6 +404,7 @@ fn open_upgrades_in_memory() {
 }
 
 /// A file that changed since `open` read it is left alone, with no backup.
+// Test ID: de5d4
 #[test]
 fn open_upgrade_edited_meanwhile() {
 	let scratch = Scratch::new("open-edited");
@@ -411,6 +422,7 @@ fn open_upgrade_edited_meanwhile() {
 
 /// Something already at the backup's name is never written over. The save
 /// is `BackupTaken` and the file stays as it was.
+// Test ID: de5d3
 #[test]
 fn open_upgrade_backup_taken() {
 	let scratch = Scratch::new("open-taken");
@@ -445,6 +457,7 @@ const BLOCK_2X: &str = "#\r\n# This config file format is SHCL.\r\n# \"Simple Hi
 /// A save of a file with 2.x's block and no Format line puts the current
 /// block where it sat, with its Format line, so the next `open` reads what
 /// was put rather than take the file as 2.x (2026101513330010).
+// Test ID: de5kq
 #[test]
 fn write_swaps_old_block() {
 	let scratch = Scratch::new("write-swap");
@@ -478,6 +491,7 @@ fn write_swaps_old_block() {
 /// A file with no Format line or 2.x block that has errors on 3.0 and 2.0
 /// alike is current, with 3.0's errors in `diags`. One marked as 2.x is
 /// still refused (2026101613005800).
+// Test ID: de5kp
 #[test]
 fn open_fails_both() {
 	const BOTH: &str = "a: 1\nb: ```\nraw line\nc: 2\n";
