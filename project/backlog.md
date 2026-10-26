@@ -59,8 +59,8 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 - CICD reset: temp files and safe removal
 	- ID: 2026102416400070
 	- Type: Enhancement
-	- Status: Waiting on automated testing
-	- Needs local test suite run?: `cicd/cicd.bash --backlog-run-full`, for the CodeQL build's `make clean` through the guard in the C leak checks.
+	- Status: Done
+	- Needs local test suite run?: No
 	- Priority: Avg
 	- Opened: 2026-10-24 16:40
 	- Opened by: JC
@@ -89,6 +89,8 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- No `test_shclw_*` folders were left under the temp roots on this box, so nothing sweeps the old layout.
 	- Commit: 0f9d2ae
 	- Test case: deean, `cicd/temp-test.bash`.
+	- Closed: 20261025
+	- Verified: 2026-10-25, the round's `--backlog-run-full` passed with the C leak checks and CodeQL build, deean and the leak IDs de2xw to de2xz all PASS (run log run_20261025-194230_latest.log).
 
 - Hosted workflow, with the arm64 Mac job
 	- ID: 2026102519333240
@@ -120,6 +122,7 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Branch: r1025
 	- Commit: 5b699a9
 	- Test case: deebf, `cicd/c-nosan-test.bash`. The workflow itself is the `ci` run on GitHub.
+	- 2026-10-25: still waits on the first hosted run, which needs ci.yml on main. The round merges into dev only.
 
 - shcl 4 adapters
 	- ID: 2026101512024163
