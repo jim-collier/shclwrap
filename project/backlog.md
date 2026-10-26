@@ -347,6 +347,7 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- The Linux job installs the host tools too, so it still runs when an image won't build there and cicd falls back to the host. The images pin Debian unstable package versions, which can drop off the mirror.
 		- The repo is public, so the Mac job runs on every trigger.
 	- Branch: r1025
+	- Commit: 5b699a9
 	- Test case: deebf, `cicd/c-nosan-test.bash`. The workflow itself is the `ci` run on GitHub.
 
 - CICD reset: CICD process gaps
