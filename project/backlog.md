@@ -235,19 +235,6 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Closed: 2026-10-25 18:04
 	- Acceptance signoff: Self-closed: each fuzz test prints its line by its ID, and dee8t covers the blame.
 
-- `--list` names the test IDs a run would run
-	- ID: 2026102507433885
-	- Type: Enhancement
-	- Status: Queued
-	- Priority: High
-	- Opened: 2026-10-25 07:43
-	- Opened by: JC
-	- Parent ID: 2026102319573100
-	- Prereq IDs: 2026102507142902, 2026102507142905, 2026102507142907
-	- Requirements:
-		- Per `--list` in `CICD style guide` in the shared CICD rules: print the steps and test IDs the other flags given would run, and run nothing.
-		- Today `--list` is another name for `--dry-run`, which lists the steps only. Most tests have no ID yet.
-
 - Run the tests on Windows and macOS
 	- ID: 2026101512024174
 	- Type: Task
@@ -574,16 +561,6 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- 2026-10-24: JC wants a hosted workflow for this.
 		- 2026-10-24, CICD reset: per `macOS builds on GitHub` and `Merge gate` in the shared CICD rules. One small workflow on push and PR against main, plus `workflow_dispatch`, runs `--merge-gate` as far as the runner can, with the arm64 macOS job beside it. cicd.bash flags picked by how long the job takes start it. It's free while the repo is public.
 
-- C's 2.0 names check has no test ID
-	- ID: 2026102518381781
-	- Type: Enhancement
-	- Status: Queued
-	- Priority: Low
-	- Opened: 2026-10-25 18:38
-	- Related IDs: 2026102416400050, 2026101516111033
-	- Requirements:
-		- The Makefile's `names` check, which fails when a shcl 2.0 name leaks past `shclw3_v2_names.h`, prints a test line with its own ID, per `Testing` in the shared CICD rules. Today it runs inside `make test` with no line of its own.
-
 - Say which layer a read came from
 	- ID: 2026102114101028
 	- Type: Enhancement
@@ -743,6 +720,55 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Opened by: JC
 	- Related IDs: 2026101513330009
 	- Note: `Merged` finds them with a second parse in each language. shcl's parser sees each fold, so a call there would be cheaper and could take that code's place.
+
+- `--list` names the test IDs a run would run
+	- ID: 2026102507433885
+	- Type: Enhancement
+	- Status: Done
+	- Priority: High
+	- Opened: 2026-10-25 07:43
+	- Opened by: JC
+	- Parent ID: 2026102319573100
+	- Prereq IDs: 2026102507142902, 2026102507142905, 2026102507142907
+	- Requirements:
+		- Per `--list` in `CICD style guide` in the shared CICD rules: print the steps and test IDs the other flags given would run, and run nothing.
+		- Today `--list` is another name for `--dry-run`, which lists the steps only. Most tests have no ID yet.
+	- Progress log:
+		- 2026-10-25: `--list` prints the first section as `--dry-run` does, then a section per step that's on, with one `<id> <name>` line per test that step would run, or `(none)`. `--dry-run` stays the step list.
+		- cicd's own tests and debab moved into `fCicdTests` and `fLint_Tests`, which the run and `--list` both call. Under `fTest_ListOnly 1`, `fTest` prints the ID and name and runs nothing. The language tests and cases come from `test_ids.py tests|cases`, the fuzz from `fuzz.py --list`, and the C container's from `c-tests.bash`.
+		- Verified: deea7 passed, and failed with the leak IDs left out, with the names check left out, with `--dry-run` listing, with Go's tests listed outside their area, and with the analyzer probes listed under `--quick`. dedm7 failed with `fTest` running its command under `fTest_ListOnly`. de7yv, dee8t, shellcheck and ruff passed. `cicd/cicd.bash --backlog-run-quick cicd c` passed, and `lint-report.bash` said CLEAN. With a `.PHONY` name planted, debab still printed its FAIL line and failed Lint.
+		- Swept: every caller of `--dry-run` or `--list` (`flags-test.bash`, `cpu-cap-test.bash`, `steps-test.bash`, the round's `mac-dryrun.bash`, design.md), and every place a test line is printed: cicd.bash, `c-in-container.bash`, `lang-in-container.bash`, `fuzz.py`, the 3 line printers, `api_test.c` and the cases. deea7 checks that the default run's list holds every ID found in the tree. The 4 bindings don't read cicd flags.
+	- Decisions:
+		- One line per ID. A shared case is one line with the languages it runs in, and a C test is one line though it also runs as C++.
+		- It lists by the flags given and probes nothing, so a box missing a tool or a cached pin still skips some at run time. `--help` says so.
+		- Only what would run is listed. A step that's off has no section, and a test the flags skip, such as the analyzer probes under `--quick`, isn't listed.
+	- Branch: r1025
+	- Commit: 527271e
+	- Test case: deea7, `cicd/list-test.bash`, and dedm7 for `fTest_ListOnly` and `fStep_Each`.
+	- Closed: 2026-10-25 18:53
+	- Acceptance signoff: Self-closed: does what the shared rule asks, and deea7 was watched to fail 5 ways.
+
+- C's 2.0 names check has no test ID
+	- ID: 2026102518381781
+	- Type: Enhancement
+	- Status: Done
+	- Priority: Low
+	- Opened: 2026-10-25 18:38
+	- Related IDs: 2026102416400050, 2026101516111033
+	- Requirements:
+		- The Makefile's `names` check, which fails when a shcl 2.0 name leaks past `shclw3_v2_names.h`, prints a test line with its own ID, per `Testing` in the shared CICD rules. Today it runs inside `make test` with no line of its own.
+	- Progress log:
+		- 2026-10-25: The check is de07q, from c71ca83, its first commit, taking the next free minute after the C tests from that commit. `c-in-container.bash` runs `make names` on its own line in test and quick modes, and a host with no gcc-15 prints its SKIP line.
+		- Verified: `c-checks.bash test 3` and the quick gate printed `PASS de07q`. With one `#define` taken out of `shclw3_v2_names.h`, quick mode printed `FAIL de07q` and exited 2.
+		- Swept: `make test` is the only target that ran `names`, and the container's test mode the only caller. Quick mode now runs it too. Go, Rust and Python take 2.0 as a module, a crate and a file of their own, so there's no name to leak.
+	- Decisions:
+		- `make test` still depends on `names`, so a hand run keeps the check. In the container it runs twice, a fraction of a second.
+		- Quick mode runs it as well, since it's cheap.
+	- Branch: r1025
+	- Commit: 527271e
+	- Test case: de07q, in `cicd/c-in-container.bash` test and quick modes.
+	- Closed: 2026-10-25 18:53
+	- Acceptance signoff: Self-closed: mechanical, and the line was watched to fail.
 
 - Rename the project shclwrap
 	- ID: 2026101513524769
