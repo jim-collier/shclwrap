@@ -299,12 +299,13 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- `fSafeRm_Under` lets the named folder sit behind a link, as a checkout can, but nothing below it.
 		- Left alone: the Dockerfiles' `rm -rf` of apt lists and download leftovers, inside the image build, and Python's `TemporaryDirectory`, which removes only what it made.
 		- No `test_shclw_*` folders were left under the temp roots on this box, so nothing sweeps the old layout.
+	- Commit: 0f9d2ae
 	- Test case: deean, `cicd/temp-test.bash`.
 
 - CICD reset: CICD process gaps
 	- ID: 2026102416400080
 	- Type: Enhancement
-	- Status: Queued
+	- Status: Done
 	- Priority: Avg
 	- Opened: 2026-10-24 16:40
 	- Opened by: JC
@@ -312,6 +313,19 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- What else in the shared CICD rules' `CICD process` shclwrap doesn't do yet. The Go, Rust and Python leak checks are 2026101711245585, and the commit and publish stage is 2026101512024171.
 		- Sweeping override, 2026-10-24: this supersedes any earlier decision on this project that conflicts with it.
 		- A profiling step that `--quick` skips, with flamegraphs under `cicd/artifacts/profiling/` and `flame-report.py`.
+	- Progress log:
+		- 2026-10-25: A Profile step, last in the run. Go's `BenchmarkCases` runs every shared case through `Run` for 5 seconds with a CPU profile. `cicd/utility/pprof2flame.py` makes the flamegraph, which is rotated in `cicd/artifacts/profiling/`, and `cicd/utility/flame-report.py` prints its summary. Both scripts are copied from zuid. `--quick`, `--backlog-run-quick` and `--no-profile` leave it out. design.md says so.
+		- 2026-10-25: dedm7's turned-off lists for `--quick`, `--ci --quick`, `--quick --no-sync` and `--backlog-run-quick` now end with the Profile step, which they didn't have before.
+		- Verified: the step passed alone in the language image and on the host with `--no-container`, and the second flamegraph rotated the first. deeap passes, and fails with plain mode writing the marker or the flamegraph dropping a frame. de7yv's new profile rows fail with `--quick` leaving the step on. `--backlog-run-quick go cicd` passed CLEAN.
+		- Swept: the gap list in the private notes' CICD reset findings names only the profiling step, beside the 2 items above.
+		- The first profile puts about half the time in `Commented`, through `fieldsOf` and shcl's `ReadFields`.
+	- Decisions:
+		- Go only. It's the reference implementation and has a profiler built in, and `perf` can't record on this box, so Rust and C would need an in-process sampler as new dependencies.
+		- The benchmark runs the shared cases, so the profile follows what the tests cover, with no workload of its own to keep up.
+		- The step fails only when the benchmark does. A flamegraph that won't convert, or a summary that won't parse, is a warning.
+	- Test case: deeap, `cicd/profile-test.bash`, for the flamegraph and its summary, and de7yv for which runs leave the step out.
+	- Closed: 2026-10-25 19:16
+	- Acceptance signoff: Self-closed: deeap and de7yv cover it, and the step adds nothing a person has to judge.
 
 - Comment doesn't stack, and leaves the user's own notes
 	- ID: 2026101513330022

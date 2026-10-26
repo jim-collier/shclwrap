@@ -51,6 +51,23 @@ fExpect "--merge-gate --no-container"   off off on
 fExpect "--merge-gate --no-fuzz"        off on  off
 fExpect "--list --no-remote --keep-temp" on on  on
 
+## fProfile "FLAGS" on|off: the profile step, which --quick and its named run leave out.
+fProfile(){
+	local plan got=on
+	plan="$(bash "${here}/cicd.bash" --dry-run ${1})"
+	if [[ "${plan}" == *"Profile ......: (skipped)"* ]]; then got=off; fi
+	[[ "${got}" == "$2" ]] || { echo "FAIL: '$1': profile is ${got}, want $2" >&2; fails=$((fails + 1)); }
+	return 0
+}
+fProfile ""                             on
+fProfile "--merge-gate"                 on
+fProfile "--backlog-run-full"           on
+fProfile "--quick"                      off
+fProfile "--quick --leakcheck"          off
+fProfile "--backlog-run-quick go"       off
+fProfile "--no-profile"                 off
+fProfile "--merge-gate --no-container"  on
+
 ## fMode "FLAGS" "WANT": WANT is a piece of the Mode line.
 fMode(){
 	local plan

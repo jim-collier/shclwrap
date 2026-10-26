@@ -14,12 +14,15 @@
 ##	   - tests (shared cases in every language, Python's included)
 ##	   - leak checks (CodeQL, CTU analysis, and the heaptrack soak, for C)
 ##	   - fuzz (Rust, C, and Python against Go from generated cases, plus Go's own fuzzer)
+##	   - profile (Go's Run over the shared cases, as a flamegraph in
+##	     cicd/artifacts/profiling/, with flame-report.py's summary; never fails a run
+##	     on what it finds)
 ##	- Syntax:
 ##	  cicd/cicd.bash [options]
 ##	  With no options it runs every stage, in about 10 minutes.
 ##	  Options:
 ##	   --quick         the fast checks only, in about a minute. No remote sync,
-##	                   C analyzers, sanitizers, or leak checks, and a short fuzz.
+##	                   C analyzers, sanitizers, leak checks or profile, and a short fuzz.
 ##	                   Nothing that needs the network. C is skipped when a pinned
 ##	                   shcl.h isn't cached yet, and Python when shcl.py isn't.
 ##	   --long, --slow  everything. The same as no options here, since nothing takes hours.
@@ -40,6 +43,7 @@
 ##	   --no-lint       skip the lint stage
 ##	   --no-tests      skip the tests stage
 ##	   --no-fuzz       skip the fuzz stage
+##	   --no-profile    skip the profile stage
 ##	   --no-container  run C, Go, Rust and Python on the host, skipping what it has
 ##	                   no tool for, and the leak checks. Each also runs on the host
 ##	                   when docker is missing or its image won't build, and says so.
@@ -57,6 +61,8 @@
 ##	  for Rust and C against Go, and SHCLW_GOFUZZ_SECONDS (default 30, 0 with --quick)
 ##	  for Go's fuzzer. Failing fuzz cases go to cicd/artifacts/fuzz/, and the
 ##	  newest 10 sets are kept.
+##	- Profile: SHCLW_PROFILE_SECONDS (default 5). The flamegraphs are rotated
+##	  like the run logs.
 ##	- Each run makes its own folder, ${HOST_TEMP}/shclwrap/<YYYYmmDD-HHMMSS>_<NNN>/,
 ##	  and points TMPDIR, TEMP and TMP at it. HOST_TEMP defaults to ${TMPDIR:-/tmp}.
 ##	  It goes at the end, on failure and Ctrl+C too, unless --keep-temp. Each run
@@ -107,23 +113,23 @@ fCpuCap
 
 cmdLine="$*"
 doQuick=0; doLeakcheck=""; doQuiet=0; assumeYes=0; dryRun=0; listTests=0; keepTemp=0
-doSync=1; doFormat=1; doLint=1; doTests=1; doFuzz=1; doContainer=1
+doSync=1; doFormat=1; doLint=1; doTests=1; doFuzz=1; doContainer=1; doProfile=1
 ## checkOnly: format checks and nothing syncs or prompts. runName is the named run that set it.
 checkOnly=0; runName=""; aliasNote=""
 declare -a areas=()
 ## Which flag turned each step off, for the first section. The later flag wins.
-syncOffBy=""; leakOffBy=""; fuzzOffBy=""
+syncOffBy=""; leakOffBy=""; fuzzOffBy=""; profileOffBy=""
 fNamedRun(){   ## fNamedRun FLAG: the 3 runs that rewrite nothing
 	checkOnly=1; assumeYes=1; runName="$1"; doSync=0; syncOffBy="$1"
 }
 while (($#)); do case "$1" in
-	--quick)    doQuick=1; doSync=0; syncOffBy="--quick"; shift ;;
+	--quick)    doQuick=1; doSync=0; syncOffBy="--quick"; doProfile=0; profileOffBy="--quick"; shift ;;
 	--long|--slow) shift ;;
 	--leakcheck) doLeakcheck=1; shift ;;
 	--no-leakcheck) doLeakcheck=0; leakOffBy="--no-leakcheck"; shift ;;
 	--gate|--backlog-run-quick)
 		if [[ "$1" == --gate ]]; then aliasNote="--gate is another name for --backlog-run-quick"; fi
-		fNamedRun --backlog-run-quick; doQuick=1; doFuzz=0; fuzzOffBy="--backlog-run-quick"; shift
+		fNamedRun --backlog-run-quick; doQuick=1; doFuzz=0; fuzzOffBy="--backlog-run-quick"; doProfile=0; profileOffBy="--backlog-run-quick"; shift
 		while (($#)) && [[ "$1" != -* ]]; do
 			case "$1" in go|rust|python|c|cicd) areas+=("$1") ;; *) echo "unknown area: $1 (go, rust, python, c or cicd)" >&2; exit 2 ;; esac
 			shift
@@ -139,6 +145,7 @@ while (($#)); do case "$1" in
 	--no-lint)  doLint=0; shift ;;
 	--no-tests) doTests=0; shift ;;
 	--no-fuzz)  doFuzz=0; fuzzOffBy="$1"; shift ;;
+	--no-profile) doProfile=0; profileOffBy="$1"; shift ;;
 	--no-container) doContainer=0; shift ;;
 	--no-remote) shift ;;
 	--keep-temp) keepTemp=1; shift ;;
@@ -163,18 +170,21 @@ export SHCLW_CARGO_LOCKED="${checkOnly}" SHCLW_AREAS="${areas[*]}"
 fArea(){ local a n; ((${#areas[@]})) || return 0; for a in "${areas[@]}"; do for n in "$@"; do [[ "${a}" != "${n}" ]] || return 0; done; done; return 1; }
 
 ## Every step in run order. A flag that turns one off adds a line here.
-fStep_Plan "Remote sync" "Format" "Lint" "Tests" "C leak checks" "Fuzz"
+fStep_Plan "Remote sync" "Format" "Lint" "Tests" "C leak checks" "Fuzz" "Profile"
 ((doSync))      || fStep_Off "Remote sync"   "${syncOffBy}"
 ((doFormat))    || fStep_Off "Format"        "--no-format"
 ((doLint))      || fStep_Off "Lint"          "--no-lint"
 ((doTests))     || fStep_Off "Tests"         "--no-tests"
 ((doLeakcheck)) || fStep_Off "C leak checks" "${leakOffBy}"
 ((doFuzz))      || fStep_Off "Fuzz"          "${fuzzOffBy}"
+((doProfile))   || fStep_Off "Profile"       "${profileOffBy}"
 
 fuzzSecs="${SHCLW_FUZZ_SECONDS:-$( ((doQuick)) && echo 10 || echo 60)}"
 goFuzzSecs="${SHCLW_GOFUZZ_SECONDS:-$( ((doQuick)) && echo 0 || echo 30)}"
 [[ "${fuzzSecs}" =~ ^[0-9]+$ ]]   || { echo "SHCLW_FUZZ_SECONDS is not a count" >&2; exit 2; }
 [[ "${goFuzzSecs}" =~ ^[0-9]+$ ]] || { echo "SHCLW_GOFUZZ_SECONDS is not a count" >&2; exit 2; }
+profileSecs="${SHCLW_PROFILE_SECONDS:-5}"
+[[ "${profileSecs}" =~ ^[1-9][0-9]*$ ]] || { echo "SHCLW_PROFILE_SECONDS is not a count above 0" >&2; exit 2; }
 
 ## Output helpers (fEcho, fEcho_Clean, fSection) and step lines are in utility/include/steps.bash.
 fCpuNote(){ printf '%s of %s CPUs, load %s%s' "${cpuJobs}" "${cpuCount}" "${cpuLoad}" "$( ((cpuBusy)) && echo ' (busy)')"; }
@@ -290,6 +300,7 @@ fCicdTests(){
 	fTest -q dedqv "a run's end removes its containers and stale images, and nothing else" bash "${here}/docker-tidy-test.bash"
 	fTest -q dedta "stale headers and fuzz sets are pruned, and nothing else" bash "${here}/prune-test.bash"
 	fTest -q deean "run folders and safe removal" bash "${here}/temp-test.bash"
+	fTest -q deeap "profile flamegraphs and their summary" bash "${here}/profile-test.bash"
 }
 
 ## --list: the test IDs each step that's on would run, one line each, by the flags given.
@@ -345,6 +356,7 @@ fPreflight(){
 	fEcho_Clean "Remote sync ..: $( ((doSync)) && echo 'fast-forward when behind; abort when diverged' || echo '(skipped)')"
 	fEcho_Clean "Leak checks ..: $( ((doLeakcheck)) && echo 'CodeQL, CTU, heaptrack soak' || echo '(skipped)')"
 	fEcho_Clean "Fuzz .........: $( ((doFuzz)) && echo "${fuzzSecs}s Rust, C, and Python against Go, ${goFuzzSecs}s Go fuzzer" || echo '(skipped)')"
+	fEcho_Clean "Profile ......: $( ((doProfile)) && echo "${profileSecs}s of Go's Run over the shared cases -> cicd/artifacts/profiling/" || echo '(skipped)')"
 	fEcho_Clean "CPU cap ......: $(fCpuNote)"
 	## ps, since a BSD nice with no command only prints its usage.
 	ni="$(ps -o ni= -p "$$" 2>/dev/null || true)"
@@ -574,6 +586,26 @@ else
 	fTest_Skip ddzw3 "Go's fuzzer finds no panic in Run" "${fuzzOffBy}"
 fi
 
+#•••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••
+## Something to read, not a gate: only a failed benchmark fails the step.
+if fStep_On "Profile"; then
+	fStep "Profile"
+	profileDir="${root}/cicd/artifacts/profiling"
+	svg="flame_${stamp}_frequent.svg"
+	bash "${here}/lang-checks.bash" profile "${work}" "${profileSecs}" "${svg}" || fDie "Go's profile run failed"
+	if [[ -s "${work}/${svg}" ]]; then
+		mkdir -p "${profileDir}"
+		mv -f "${work}/${svg}" "${profileDir}/"
+		gfs_rotate "${profileDir}" flame svg
+		fEcho_Clean
+		PYTHONPYCACHEPREFIX="${work}/pycache" python3 "${here}/utility/flame-report.py" --dir "${profileDir}" \
+			|| fEcho "WARNING: flame-report.py couldn't read the flamegraph"
+	else
+		fEcho "WARNING: Go's profile ran, but made no flamegraph"
+	fi
+	fStep_Pass
+fi
+
 fStep_AllPassed
 runPassed=1
 fSection "shclwrap CI/CD: done."
@@ -600,4 +632,5 @@ fEcho_Clean
 ##		- 2026-10-25 JC: The run's end stops and removes its containers by label, drops stale images and week-old build cache, and says what went in one line.
 ##		- 2026-10-25 JC: Test lines for the shared cases, the fuzz and Go's fuzzer, and SKIP lines for them when the fuzz is off.
 ##		- 2026-10-25 JC: --list names the test IDs each step would run, and --dry-run stays the step list.
+##		- 2026-10-25 JC: A profile step: Go's Run over the shared cases as a flamegraph, rotated, with flame-report.py's summary. --no-profile.
 ##		- 2026-10-25 JC: The run's folder is ${HOST_TEMP}/shclwrap/<stamp>_<NNN>, and TMPDIR, TEMP and TMP point there. Stale run folders go. Every recursive removal goes through safe-rm.bash.

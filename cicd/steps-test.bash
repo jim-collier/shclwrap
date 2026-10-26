@@ -119,14 +119,14 @@ fOff(){
 }
 fOff ""                        "none"
 fOff "--ci"                    "Remote sync (--merge-gate)"
-fOff "--quick"                 "Remote sync (--quick)" "C leak checks (--quick without --leakcheck)"
-fOff "--ci --quick"            "Remote sync (--quick)" "C leak checks (--quick without --leakcheck)"
+fOff "--quick"                 "Remote sync (--quick)" "C leak checks (--quick without --leakcheck)" "Profile (--quick)"
+fOff "--ci --quick"            "Remote sync (--quick)" "C leak checks (--quick without --leakcheck)" "Profile (--quick)"
 fOff "--ci --leakcheck"        "Remote sync (--merge-gate)"
 fOff "--leakcheck --no-leakcheck --no-sync --no-fuzz" "Remote sync (--no-sync)" "C leak checks (--no-leakcheck)" "Fuzz (--no-fuzz)"
-fOff "--quick --no-sync"       "Remote sync (--no-sync)" "C leak checks (--quick without --leakcheck)"
+fOff "--quick --no-sync"       "Remote sync (--no-sync)" "C leak checks (--quick without --leakcheck)" "Profile (--quick)"
 fOff "--quiet --ci --no-fuzz"  "Remote sync (--merge-gate)" "Fuzz (--no-fuzz)"
 fOff "--no-format --no-lint --no-tests" "Format (--no-format)" "Lint (--no-lint)" "Tests (--no-tests)"
-fOff "--backlog-run-quick"     "Remote sync (--backlog-run-quick)" "C leak checks (--backlog-run-quick without --leakcheck)" "Fuzz (--backlog-run-quick)"
+fOff "--backlog-run-quick"     "Remote sync (--backlog-run-quick)" "C leak checks (--backlog-run-quick without --leakcheck)" "Fuzz (--backlog-run-quick)" "Profile (--backlog-run-quick)"
 fOff "--backlog-run-full"      "Remote sync (--backlog-run-full)"
 fOff "--no-container"          "C leak checks (--no-container)"
 
