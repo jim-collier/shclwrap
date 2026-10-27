@@ -1,4 +1,4 @@
 github.com/jim-collier/shcl/source/go/v2 v2.0.0 h1:jfHFipn/h5seFCYj3EBLdBsV7NJxJKonNdiFdA4kYuQ=
 github.com/jim-collier/shcl/source/go/v2 v2.0.0/go.mod h1:A4/dewqlAvr+OcaRSFOe4u8lIWz2p0Ejm6p62ydk1lk=
-github.com/yottacore/shcl/source/go/v2 v2.0.0-20261025173308-a65eceb8f0ef h1:za1gvWVDceYaQi3G5a+MJeinSxExFyzcUtEiY0sh34s=
-github.com/yottacore/shcl/source/go/v2 v2.0.0-20261025173308-a65eceb8f0ef/go.mod h1:TnVarSv7dAVgSbrJRlgPS3w8RPTUmiqlHdD78Yll3yY=
+github.com/yottacore/shcl/source/go/v2 v2.0.0-20261026200642-2174f0d94127 h1:T6lzayElyxUuW6c05hLwcTos/NYuD4TC919RVCLXlL8=
+github.com/yottacore/shcl/source/go/v2 v2.0.0-20261026200642-2174f0d94127/go.mod h1:TnVarSv7dAVgSbrJRlgPS3w8RPTUmiqlHdD78Yll3yY=

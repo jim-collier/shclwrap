@@ -1,38 +1,4 @@
 > upgrade	2
-from 2 changed true unsure 1
-lost [5] rewritten [3 4 6]
-| # 2.x lines 3.0 writes differently, and one it can't keep
-| name: app
-| dir: "C:◉NEWLINE◉ew"
-| tags: [a, b]
-| list: [x, y]
-| \tc: 2
-| keep: "as typed"
-| 
-| ##
-| ## This config file format is SHCL.
-| ## "Simple Hierarchical Config Language"
-| ##    Format   3
-| ##    Home     https://github.com/yottacore/shcl
-| ##    Syntax   https://github.com/yottacore/shcl/blob/v3.0.0-beta1/project/spec.md
-| ##    Legal    SHCL is Copyright © 2026 Jim Collier [ID: 2უNაɘ«҂թȹɤξπ๙¿ձϖ]. License: MIT. No warranty.
-| ##
+error refused
 > upgrade
-from 2 changed true unsure 1
-lost [5] rewritten [3 4 6]
-| # 2.x lines 3.0 writes differently, and one it can't keep
-| name: app
-| dir: "C:◉NEWLINE◉ew"
-| tags: [a, b]
-| list: [x, y]
-| \tc: 2
-| keep: "as typed"
-| 
-| ##
-| ## This config file format is SHCL.
-| ## "Simple Hierarchical Config Language"
-| ##    Format   3
-| ##    Home     https://github.com/yottacore/shcl
-| ##    Syntax   https://github.com/yottacore/shcl/blob/v3.0.0-beta1/project/spec.md
-| ##    Legal    SHCL is Copyright © 2026 Jim Collier [ID: 2უNაɘ«҂թȹɤξπ๙¿ձϖ]. License: MIT. No warranty.
-| ##
+error ambiguous

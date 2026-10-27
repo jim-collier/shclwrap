@@ -1,9 +1,12 @@
 # Test ID: de5cy
 # What Folderkite's own setters wrote under shcl 2.0, from its old-format
-# writer. Open upgrades it. The backslashes 2.0 wrote doubled read as 2.0
-# read them, so terminal.exec has 2 and not 4, and the tab in
-# archive.create-with-rar stays a tab (2026101910455900).
+# writer. Nothing in it says it's 2.x, and its backslash pairs read two
+# ways, so Open refuses it as ambiguous (2026102616480100).
 open	doc.shcl
+# With a Format line naming 2, Open upgrades it. The backslashes 2.0 wrote
+# doubled read as 2.0 read them, so terminal.exec has 2 and not 4, and the
+# tab in archive.create-with-rar stays a tab (2026101910455900).
+open	format2.shcl
 upgraded
 rewrites
 get	strs	search.search-skip-folders
@@ -12,6 +15,6 @@ get	str	terminal.exec
 get	str	archive.create-with-rar
 get	str	preferences.bulk-rename-tool
 get	float	file-cache.memory-gib
-write	doc.shcl
+write	format2.shcl
 upgraded
 files

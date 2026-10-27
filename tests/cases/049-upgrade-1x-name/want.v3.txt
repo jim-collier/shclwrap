@@ -1,5 +1,5 @@
 > upgrade
-from 1 changed true unsure 0
+from 1 changed true unsure 1
 lost [] rewritten [2 3 8 10]
 | paths:
 | \t"c:\\\\tools": "C:\\tools"

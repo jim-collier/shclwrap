@@ -1,0 +1,46 @@
+appearance:
+	# Theme, with a # and a \ in the note
+	gtk-theme: Adwaita-dark
+	icon-theme: "café icons"
+	mode: dark
+
+terminal:
+	exec: \\\\server\\share\\term.exe
+	# Argument that terminal takes before a command
+	exec-arg: '--title="a # b"'
+
+list-view:
+	row-shading-color: "rgba(0, 0, 0, 0.1)"
+
+preferences:
+	bulk-rename-tool: "C:\\Program Files\\Renamer\\r.exe --flag"
+	click-policy: single
+	show-hidden-files: true
+	menu-config:
+		background-menu-compress: false
+	thumbnail-threads: -3
+	thumbnail-limit: 1000000
+
+archive:
+	create-with-7z: tools\\7z.exe
+	create-with-rar: rar\ta
+	extract-with-7z: ""
+	extract-with-rar: " lead and trail "
+
+windows:
+	path-separator: slash
+	associations: "txt=notepad.exe %1", 'log=C:\\Tools\\view.exe "%1"', "md=typora, with comma"
+
+search:
+	search-skip-folders: node_modules, "a, b", "", "x#y", "'q'"
+
+plugins:
+	disabled-extensions:
+
+thumbnailers:
+	disable: image/x-one
+
+file-cache:
+	max-size-gib: 2.5
+	memory-gib: 0.125
+##    Format   2

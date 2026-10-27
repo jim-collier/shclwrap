@@ -1,0 +1,16 @@
+# Backslashes as 2.x read them, typed by hand and as its setters wrote them
+tab: C:\temp
+pair: C:\\new
+lone: C:\dir\file
+quoted: "C:\\Program Files\\app"
+qtab: "col1\tcol2"
+say: "say \"hi\""
+lines: one\ntwo
+end: tail\
+list: one\\two, "p\tq", C:\dir
+rep: a\tb
+rep: plain
+raw: ~~~
+keep \t as typed
+~~~
+##    Format   2

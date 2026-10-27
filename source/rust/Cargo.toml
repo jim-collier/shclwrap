@@ -14,7 +14,7 @@ shcl3 = ["dep:shcl3", "dep:shcl2"]
 
 [dependencies]
 shcl2 = { package = "shcl", version = "=2.0.0", optional = true, default-features = false }
-shcl3 = { package = "shcl", git = "https://github.com/yottacore/shcl", rev = "a65eceb8f0ef15624bc2aced9e47215fda92f886", optional = true, default-features = false }
+shcl3 = { package = "shcl", git = "https://github.com/yottacore/shcl", rev = "2174f0d94127bb5ae1024652a923ae2f7413c89b", optional = true, default-features = false }
 
 [[bin]]
 name = "shclw-drive"

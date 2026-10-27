@@ -17,7 +17,7 @@ use crate::{
 };
 
 /// The shcl release this module wraps.
-pub const SHCL_VERSION: &str = "3.0.0-dev+a65eceb8";
+pub const SHCL_VERSION: &str = "3.0.0-dev+2174f0d9";
 
 /// The newest file format this shcl reads.
 pub const FORMAT_MAJOR: u32 = shcl::FORMAT_MAJOR;
@@ -136,7 +136,7 @@ pub struct Version;
 
 impl crate::Lib for Version {
 	type Doc = Doc;
-	const NAME: &'static str = "shcl 3.0.0-dev+a65eceb8";
+	const NAME: &'static str = "shcl 3.0.0-dev+2174f0d9";
 	const FORMAT_MAJOR: u32 = FORMAT_MAJOR;
 	fn parse(text: &str) -> Doc {
 		parse(text)
@@ -359,18 +359,13 @@ pub fn upgrade(text: &str, from: u32) -> Result<Upgraded, Error> {
 			left.len()
 		)));
 	}
-	let (fixed, lost) = carry_reads(&old, &out.text, format_of(text) == 1)?;
-	out.lost = lost;
+	out.lost = check_reads(&old, &out.text, format_of(text) == 1)?;
 	out.text = if banner {
-		crate::info::place_block(&crate::info::same_ends(text, &fixed, &e), input != text, &e)?
-	} else if !out.changed && fixed == out.text {
-		return Ok(out);
+		crate::info::place_block(&crate::info::same_ends(text, &out.text, &e), input != text, &e)?
 	} else if !out.changed {
-		// shcl left this one as it was, so it has no Format line yet, and the
-		// next upgrade would read the escapes a second time.
-		crate::finish_info(&fixed, crate::Info::On, false, &e)?
+		return Ok(out);
 	} else {
-		crate::info::same_ends(text, &fixed, &e)
+		crate::info::same_ends(text, &out.text, &e)
 	};
 	out.changed = out.text != text;
 	out.rewritten = crate::rewritten_lines(text, &out.text, &out.lost);
@@ -473,66 +468,21 @@ fn old_errors(old: &shcl2::Document) -> Option<Error> {
 	Some(e)
 }
 
-/// Makes `up`, the upgraded text, read each value the way shcl 2.0 read it
-/// in `old`. shcl's migrate leaves a 2.x backslash escape as typed, and 3.0
-/// reads it as text, so `C:\\new` was `C:\new` and would now be `C:\\new`
-/// (2026101910455900). Each value with an escape in it is set again, then
-/// every path 2.0 reads one value at is read back against 2.0. A name 2.0 read
-/// with an escape resolved can't be renamed here, so it's refused, unless the
-/// file names format 1, since 1.2 read names as typed. So is a value that
-/// still reads differently. The lines with a value 2.0 read that `up` doesn't
-/// have at all come back as lost, in order.
-fn carry_reads(old: &shcl2::Document, up: &str, names_as_typed: bool) -> Result<(String, Vec<usize>), Error> {
-	let mut d = shcl::Document::parse_keep_lines(up, shcl::Strictness::Standard).unwrap_or_else(|le| le.document);
+/// Reads every path 2.0 reads one value at in `old` back against `up`, the
+/// upgraded text. shcl's migrate writes the text 2.x read, backslash escapes
+/// included (2026101910455900), so this checks its answer rather than
+/// trusting it. A name 2.0 read with an escape resolved stays as typed, so
+/// it's refused, unless the file names format 1, since 1.2 read names as
+/// typed. So is a value that reads differently. The lines with a value 2.0
+/// read that `up` doesn't have at all come back as lost, in order.
+fn check_reads(old: &shcl2::Document, up: &str, names_as_typed: bool) -> Result<Vec<usize>, Error> {
+	let now = shcl::Document::parse(up);
 	let mut bad = Vec::new();
-	let mut sets: Vec<(String, Vec<String>)> = Vec::new();
-	for f in d.fields() {
+	for f in now.fields() {
 		if !names_as_typed && v2_escapes(&f.name) != f.name {
 			bad.push(carry_diag(
 				old.line(&f.path),
 				"shcl 2.0 read this name with its backslash escapes resolved, and 3.0 reads it as typed; rename it and upgrade again",
-			));
-			continue;
-		}
-		if d.read_raw(&f.path).status == shcl::Status::Good {
-			continue;
-		}
-		let arr = d.read_string_array(&f.path);
-		if arr.status != shcl::Status::Good {
-			continue;
-		}
-		let want: Vec<String> = arr.value.iter().map(|v| v2_escapes(v)).collect();
-		if want == arr.value {
-			continue;
-		}
-		let s = d.read_string(&f.path);
-		let st = if want.len() == 1 && s.status == shcl::Status::Good && s.value == arr.value[0] {
-			d.set_string(&f.path, &want[0])
-		} else {
-			let refs: Vec<&str> = want.iter().map(String::as_str).collect();
-			d.set_string_array(&f.path, &refs)
-		};
-		if st != shcl::SetStatus::Ok {
-			bad.push(carry_diag(
-				old.line(&f.path),
-				"the upgraded file can't hold this value as shcl 2.0 read it",
-			));
-			continue;
-		}
-		sets.push((f.path, want));
-	}
-	let text = if sets.is_empty() {
-		up.to_owned()
-	} else {
-		d.to_text_keep_lines().0
-	};
-	let now = shcl::Document::parse(&text);
-	for (path, want) in &sets {
-		let got = now.read_string_array(path);
-		if got.status != shcl::Status::Good || got.value != *want {
-			bad.push(carry_diag(
-				old.line(path),
-				"the upgraded file doesn't read this value as shcl 2.0 read it",
 			));
 		}
 	}
@@ -562,7 +512,7 @@ fn carry_reads(old: &shcl2::Document, up: &str, names_as_typed: bool) -> Result<
 	if bad.is_empty() {
 		lost.sort_unstable();
 		lost.dedup();
-		return Ok((text, lost));
+		return Ok(lost);
 	}
 	let mut lines: Vec<usize> = bad.iter().map(|d| d.line).collect();
 	lines.sort_unstable();

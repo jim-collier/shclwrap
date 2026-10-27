@@ -11,12 +11,12 @@ checksum = "df2d47163f69bf015a0c1a525bf6c01f09af05c6c37b35e85d38942ebdeb5862"
 [[package]]
 name = "shcl"
 version = "2.0.0"
-source = "git+https://github.com/yottacore/shcl?rev=a65eceb8f0ef15624bc2aced9e47215fda92f886#a65eceb8f0ef15624bc2aced9e47215fda92f886"
+source = "git+https://github.com/yottacore/shcl?rev=2174f0d94127bb5ae1024652a923ae2f7413c89b#2174f0d94127bb5ae1024652a923ae2f7413c89b"
 
 [[package]]
 name = "shclw"
 version = "0.1.0"
 dependencies = [
  "shcl 2.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "shcl 2.0.0 (git+https://github.com/yottacore/shcl?rev=a65eceb8f0ef15624bc2aced9e47215fda92f886)",
+ "shcl 2.0.0 (git+https://github.com/yottacore/shcl?rev=2174f0d94127bb5ae1024652a923ae2f7413c89b)",
 ]

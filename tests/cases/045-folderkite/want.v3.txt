@@ -1,4 +1,6 @@
 > open	doc.shcl
+error ambiguous
+> open	format2.shcl
 ok
 > upgraded
 from 2 backup none
@@ -16,7 +18,7 @@ Good	26	rar\ta
 Good	16	C:\\Program Files\\Renamer\\r.exe --flag
 > get	float	file-cache.memory-gib
 Good	45	0.125
-> write	doc.shcl
+> write	format2.shcl
 ok
 | appearance:
 | \t# Theme, with a # and a \\ in the note
@@ -73,7 +75,7 @@ ok
 | ##    Legal    SHCL is Copyright © 2026 Jim Collier [ID: 2უNაɘ«҂թȹɤξπ๙¿ձϖ]. License: MIT. No warranty.
 | ##
 > upgraded
-from 2 backup doc_backup_STAMP_format-v2.shcl
+from 2 backup format2_backup_STAMP_format-v2.shcl
 | appearance:
 | \t# Theme, with a # and a \\ in the note
 | \tgtk-theme: Adwaita-dark
@@ -119,7 +121,9 @@ from 2 backup doc_backup_STAMP_format-v2.shcl
 | file-cache:
 | \tmax-size-gib: 2.5
 | \tmemory-gib: 0.125
+| ##    Format   2
 > files
 doc.shcl
-doc_backup_STAMP_format-v2.shcl
+format2.shcl
+format2_backup_STAMP_format-v2.shcl
 ops.txt
