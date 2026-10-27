@@ -25,6 +25,39 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 
 ## Issues
 
+- Follow shcl's newest dev commit
+	- ID: 2026102616480100
+	- Type: Task
+	- Status: Waiting on automated testing
+	- Needs local test suite run?: The full run, `cicd/cicd.bash --backlog-run-full`, plain arm.
+	- Priority: High
+	- Opened: 2026-10-26 16:48
+	- Opened by: JC
+	- Branch: shcl-dev-pin, r1026
+	- Related IDs: 2026101512024165
+	- Requirements:
+		- The 3.0 pin moves to shcl's newest dev commit in all 4 languages, with `cicd/bump-shcl.bash`.
+		- Upgrades of 2.x files follow shcl's new migrate rules, and the shared cases pass.
+		- The analyzer known list is made for the new pin.
+	- Notes:
+		- Tallowbase's move to shcl 3 waits on this.
+		- 2026-10-25: branch `shcl-dev-pin` moved the pin to `a65eceb8`. It builds, with a refusal for shcl's new `errors_left` in all 4 languages. 8 shared cases fail. 2.x upgrades that used to work come back `ambiguous` or `refused`, with W002 from the wrapper's own check after the conversion.
+	- Progress log:
+		- 2026-10-26: The pin is at `2174f0d9` in all 4 languages. shcl's library is the same as at `a65eceb8`.
+		- 2026-10-26: The W002s came from resolving each backslash escape twice. shcl's migrate now writes the text 2.x read, and the wrapper then set the value again. The wrapper's own sets are gone in all 4 languages. It still reads every value back against 2.0.
+		- 2026-10-26: shcl now counts a backslash pair as reading two ways in a file that doesn't say it's 2.x. So 035's `upgrade`, 045's and 047's `Open`, and 059's `upgrade` are `ambiguous` now. 045 and 047 open a copy with a Format line naming 2 too, which reads as before.
+		- 2026-10-26: 059's `upgrade 2` is refused now, since shcl won't write a file that would still have an error. Its comma list with lines under it used to come back in `Lost`. No input found that still gives a lost line.
+		- 2026-10-26: 049 gives `unsure 1`, since shcl counts the escaped name as lost. The wrapper keeps it as typed, as 1.2 read it.
+		- 2026-10-26: The known list for `2174f0d9` has no findings. `ea0998fa`'s is gone, since no pin names it.
+	- Decisions:
+		- A guessed 2.x file with a backslash pair is `ErrAmbiguous`, as shcl says, rather than passing shcl `from` 2 on a guess from errors alone, which would also make `a,b` an array with nothing asked. It follows the lean toward no quiet change. In questions.md as a Check.
+		- The `errors_left` refusal gives a count, not the lines in `Diags`, as on the branch. shcl gives only line numbers, with no message to put beside them.
+		- design.md's Format and upgrade and Decisions say how it works now.
+	- Verified: `cicd/cicd.bash --backlog-run-quick go rust python c` passed, lint CLEAN, with all 61 shared cases in Go, Rust, C and Python. `bash cicd/c-checks.bash leakcheck 3 WORK` passed: CodeQL, CTU, the analyzers and the heaptrack soak, with 0 shcl findings at the new pin and 2.0's matching its list. `bash cicd/c-checks.bash lint 3 WORK` passed, clang-tidy and analyze-shcl included.
+		- In Go the 8 cases failed at the new pin before the fix, and pass after.
+	- Swept: `checkReads` in Go, `check_reads` in Rust, C and Python, and each one's `Upgrade`. `v2Escapes` is left only for the name check. `UpgradeFile` and `Open` go through `Upgrade`. The fuzz, `c_cases.py` and the API tests don't depend on the sets.
+	- Test case: de5b9, de5ba, de5cr, de5cy, de5eq, de5es, de5k2, debk6 (shared cases 034, 035, 039, 045, 047, 049, 050, 059), and deb8c with the known lists.
+
 - Create-only Write
 	- ID: 2026101513330015
 	- Type: Feature
@@ -148,53 +181,6 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- shcl's Go module path is still `.../v2`, and Go won't take a v3 tag on it. Go stays on a commit until that changes.
 		- Quillroute plans to have its release refuse a commit pin. The same check would fit here.
 		- 2026-10-25: Until the beta, the pin follows shcl's newest dev commit, not an old one. `cicd/bump-shcl.bash` moves every 3.0 pin at once. Moved from `ea0998fa` to `a65eceb8`.
-
-- Follow shcl's newest dev commit
-	- ID: 2026102616480100
-	- Type: Task
-	- Status: Waiting on automated testing
-	- Needs local test suite run?: The full run, `cicd/cicd.bash --backlog-run-full`, plain arm.
-	- Priority: High
-	- Opened: 2026-10-26 16:48
-	- Opened by: JC
-	- Branch: shcl-dev-pin, r1026
-	- Related IDs: 2026101512024165
-	- Requirements:
-		- The 3.0 pin moves to shcl's newest dev commit in all 4 languages, with `cicd/bump-shcl.bash`.
-		- Upgrades of 2.x files follow shcl's new migrate rules, and the shared cases pass.
-		- The analyzer known list is made for the new pin.
-	- Notes:
-		- Tallowbase's move to shcl 3 waits on this.
-		- 2026-10-25: branch `shcl-dev-pin` moved the pin to `a65eceb8`. It builds, with a refusal for shcl's new `errors_left` in all 4 languages. 8 shared cases fail. 2.x upgrades that used to work come back `ambiguous` or `refused`, with W002 from the wrapper's own check after the conversion.
-	- Progress log:
-		- 2026-10-26: The pin is at `2174f0d9` in all 4 languages. shcl's library is the same as at `a65eceb8`.
-		- 2026-10-26: The W002s came from resolving each backslash escape twice. shcl's migrate now writes the text 2.x read, and the wrapper then set the value again. The wrapper's own sets are gone in all 4 languages. It still reads every value back against 2.0.
-		- 2026-10-26: shcl now counts a backslash pair as reading two ways in a file that doesn't say it's 2.x. So 035's `upgrade`, 045's and 047's `Open`, and 059's `upgrade` are `ambiguous` now. 045 and 047 open a copy with a Format line naming 2 too, which reads as before.
-		- 2026-10-26: 059's `upgrade 2` is refused now, since shcl won't write a file that would still have an error. Its comma list with lines under it used to come back in `Lost`. No input found that still gives a lost line.
-		- 2026-10-26: 049 gives `unsure 1`, since shcl counts the escaped name as lost. The wrapper keeps it as typed, as 1.2 read it.
-		- 2026-10-26: The known list for `2174f0d9` has no findings. `ea0998fa`'s is gone, since no pin names it.
-	- Decisions:
-		- A guessed 2.x file with a backslash pair is `ErrAmbiguous`, as shcl says, rather than passing shcl `from` 2 on a guess from errors alone, which would also make `a,b` an array with nothing asked. It follows the lean toward no quiet change. In questions.md as a Check.
-		- The `errors_left` refusal gives a count, not the lines in `Diags`, as on the branch. shcl gives only line numbers, with no message to put beside them.
-		- design.md's Format and upgrade and Decisions say how it works now.
-	- Verified: `cicd/cicd.bash --backlog-run-quick go rust python c` passed, lint CLEAN, with all 61 shared cases in Go, Rust, C and Python. `bash cicd/c-checks.bash leakcheck 3 WORK` passed: CodeQL, CTU, the analyzers and the heaptrack soak, with 0 shcl findings at the new pin and 2.0's matching its list. `bash cicd/c-checks.bash lint 3 WORK` passed, clang-tidy and analyze-shcl included.
-		- In Go the 8 cases failed at the new pin before the fix, and pass after.
-	- Swept: `checkReads` in Go, `check_reads` in Rust, C and Python, and each one's `Upgrade`. `v2Escapes` is left only for the name check. `UpgradeFile` and `Open` go through `Upgrade`. The fuzz, `c_cases.py` and the API tests don't depend on the sets.
-	- Test case: de5b9, de5ba, de5cr, de5cy, de5eq, de5es, de5k2, debk6 (shared cases 034, 035, 039, 045, 047, 049, 050, 059), and deb8c with the known lists.
-
-- bump-shcl.bash removes its temp folder with a bare rm -rf
-	- ID: 2026102617263369
-	- Type: Bug
-	- Status: Done
-	- Severity: High
-	- Opened: 2026-10-26 17:26
-	- Opened by: JC
-	- Related IDs: 2026102616480100
-	- Incorrect behavior: deean fails on `cicd/bump-shcl.bash` line 36, `rm -rf -- "${work}"` in its exit trap, so `--backlog-run-quick cicd` and the full run stop at Tests.
-	- Expected behavior: The removal goes through `fSafeRm` from `cicd/utility/include/safe-rm.bash`, per Safe removal, and deean passes.
-	- Reproduced: 2026-10-26, `bash cicd/temp-test.bash` on r1026 at `eba6db8`. It came in with `e3f2389`.
-	- Test case: deean, in cicd/temp-test.bash
-	- 2026-10-26: bump-shcl.bash removes its temp folder through fSafeRm, as the other cicd scripts do. Verified: PASS deean.
 
 - Run the tests on Windows and macOS
 	- ID: 2026101512024174
@@ -691,6 +677,20 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Swept: `git grep -iE 'shcl[-_]wrapper'` finds nothing.
 	- Closed: 20261015-135423
 	- Acceptance signoff: Self-closed: mechanical rename.
+
+- bump-shcl.bash removes its temp folder with a bare rm -rf
+	- ID: 2026102617263369
+	- Type: Bug
+	- Status: Done
+	- Severity: High
+	- Opened: 2026-10-26 17:26
+	- Opened by: JC
+	- Related IDs: 2026102616480100
+	- Incorrect behavior: deean fails on `cicd/bump-shcl.bash` line 36, `rm -rf -- "${work}"` in its exit trap, so `--backlog-run-quick cicd` and the full run stop at Tests.
+	- Expected behavior: The removal goes through `fSafeRm` from `cicd/utility/include/safe-rm.bash`, per Safe removal, and deean passes.
+	- Reproduced: 2026-10-26, `bash cicd/temp-test.bash` on r1026 at `eba6db8`. It came in with `e3f2389`.
+	- Test case: deean, in cicd/temp-test.bash
+	- 2026-10-26: bump-shcl.bash removes its temp folder through fSafeRm, as the other cicd scripts do. Verified: PASS deean.
 
 - shcl analyzer probe fails under the container's clang
 	- ID: 2026102113502809
