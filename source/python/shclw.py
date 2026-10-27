@@ -813,6 +813,46 @@ def _place_block(text: str, marked: bool) -> str:
 	return head + out
 
 
+def _keep_blanks(orig: str, up: str) -> str:
+	"""up, shcl's conversion of orig, with the blank lines it dropped put back,
+	so each line keeps its number (2026102618065634). Go's KeepBlanks has the
+	reasons."""
+	bom = "\ufeff" if up.startswith("\ufeff") else ""
+	was, now = _Lines(orig.removeprefix("\ufeff")), _Lines(up.removeprefix(bom))
+	gaps: list[list[str]] = []
+	texts: list[str] = []
+	gap: list[str] = []
+	for line in was.lines:
+		if line.strip(" \t"):
+			gaps.append(gap)
+			texts.append(line.strip(" \t"))
+			gap = []
+		else:
+			gap.append(line)
+	rest = [i for i, line in enumerate(now.lines) if line.strip(" \t")]
+	parts: list[str] = []
+	k = seen = n = 0
+	for line, end in zip(now.lines, now.ends, strict=True):
+		text = line.strip(" \t")
+		if not text:
+			seen += 1
+		else:
+			n += 1
+			after = now.lines[rest[n]].strip(" \t") if n < len(rest) else ""
+			if k < len(texts) and text != texts[k] and after == texts[k]:
+				# A line the conversion added.
+				seen = 0
+			else:
+				if k < len(gaps):
+					parts += [b + now.eol for b in gaps[k][min(seen, len(gaps[k])) :]]
+				k, seen = k + 1, 0
+		parts.append(line + end)
+	out = bom + "".join(parts)
+	if out == up or _values(out) != _values(up):
+		return up
+	return out
+
+
 def _same_ends(orig: str, text: str) -> str:
 	if _Lines(orig).eol != "\r\n" or "\r" in text:
 		return text
@@ -1769,6 +1809,8 @@ def upgrade(text: str, from_: int = 0) -> Upgraded:
 			ErrKind.Refused,
 			msg=f"{len(u.errors_left)} lines would still have an error once converted; fix them and upgrade again",
 		)
+	if out.changed:
+		out.text = _keep_blanks(src, _mend_reads(old, out.text))
 	out.lost = _check_reads(old, out.text, format_of(text) == 1)
 	if banner:
 		fixed = _place_block(_same_ends(text, out.text), src != text)
@@ -1817,6 +1859,37 @@ def _old_errors(old: Any) -> Error | None:
 
 def _carry_diag(line: int, msg: str) -> Diag:
 	return Diag(line, Severity.Error, "W002", msg)
+
+
+def _mend_reads(old: Any, up: str) -> str:
+	"""up, the upgraded text, with each value that reads otherwise than 2.0
+	read it in old set back to 2.0's reading. shcl's migrate splits a 2.x
+	element at a comma inside quotes, as in title="a, b", which 1.2 and 2.0
+	read whole (2026102618065640). _check_reads still checks the result."""
+	now = shcl.Document.parse(up)
+	d = None
+	for p in old.paths():
+		if old.count(p) != 1 or now.count(p) != 1 or now.read_raw(p).status == shcl.Status.Good:
+			continue
+		was, now_is = old.read_string_array(p), now.read_string_array(p)
+		if was.status != shcl2.Status.Good or now_is.status != shcl.Status.Good or was.value == now_is.value:
+			continue
+		if d is None:
+			try:
+				d = shcl.Document.parse_keep_lines(up, shcl.Strictness.Standard)
+			except shcl.LoadError:
+				return up
+		# 2.0's read_string is Good on a list too, so its length says which.
+		if len(was.value) == 1:
+			st = d.set_string(p, was.value[0])
+		else:
+			st = d.set_string_array(p, list(was.value))
+		if st != shcl.SetStatus.Ok:
+			return up
+	if d is None:
+		return up
+	text, kept = d.to_text_keep_lines()
+	return text if kept else up
 
 
 def _check_reads(old: Any, up: str, names_as_typed: bool) -> list[int]:

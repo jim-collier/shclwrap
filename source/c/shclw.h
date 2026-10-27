@@ -365,8 +365,9 @@ typedef struct {
 // reports errors on is SHCLW_ERR_REFUSED, with them in its diags. A 2.x file
 // comes out reading what 2.0 read, backslash escapes included, and one that
 // can't is SHCLW_ERR_REFUSED too. 2.x's info block is swapped for the
-// current one where it sits, and the lines end as the file's did. *out is set
-// on a failure too, and is NULL only when memory ran out.
+// current one where it sits, and the lines end as the file's did. Blank
+// lines shcl's conversion drops are put back, so a line keeps its number.
+// *out is set on a failure too, and is NULL only when memory ran out.
 shclw_kind shclw_upgrade(const char *text, size_t len, int64_t from, shclw_upgraded **out, shclw_error *err);
 // shclw_upgrade on a file. When it changes the file it first copies the
 // original beside it. A file that changed after it was read is left alone with

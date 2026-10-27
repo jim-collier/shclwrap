@@ -187,6 +187,75 @@ pub(crate) fn place_block(text: &str, marked: bool, e: &InfoEdit<'_>) -> Result<
 	Ok(format!("{bom}{out}"))
 }
 
+/// `up`, shcl's conversion of `orig`, with the blank lines it dropped put
+/// back, so each line keeps its number and a diagnostic names the file's line
+/// (2026102618065634). The conversion keeps every other line in order, so the
+/// n-th line of `up` with text on it is the n-th of `orig`'s, except where it
+/// writes one as two, as 2.x's `x: ~~~` comes out as `x:` and a fence under
+/// it. Where putting them back would change a value, `up` comes back as it
+/// was.
+pub(crate) fn keep_blanks(orig: &str, up: &str, e: &InfoEdit<'_>) -> String {
+	let body = up.strip_prefix('\u{feff}').unwrap_or(up);
+	let bom = &up[..up.len() - body.len()];
+	let was = InfoLines::split(orig.strip_prefix('\u{feff}').unwrap_or(orig));
+	let now = InfoLines::split(body);
+	let mut gaps: Vec<Vec<&str>> = Vec::new();
+	let mut texts: Vec<&str> = Vec::new();
+	let mut gap = Vec::new();
+	for l in &was.lines {
+		if blank_line(l) {
+			gap.push(l.as_str());
+		} else {
+			gaps.push(std::mem::take(&mut gap));
+			texts.push(l.trim_matches([' ', '\t']));
+		}
+	}
+	let mut g = InfoLines {
+		lines: Vec::with_capacity(was.lines.len().max(now.lines.len()) + 8),
+		ends: Vec::with_capacity(was.lines.len().max(now.lines.len()) + 8),
+		eol: now.eol,
+	};
+	let (mut k, mut seen) = (0, 0);
+	for (i, l) in now.lines.iter().enumerate() {
+		if blank_line(l) {
+			seen += 1;
+		} else if texts
+			.get(k)
+			.is_some_and(|&t| l.trim_matches([' ', '\t']) != t && next_text(&now.lines, i) == t)
+		{
+			// A line the conversion added.
+			seen = 0;
+		} else {
+			if let Some(gap) = gaps.get(k) {
+				for b in &gap[seen.min(gap.len())..] {
+					g.lines.push((*b).to_owned());
+					g.ends.push(now.eol);
+				}
+			}
+			(k, seen) = (k + 1, 0);
+		}
+		g.lines.push(l.clone());
+		g.ends.push(now.ends[i]);
+	}
+	let out = format!("{bom}{}", g.join_without(None));
+	if out == up || (e.values)(&out) != (e.values)(up) {
+		return up.to_owned();
+	}
+	out
+}
+
+/// The first line after `lines[i]` with text on it, trimmed.
+fn next_text(lines: &[String], i: usize) -> &str {
+	lines[i + 1..]
+		.iter()
+		.find(|l| !blank_line(l))
+		.map_or("", |l| l.trim_matches([' ', '\t']))
+}
+
+fn blank_line(l: &str) -> bool {
+	l.trim_matches([' ', '\t']).is_empty()
+}
+
 /// `text`, an upgrade of `orig`, with `orig`'s line ends, where shcl wrote it
 /// out again with LF only.
 pub(crate) fn same_ends(orig: &str, text: &str, e: &InfoEdit<'_>) -> String {

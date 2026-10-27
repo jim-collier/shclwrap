@@ -150,34 +150,6 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- Quillroute plans to have its release refuse a commit pin. The same check would fit here.
 		- 2026-10-25: Until the beta, the pin follows shcl's newest dev commit, not an old one. `cicd/bump-shcl.bash` moves every 3.0 pin at once. Moved from `ea0998fa` to `a65eceb8`.
 
-- Upgrade moves lines, so a 2.x file's diagnostics name the wrong line
-	- ID: 2026102618065634
-	- Type: Bug
-	- Status: Queued
-	- Severity: High
-	- Opened: 20261026-180656
-	- Opened by: JC
-	- Steps to reproduce:
-		- On 3.0, `Upgrade` `"\n\nt:\n\taliases: a, b\n"` with `from` 0 or 2, then parse the text and ask for the line of `t.aliases`.
-	- Incorrect behavior: The blank lines at the top are gone, and a run of blank lines inside folds to one, so `t.aliases` is on line 2, not 4. Open does the same in memory, so every diagnostic after the first dropped blank names the wrong line. Silent wrong answer.
-	- Expected behavior: The upgraded text keeps the file's lines where they were, as the doc comment's "the lines end as the file's did" suggests, or Open maps lines back to the file's.
-	- Reproduced: 20261026 at f03fe5e over shcl 2174f0d9, in Go. shcl's own `Upgrade` does it too, so the fix may belong there.
-	- Note: Found in gitniblet, 2026102509204445, which puts the lines back itself by matching non-blank lines in order.
-
-- Upgrade splits a 1.2 element at a comma inside quotes
-	- ID: 2026102618065640
-	- Type: Bug
-	- Status: Queued
-	- Severity: High
-	- Opened: 20261026-180656
-	- Opened by: JC
-	- Steps to reproduce:
-		- On 3.0, `Upgrade` `row: idx=2, title="a, b", description="say \"hi\""` with `from` 2, then read `row` as strings.
-	- Incorrect behavior: It comes back `[idx=2, 'title="a', 'b"', ...]`, 4 elements where shcl 1.2 read 3, with `title="a, b"` whole and its escapes applied. The doc comment says from 2 is for a file "from shcl 2.x or older". Silent wrong answer for a 1.2 file.
-	- Expected behavior: A 1.2 file reads as 1.2 read it, or the doc says from 2 means 2.x only and a 1.2 reading is refused.
-	- Reproduced: 20261026 at f03fe5e over shcl 2174f0d9, in Go.
-	- Note: Found in gitniblet, 2026102509204445, whose seed rows are written this way. It rewrites those lines itself.
-
 - Run the tests on Windows and macOS
 	- ID: 2026101512024174
 	- Type: Task
@@ -503,6 +475,21 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- 2026-10-24, CICD reset: per `macOS builds on GitHub` and `Merge gate` in the shared CICD rules. One small workflow on push and PR against main, plus `workflow_dispatch`, runs `--merge-gate` as far as the runner can, with the arm64 macOS job beside it. cicd.bash flags picked by how long the job takes start it. It's free while the repo is public.
 		- 2026-10-25: Split into 2026102519333240, the workflow, and 2026102519333340, cicd.bash starting it.
 
+- Upgrade of a 2.x raw block moves the lines after it by one
+	- ID: 2026102620430717
+	- Type: Bug
+	- Status: Queued
+	- Severity: Low
+	- Opened: 20261026-204307
+	- Opened by: JC
+	- Related IDs: 2026102618065634
+	- Steps to reproduce:
+		- On 3.0, `Upgrade` `"a: p, q\nraw: ~~~\nkeep\n~~~\nlast: z\n"` with `from` 2, then ask for the line of `last`.
+	- Incorrect behavior: shcl writes `raw: ~~~` as `raw:` with the fence on a line of its own, so `last` is on line 6, not 5, and so is every diagnostic after the block. A file shcl leaves alone keeps its lines.
+	- Expected behavior: The lines keep their numbers, or Open maps them back to the file's.
+	- Reproduced: 20261026 on r1026b, in all 4, in shared case 062.
+	- Note: Blank lines can't fix it. A fix joins the fence back onto its line where 3.0 reads that the same, or maps lines in Open.
+
 - Say which layer a read came from
 	- ID: 2026102114101028
 	- Type: Enhancement
@@ -685,6 +672,68 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Swept: `git grep -iE 'shcl[-_]wrapper'` finds nothing.
 	- Closed: 20261015-135423
 	- Acceptance signoff: Self-closed: mechanical rename.
+
+- Upgrade moves lines, so a 2.x file's diagnostics name the wrong line
+	- ID: 2026102618065634
+	- Type: Bug
+	- Status: Done
+	- Needs local test suite run?: No
+	- Severity: High
+	- Opened: 20261026-180656
+	- Opened by: JC
+	- Steps to reproduce:
+		- On 3.0, `Upgrade` `"\n\nt:\n\taliases: a, b\n"` with `from` 0 or 2, then parse the text and ask for the line of `t.aliases`.
+	- Incorrect behavior: The blank lines at the top are gone, and a run of blank lines inside folds to one, so `t.aliases` is on line 2, not 4. Open does the same in memory, so every diagnostic after the first dropped blank names the wrong line. Silent wrong answer.
+	- Expected behavior: The upgraded text keeps the file's lines where they were, as the doc comment's "the lines end as the file's did" suggests, or Open maps lines back to the file's.
+	- Reproduced: 20261026 at f03fe5e over shcl 2174f0d9, in Go. shcl's own `Upgrade` does it too, so the fix may belong there.
+	- Note: Found in gitniblet, 2026102509204445, which puts the lines back itself by matching non-blank lines in order.
+	- Actual cause:
+		- shcl's conversion writes the file out again without the blank lines at the top, and with each run of blank lines folded to one. It also writes 2.x's `x: ~~~` as 2 lines. Checked at the pin, `2174f0d9`.
+	- Decisions:
+		- Fixed in the wrapper, right after shcl's conversion, rather than mapping lines back in Open. One fix covers Upgrade, UpgradeFile and Open, and the file a program writes after keeps its lines too.
+		- Lines with text are paired in order, with one line of lookahead for a line shcl added, so it's linear in the file's length. Where putting the blanks back would change a value, shcl's text is kept.
+		- A line shcl writes as two still moves the lines after it by one, so the result departs from the wording there. That's 2026102620430717.
+	- Actual fix: `KeepBlanks` in Go, `keep_blanks` in Rust and C, and `_keep_blanks` in Python, run on shcl's text before the read-back against 2.0. design.md's Format and upgrade says so.
+	- Note: shcl friction, a silent wrong answer. `Upgrade("\n\nt:\n\taliases: a, b\n", true)` puts `t.aliases` on line 2, not 4. A draft for shcl's backlog is in the private upstream folder under this ID.
+	- Note: Tallowbase can drop its own put-back of the lines once it's on this.
+	- Test case: tests/cases/062-upgrade-blank-lines (deftf). It failed before the fix in Go and Python, and passes after in Go, Rust, C and Python.
+	- Swept: `Upgrade` in Go `shclw3`, Rust `v3`, C `shclw3.c` and Python. `UpgradeFile` and `Open` go through it in each. No existing want file changed.
+	- Verified: `cicd/cicd.bash --backlog-run-quick go rust python c` passed, lint CLEAN. `bash cicd/c-checks.bash lint 3 WORK` passed. A 90 second fuzz through Go, Rust, C and Python found no difference.
+	- Branch: r1026b
+	- 2026-10-26 Verified: cicd.bash --backlog-run-full passed all 8 steps at r1026b (run 20261026-204935, lint CLEAN), with deftf and deftg passing in Go, Rust, C and Python.
+	- 2026-10-26: filed in shcl's backlog as 2026102620591101.
+
+- Upgrade splits a 1.2 element at a comma inside quotes
+	- ID: 2026102618065640
+	- Type: Bug
+	- Status: Done
+	- Needs local test suite run?: No
+	- Severity: High
+	- Opened: 20261026-180656
+	- Opened by: JC
+	- Steps to reproduce:
+		- On 3.0, `Upgrade` `row: idx=2, title="a, b", description="say \"hi\""` with `from` 2, then read `row` as strings.
+	- Incorrect behavior: It comes back `[idx=2, 'title="a', 'b"', ...]`, 4 elements where shcl 1.2 read 3, with `title="a, b"` whole and its escapes applied. The doc comment says from 2 is for a file "from shcl 2.x or older". Silent wrong answer for a 1.2 file.
+	- Expected behavior: A 1.2 file reads as 1.2 read it, or the doc says from 2 means 2.x only and a 1.2 reading is refused.
+	- Reproduced: 20261026 at f03fe5e over shcl 2174f0d9, in Go.
+	- Note: Found in gitniblet, 2026102509204445, whose seed rows are written this way. It rewrites those lines itself.
+	- Progress log:
+		- 2026-10-26: At 0bf86ce the wrapper refused the file, since its read-back against 2.0 caught the split. The 4 elements are shcl's own `Upgrade`.
+	- Actual cause:
+		- shcl's conversion splits a 2.x element at every comma, even one inside quotes. 1.2 and 2.0 read a quote inside an element as text, and keep the comma in the element. `one: x="a, b"` comes out as 2 elements too.
+	- Decisions:
+		- The upgrade gives 2.0's reading rather than a refusal. 2.0 reads this row as the item says 1.2 did, 3 elements with the escapes applied, so `from` 2 still means 2.x or older.
+		- Only a value that reads differently is set again, to 2.0's reading, which has its escapes resolved already, so none is read twice, as in 2026102616480100. It goes in as a list or a string by how many elements 2.0 read, since 2.0's string read is Good on a list too. The read-back against 2.0 still checks every value.
+		- A set that fails, or a file shcl can't keep the lines of, is refused as before.
+	- Actual fix: `mendReads` in Go, and `mend_reads` in Rust, C and Python, run on shcl's text before the read-back. design.md's Format and upgrade says so.
+	- Note: shcl friction, a silent wrong answer. `Upgrade` of `row: idx=2, title="a, b"` with fromV2 gives `[idx=2, 'title="a', 'b"']`. A draft for shcl's backlog is in the private upstream folder under this ID.
+	- Note: Tallowbase can drop its rewrite of the seed rows once it's on this.
+	- Test case: tests/cases/063-upgrade-quoted-comma (deftg), with `from` 0 and 2 and Open. It failed before the fix in Go and Python, and passes after in Go, Rust, C and Python.
+	- Swept: `Upgrade` in all 4, as above. A repeated key and a raw value are left to the read-back, as before.
+	- Verified: the same runs as 2026102618065634.
+	- Branch: r1026b
+	- 2026-10-26 Verified: cicd.bash --backlog-run-full passed all 8 steps at r1026b (run 20261026-204935, lint CLEAN), with deftf and deftg passing in Go, Rust, C and Python.
+	- 2026-10-26: filed in shcl's backlog as 2026102620591100.
 
 - bump-shcl.bash removes its temp folder with a bare rm -rf
 	- ID: 2026102617263369

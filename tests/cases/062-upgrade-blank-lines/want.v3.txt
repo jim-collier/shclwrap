@@ -1,0 +1,47 @@
+> upgrade	2
+from 2 changed true unsure 0
+lost [] rewritten [5 15 16 17]
+| 
+| 
+| # 2.x kept these blank lines
+| t:
+| \taliases: [a, b]
+| 
+| 
+| \tname: x
+| 
+| 
+| 
+| end: y
+| 
+| 
+| raw:
+| \t~~~
+| \tkeep
+| \t~~~
+| 
+| 
+| last: z
+| 
+| ##
+| ## This config file format is SHCL.
+| ## "Simple Hierarchical Config Language"
+| ##    Format   3
+| ##    Home     https://github.com/yottacore/shcl
+| ##    Syntax   https://github.com/yottacore/shcl/blob/v3.0.0-beta1/project/spec.md
+| ##    Legal    SHCL is Copyright © 2026 Jim Collier [ID: 2უNაɘ«҂թȹɤξπ๙¿ձϖ]. License: MIT. No warranty.
+| ##
+> open	doc.shcl
+ok
+> upgraded
+from 2 backup none
+> get	strs	t.aliases
+Good	5	2	a	b
+> get	str	t.name
+Good	8	x
+> get	str	end
+Good	12	y
+> get	raw	raw
+Good	15	keep
+> get	str	last
+Good	21	z

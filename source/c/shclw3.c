@@ -1478,6 +1478,100 @@ static shclw_kind check_reads(shclw_i_v2_doc *old, const char *up, size_t up_len
 	return lost->oom || bad->oom ? SHCLW_ERR_NO_MEMORY : SHCLW_OK;
 }
 
+// What mend_reads gathers of 2.0's read of one path, an element at a time.
+typedef struct {
+	shcl_doc *now, *d;
+	const char *up;
+	size_t up_len;
+	const char **items;
+	size_t *lens;
+	size_t cap;
+	bool oom, failed;
+} mend;
+
+static void mend_old(void *ctx, const char *path, size_t plen, size_t line, size_t i, size_t n, const char *v,
+                     size_t vlen) {
+	(void)line;
+	mend *m = (mend *)ctx;
+	if (m->oom || m->failed) {
+		return;
+	}
+	if (i == 0 && n > m->cap) {
+		const char **items =
+			n < SIZE_MAX / sizeof(char *) ? (const char **)realloc((void *)m->items, n * sizeof(char *)) : NULL;
+		if (items) {
+			m->items = items;
+		}
+		size_t *lens = items && n < SIZE_MAX / sizeof(size_t) ? (size_t *)realloc(m->lens, n * sizeof(size_t)) : NULL;
+		if (!lens) {
+			m->oom = true;
+			return;
+		}
+		m->lens = lens;
+		m->cap = n;
+	}
+	if (i >= m->cap) {
+		return;
+	}
+	m->items[i] = v;
+	m->lens[i] = vlen;
+	if (i + 1 != n || shcl_count(m->now, path, plen) != 1 || shcl_read_raw(m->now, path, plen).status == SHCL_GOOD) {
+		return;
+	}
+	shcl_read_str_arr is = shcl_read_string_array(m->now, path, plen);
+	if (is.status != SHCL_GOOD) {
+		return;
+	}
+	bool same = is.n == n;
+	for (size_t k = 0; same && k < n; k++) {
+		same = is.values[k].n == m->lens[k] && (!m->lens[k] || !memcmp(is.values[k].p, m->items[k], m->lens[k]));
+	}
+	if (same) {
+		return;
+	}
+	if (!m->d) {
+		m->d = shcl_parse_keep_lines(m->up, m->up_len, SHCL_STANDARD);
+	}
+	if (!m->d) {
+		m->oom = true;
+		return;
+	}
+	// 2.0's string read is Good on a list too, so its length says which.
+	shcl_set_status st = n == 1 ? shcl_set_string(m->d, path, plen, m->items[0], m->lens[0])
+	                            : shcl_set_string_array(m->d, path, plen, m->items, m->lens, n);
+	m->failed = st != SHCL_SET_OK;
+}
+
+// Go's mendReads: up with each value that reads otherwise than 2.0 read it
+// in old set back to 2.0's reading. shcl's migrate splits a 2.x element at a
+// comma inside quotes, as in title="a, b", which 1.2 and 2.0 read whole
+// (2026102618065640). check_reads still checks the result. malloc'd, or NULL
+// when memory ran out.
+static char *mend_reads(shclw_i_v2_doc *old, const char *up, size_t up_len, size_t *out_len) {
+	shcl_doc *now = shcl_parse(up, up_len);
+	if (!now) {
+		return NULL;
+	}
+	mend m = {now, NULL, up, up_len, NULL, NULL, 0, false, false};
+	shclw_i_v2_reads(old, mend_old, &m);
+	char *out = NULL;
+	if (!m.oom) {
+		int kept = 0;
+		shcl_str t = {NULL, 0};
+		if (m.d && !m.failed) {
+			t = shcl_to_text_keep_lines(m.d, &kept);
+		}
+		out = kept && t.p ? shclw_i_dup(t.p, t.n, out_len) : shclw_i_dup(up, up_len, out_len);
+	}
+	if (m.d) {
+		shcl_free(m.d);
+	}
+	shcl_free(now);
+	free((void *)m.items);
+	free(m.lens);
+	return out;
+}
+
 // The result of an upgrade of text to up, with text's line ends, and with the
 // info block put where the mark is when banner. *k is set on a failure.
 static shclw_upgraded *upgraded_ends(const char *text, size_t len, const char *up, size_t up_len, bool banner,
@@ -1581,9 +1675,25 @@ static shclw_kind upgrade(const char *text, size_t len, int64_t from, const char
 		bool guessed = !from_v2 && named == 0;
 		bool checked = false;
 		lost_list lost = {NULL, NULL, 0, 0, false};
+		char *fixed = NULL;
+		const char *up = u.text;
+		size_t up_len = u.len;
 		if (!l.oom && !l.n && !u.ambiguous && !u.errors_left_n) {
-			k = check_reads(old, u.text, u.len, named == 1, &l, &lost);
-			checked = true;
+			if (!u.current) {
+				size_t mended_len = 0;
+				char *mended = mend_reads(old, u.text, u.len, &mended_len);
+				fixed = mended ? shclw_i_keep_blanks(marked ? marked : text, marked ? marked_len : len, mended,
+				                                     mended_len, &info_edit, &up_len)
+				               : NULL;
+				free(mended);
+				up = fixed;
+			}
+			if (up) {
+				k = check_reads(old, up, up_len, named == 1, &l, &lost);
+				checked = true;
+			} else {
+				k = SHCLW_ERR_NO_MEMORY;
+			}
 		}
 		shclw_i_v2_free(old);
 		if (l.oom || k != SHCLW_OK) {
@@ -1615,7 +1725,7 @@ static shclw_kind upgrade(const char *text, size_t len, int64_t from, const char
 			               u.errors_left_n);
 			k = shclw_i_fail(err, SHCLW_ERR_REFUSED, path, why, 0);
 		} else if (banner || !u.current) {
-			*out = upgraded_ends(text, len, u.text, u.len, banner, marked != NULL, was, &u, path, &k, err);
+			*out = upgraded_ends(text, len, up, up_len, banner, marked != NULL, was, &u, path, &k, err);
 		} else {
 			*out = shclw_i_upgraded(u.text, u.len, was, false, u.lost, NULL, NULL, 0);
 		}
@@ -1623,6 +1733,7 @@ static shclw_kind upgrade(const char *text, size_t len, int64_t from, const char
 			*out = with_lines(*out, text, len, &lost);
 		}
 		free(lost.v);
+		free(fixed);
 		free_old(&l);
 	}
 	shcl_upgraded_free(&u);

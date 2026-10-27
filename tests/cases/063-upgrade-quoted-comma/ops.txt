@@ -1,0 +1,9 @@
+# Test ID: deftg
+# 1.2 and 2.0 read a quote inside an element as text, and a comma inside it
+# as part of the element. shcl's conversion split title="a, b" in two, so
+# the upgrade sets those values back to what 2.0 read (2026102618065640).
+upgrade	2
+upgrade
+open	doc.shcl
+get	strs	row
+get	str	one

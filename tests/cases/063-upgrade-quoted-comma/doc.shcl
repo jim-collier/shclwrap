@@ -1,0 +1,3 @@
+# Seed rows as 1.2 and 2.0 read them, with a comma inside quotes
+row: idx=2, title="a, b", description="say \"hi\""
+one: x="a, b"
