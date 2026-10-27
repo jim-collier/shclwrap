@@ -150,6 +150,34 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- Quillroute plans to have its release refuse a commit pin. The same check would fit here.
 		- 2026-10-25: Until the beta, the pin follows shcl's newest dev commit, not an old one. `cicd/bump-shcl.bash` moves every 3.0 pin at once. Moved from `ea0998fa` to `a65eceb8`.
 
+- Upgrade moves lines, so a 2.x file's diagnostics name the wrong line
+	- ID: 2026102618065634
+	- Type: Bug
+	- Status: Queued
+	- Severity: High
+	- Opened: 20261026-180656
+	- Opened by: JC
+	- Steps to reproduce:
+		- On 3.0, `Upgrade` `"\n\nt:\n\taliases: a, b\n"` with `from` 0 or 2, then parse the text and ask for the line of `t.aliases`.
+	- Incorrect behavior: The blank lines at the top are gone, and a run of blank lines inside folds to one, so `t.aliases` is on line 2, not 4. Open does the same in memory, so every diagnostic after the first dropped blank names the wrong line. Silent wrong answer.
+	- Expected behavior: The upgraded text keeps the file's lines where they were, as the doc comment's "the lines end as the file's did" suggests, or Open maps lines back to the file's.
+	- Reproduced: 20261026 at f03fe5e over shcl 2174f0d9, in Go. shcl's own `Upgrade` does it too, so the fix may belong there.
+	- Note: Found in gitniblet, 2026102509204445, which puts the lines back itself by matching non-blank lines in order.
+
+- Upgrade splits a 1.2 element at a comma inside quotes
+	- ID: 2026102618065640
+	- Type: Bug
+	- Status: Queued
+	- Severity: High
+	- Opened: 20261026-180656
+	- Opened by: JC
+	- Steps to reproduce:
+		- On 3.0, `Upgrade` `row: idx=2, title="a, b", description="say \"hi\""` with `from` 2, then read `row` as strings.
+	- Incorrect behavior: It comes back `[idx=2, 'title="a', 'b"', ...]`, 4 elements where shcl 1.2 read 3, with `title="a, b"` whole and its escapes applied. The doc comment says from 2 is for a file "from shcl 2.x or older". Silent wrong answer for a 1.2 file.
+	- Expected behavior: A 1.2 file reads as 1.2 read it, or the doc says from 2 means 2.x only and a 1.2 reading is refused.
+	- Reproduced: 20261026 at f03fe5e over shcl 2174f0d9, in Go.
+	- Note: Found in gitniblet, 2026102509204445, whose seed rows are written this way. It rewrites those lines itself.
+
 - Run the tests on Windows and macOS
 	- ID: 2026101512024174
 	- Type: Task
@@ -199,6 +227,18 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- It passes, as it does on the pinned go1.26.2. Float ties print by Go's rule in every language, so a Go program built with 1.27 would write a value Rust, C and Python don't.
 	- Reproduced [Bug]: 2026-10-25, with go1.27.3 on b23 (linux/amd64) and on b26 (darwin/amd64). go1.26.2 passes on both.
 	- Possible cause [Bug]: Go 1.27 changed how `strconv` rounds a float32 halfway case. Not looked into yet.
+
+- Let an upgrade keep a backtick value as 3.0 reads it
+	- ID: 2026102618065645
+	- Type: Enhancement
+	- Status: Queued
+	- Priority: Avg
+	- Opened: 20261026-180656
+	- Opened by: JC
+	- Requirements:
+		- A file with no Format line, a bare `a, b` list and a backtick value, such as `` sql: `select a, b from t` ``, is ErrAmbiguous on Open. With from 2 the backtick value turns into a 2-element array. A program that read that line raw under 2.x, as gitniblet did, wants the list in brackets and the backtick value kept as typed, and neither from 0 nor from 2 gives that.
+		- Missing capability. Maybe an option naming the keys a program reads raw, or one that takes 3.0's reading for backtick lines.
+	- Note: Found in gitniblet, 2026102509204445, which swaps those lines out before the upgrade and puts them back after.
 
 - Comment doesn't stack, and leaves the user's own notes
 	- ID: 2026101513330022
