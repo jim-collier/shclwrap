@@ -1,6 +1,8 @@
 # Test ID: de5ba
 # What the wrapper's 2.0 adapter wrote, with no info block. With no Format
-# line, it's taken as 2.x since its arrays don't load clean on 3.0.
+# line, it's taken as 2.x since its arrays don't load clean on 3.0, but its
+# path's backslash pair reads two ways, so only from 2 converts it
+# (2026102616480100).
 format
 diags
 upgrade

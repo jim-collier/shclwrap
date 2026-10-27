@@ -39,4 +39,5 @@ done
 ## this repo's internals.
 for gitVar in $(git rev-parse --local-env-vars); do unset "${gitVar}"; done
 
-exec "${root}/cicd/cicd.bash" --merge-gate --quiet
+## The push to main starts ci.yml on GitHub itself, so the gate doesn't wait on one.
+exec "${root}/cicd/cicd.bash" --merge-gate --quiet --no-remote

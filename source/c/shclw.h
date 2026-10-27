@@ -51,7 +51,7 @@
 #error "shclw: this shcl.h is newer than 3.0, which shclw doesn't wrap yet"
 #endif
 #define SHCLW_FORMAT_MAJOR 3
-#define SHCLW_SHCL_VERSION "3.0.0-dev+ea0998fa"
+#define SHCLW_SHCL_VERSION "3.0.0-dev+2174f0d9"
 
 #ifdef __cplusplus
 extern "C" {

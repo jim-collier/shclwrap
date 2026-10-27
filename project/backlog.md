@@ -88,6 +88,38 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Test case: deebf, `cicd/c-nosan-test.bash`. The workflow itself is the `ci` run on GitHub.
 	- 2026-10-25: still waits on the first hosted run, which needs ci.yml on main. The round merges into dev only.
 
+- cicd.bash starts the hosted workflow and waits for it
+	- ID: 2026102519333340
+	- Type: Enhancement
+	- Status: Waiting on automated testing
+	- Needs local test suite run?: No
+	- Needs external testing: Once ci.yml is on main, a full run on a pushed branch: `PASS defmk`, then defmm from the real run on GitHub. It starts the Mac runner, so check the repo is still public first.
+	- Priority: Avg
+	- Opened: 2026-10-25 19:33
+	- Opened by: JC
+	- Parent ID: 2026102307090301
+	- Prereq IDs: 2026102519333240
+	- Requirements:
+		- cicd.bash flags picked by how long the job takes start the `ci` workflow, per the parent's CICD reset note.
+		- A run that starts it waits for its result at the end. Anything short of a finished run that failed is a `SKIP`, as for a test box that doesn't answer. `--no-remote` skips it.
+	- Note: zuid does this for its full run, `--backlog-run-full` and `--merge-gate`, in `fStage_Hosted_Start` and `fStage_Hosted_Result` in its cicd.bash, tests dedwh, dedwj, dedwk and dedwm. GitHub runs only what's pushed, and `workflow_dispatch` works only once the workflow is on the default branch.
+	- Progress log:
+		- 2026-10-26: `cicd/utility/include/hosted.bash`, from zuid's. The default run, `--merge-gate` and `--backlog-run-full` start ci.yml first (defmk) and wait for it last (defmm). Quick runs and `--no-remote` leave both steps out, by name. design.md says so.
+		- 2026-10-26: It asks only when the branch's remote is at HEAD and the repo is public. A runner, a detached HEAD, no gh, a refused dispatch, no listed run, a cancel, or no answer within 110 minutes is a `SKIP`.
+		- 2026-10-26: The pre-push hook now passes `--no-remote`, since the push to main starts ci.yml itself. dedn4's expected hook call went from `--merge-gate --quiet` to `--merge-gate --quiet --no-remote`. dedm7's off lists for `--quick`, `--ci --quick`, `--quick --no-sync` and `--backlog-run-quick` gained the 2 new steps.
+		- Verified: defmn passes, and fails with each of these taken out: the cancel skip, the visibility check, the since time, the wait cap, the quick-run off, the hook's `--no-remote`, the at-HEAD check. de7yv, deea7, dedm7, dedn4 and deeap pass. shellcheck is clean. `--backlog-run-quick cicd` passed format and lint, and its tests stopped at deean, per bug 2026102617263369. Read-only gh calls here: the repo reads `PUBLIC`, and ci.yml on dev gets HTTP 404 until it's on main, which is a `SKIP`.
+		- Swept: every cicd.bash caller with a run that isn't quick: the pre-push hook, both ci.yml jobs (both pass `--no-remote`), and the tests that run cicd.bash (all `--dry-run` or `--list`, or a stand-in).
+	- Decisions:
+		- One include, `hosted.bash`, so a test drives the real functions, rather than zuid's functions lifted out of cicd.bash.
+		- The default run starts it too, not only the 2 named full runs, since it runs every check they do and takes as long.
+		- A private repo is a `SKIP`, since the Mac runner is paid there. One extra gh call per run.
+		- The pre-push hook leaves it out, rather than holding a push to main for up to 110 minutes on a run the push starts anyway.
+		- `SHCLW_GH` stands in for gh, like zuid's `ZUID_GH`.
+	- Branch: r1026
+	- Test case: defmn, `cicd/hosted-test.bash`. defmk and defmm are the steps' own lines.
+	- Commit: d09c379
+	- 2026-10-26 Verified: PASS defmn in cicd.bash --backlog-run-full at 28bbbb0, run_20261026-173021. defmk and defmm were SKIP, as expected. Only the external row is left.
+
 - shcl 4 adapters
 	- ID: 2026101512024163
 	- Type: Feature
@@ -116,6 +148,7 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- The tag is spelled with no dot, per shcl's own backlog.
 		- shcl's Go module path is still `.../v2`, and Go won't take a v3 tag on it. Go stays on a commit until that changes.
 		- Quillroute plans to have its release refuse a commit pin. The same check would fit here.
+		- 2026-10-25: Until the beta, the pin follows shcl's newest dev commit, not an old one. `cicd/bump-shcl.bash` moves every 3.0 pin at once. Moved from `ea0998fa` to `a65eceb8`.
 
 - Run the tests on Windows and macOS
 	- ID: 2026101512024174
@@ -430,20 +463,6 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- 2026-10-24, CICD reset: per `macOS builds on GitHub` and `Merge gate` in the shared CICD rules. One small workflow on push and PR against main, plus `workflow_dispatch`, runs `--merge-gate` as far as the runner can, with the arm64 macOS job beside it. cicd.bash flags picked by how long the job takes start it. It's free while the repo is public.
 		- 2026-10-25: Split into 2026102519333240, the workflow, and 2026102519333340, cicd.bash starting it.
 
-- cicd.bash starts the hosted workflow and waits for it
-	- ID: 2026102519333340
-	- Type: Enhancement
-	- Status: Queued
-	- Priority: Avg
-	- Opened: 2026-10-25 19:33
-	- Opened by: JC
-	- Parent ID: 2026102307090301
-	- Prereq IDs: 2026102519333240
-	- Requirements:
-		- cicd.bash flags picked by how long the job takes start the `ci` workflow, per the parent's CICD reset note.
-		- A run that starts it waits for its result at the end. Anything short of a finished run that failed is a `SKIP`, as for a test box that doesn't answer. `--no-remote` skips it.
-	- Note: zuid does this for its full run, `--backlog-run-full` and `--merge-gate`, in `fStage_Hosted_Start` and `fStage_Hosted_Result` in its cicd.bash, tests dedwh, dedwj, dedwk and dedwm. GitHub runs only what's pushed, and `workflow_dispatch` works only once the workflow is on the default branch.
-
 - Say which layer a read came from
 	- ID: 2026102114101028
 	- Type: Enhancement
@@ -627,6 +646,20 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Closed: 20261015-135423
 	- Acceptance signoff: Self-closed: mechanical rename.
 
+- bump-shcl.bash removes its temp folder with a bare rm -rf
+	- ID: 2026102617263369
+	- Type: Bug
+	- Status: Done
+	- Severity: High
+	- Opened: 2026-10-26 17:26
+	- Opened by: JC
+	- Related IDs: 2026102616480100
+	- Incorrect behavior: deean fails on `cicd/bump-shcl.bash` line 36, `rm -rf -- "${work}"` in its exit trap, so `--backlog-run-quick cicd` and the full run stop at Tests.
+	- Expected behavior: The removal goes through `fSafeRm` from `cicd/utility/include/safe-rm.bash`, per Safe removal, and deean passes.
+	- Reproduced: 2026-10-26, `bash cicd/temp-test.bash` on r1026 at `eba6db8`. It came in with `e3f2389`.
+	- Test case: deean, in cicd/temp-test.bash
+	- 2026-10-26: bump-shcl.bash removes its temp folder through fSafeRm, as the other cicd scripts do. Verified: PASS deean.
+
 - shcl analyzer probe fails under the container's clang
 	- ID: 2026102113502809
 	- Type: Bug
@@ -766,6 +799,40 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Swept: `Upgrade` and `UpgradeFile` in Go `shclw3` and Rust `v3`. The 1.2 and 2.0 adapters convert nothing. A format 3 file passed with `from` 2 that 2.0 has errors on, such as `tags: [a, b]`, is still left alone.
 	- Closed: 20261017-11325800
 	- Acceptance signoff: Self-closed: the 2.0 check is now required in every build, per 2026101613005800, and the test failed before the fix and passes after.
+
+- Follow shcl's newest dev commit
+	- ID: 2026102616480100
+	- Type: Task
+	- Status: Done
+	- Needs local test suite run?: No
+	- Priority: High
+	- Opened: 2026-10-26 16:48
+	- Opened by: JC
+	- Branch: shcl-dev-pin, r1026
+	- Related IDs: 2026101512024165
+	- Requirements:
+		- The 3.0 pin moves to shcl's newest dev commit in all 4 languages, with `cicd/bump-shcl.bash`.
+		- Upgrades of 2.x files follow shcl's new migrate rules, and the shared cases pass.
+		- The analyzer known list is made for the new pin.
+	- Notes:
+		- Tallowbase's move to shcl 3 waits on this.
+		- 2026-10-25: branch `shcl-dev-pin` moved the pin to `a65eceb8`. It builds, with a refusal for shcl's new `errors_left` in all 4 languages. 8 shared cases fail. 2.x upgrades that used to work come back `ambiguous` or `refused`, with W002 from the wrapper's own check after the conversion.
+	- Progress log:
+		- 2026-10-26: The pin is at `2174f0d9` in all 4 languages. shcl's library is the same as at `a65eceb8`.
+		- 2026-10-26: The W002s came from resolving each backslash escape twice. shcl's migrate now writes the text 2.x read, and the wrapper then set the value again. The wrapper's own sets are gone in all 4 languages. It still reads every value back against 2.0.
+		- 2026-10-26: shcl now counts a backslash pair as reading two ways in a file that doesn't say it's 2.x. So 035's `upgrade`, 045's and 047's `Open`, and 059's `upgrade` are `ambiguous` now. 045 and 047 open a copy with a Format line naming 2 too, which reads as before.
+		- 2026-10-26: 059's `upgrade 2` is refused now, since shcl won't write a file that would still have an error. Its comma list with lines under it used to come back in `Lost`. No input found that still gives a lost line.
+		- 2026-10-26: 049 gives `unsure 1`, since shcl counts the escaped name as lost. The wrapper keeps it as typed, as 1.2 read it.
+		- 2026-10-26: The known list for `2174f0d9` has no findings. `ea0998fa`'s is gone, since no pin names it.
+	- Decisions:
+		- A guessed 2.x file with a backslash pair is `ErrAmbiguous`, as shcl says, rather than passing shcl `from` 2 on a guess from errors alone, which would also make `a,b` an array with nothing asked. It follows the lean toward no quiet change. In questions.md as a Check.
+		- The `errors_left` refusal gives a count, not the lines in `Diags`, as on the branch. shcl gives only line numbers, with no message to put beside them.
+		- design.md's Format and upgrade and Decisions say how it works now.
+	- Verified: `cicd/cicd.bash --backlog-run-quick go rust python c` passed, lint CLEAN, with all 61 shared cases in Go, Rust, C and Python. `bash cicd/c-checks.bash leakcheck 3 WORK` passed: CodeQL, CTU, the analyzers and the heaptrack soak, with 0 shcl findings at the new pin and 2.0's matching its list. `bash cicd/c-checks.bash lint 3 WORK` passed, clang-tidy and analyze-shcl included.
+		- In Go the 8 cases failed at the new pin before the fix, and pass after.
+	- Swept: `checkReads` in Go, `check_reads` in Rust, C and Python, and each one's `Upgrade`. `v2Escapes` is left only for the name check. `UpgradeFile` and `Open` go through `Upgrade`. The fuzz, `c_cases.py` and the API tests don't depend on the sets.
+	- Test case: de5b9, de5ba, de5cr, de5cy, de5eq, de5es, de5k2, debk6 (shared cases 034, 035, 039, 045, 047, 049, 050, 059), and deb8c with the known lists.
+	- 2026-10-26 Verified: cicd.bash --backlog-run-full passed every step at 28bbbb0, lint CLEAN, run_20261026-173021.
 
 - CICD reset: containers
 	- ID: 2026102416400010

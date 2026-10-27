@@ -46,7 +46,7 @@ fExpect(){
 	shift
 	out="$(cd "${repo}" && printf '%s\n' "$@" | ./cicd/hooks/pre-push origin url 2>&1)" || { echo "dedn4: hook failed for '$*': ${out}" >&2; fails=$((fails + 1)); return 0; }
 	case "${out}" in
-		"gate: --merge-gate --quiet") got=gate ;;
+		"gate: --merge-gate --quiet --no-remote") got=gate ;;
 		"") got=none ;;
 		*) got="odd output '${out}'" ;;
 	esac

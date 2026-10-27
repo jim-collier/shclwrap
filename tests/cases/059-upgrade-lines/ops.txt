@@ -1,6 +1,7 @@
 # Test ID: debk6
-# The upgrade lists the lines of the original it lost, and the rest it
-# wrote differently. 2.0 read list as one string, and 3.0 can't hold that
-# with c under it. dir's line break is carried, so it's only rewritten.
+# 2.0 read list as one string, and 3.0 can't hold that with c under it.
+# shcl won't write a file that would still have an error, so the upgrade is
+# refused rather than listing the line as lost. With no Format line, dir's
+# backslash reads two ways (2026102616480100).
 upgrade	2
 upgrade

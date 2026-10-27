@@ -2,8 +2,11 @@
 # 2.x read \t, \n, \\, \", and \' in a value as escapes, bare or quoted, and
 # left any other backslash as typed. The upgraded file reads the same, and a
 # raw body keeps its text (2026101910455900). The comma list doesn't load
-# clean on 3.0, so Open takes the file as 2.x.
+# clean on 3.0, so Open takes the file as 2.x, but the backslash pairs read
+# two ways, so it's ambiguous (2026102616480100).
 open	doc.shcl
+# With a Format line naming 2, Open upgrades it.
+open	format2.shcl
 upgraded
 get	str	tab
 get	str	pair
@@ -18,9 +21,9 @@ first	str	rep
 last	str	rep
 get	raw	raw
 text
-open	doc.shcl
-write	doc.shcl
-open	doc.shcl
+open	format2.shcl
+write	format2.shcl
+open	format2.shcl
 upgraded
 get	str	tab
 get	str	pair

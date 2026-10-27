@@ -1763,17 +1763,19 @@ def upgrade(text: str, from_: int = 0) -> Upgraded:
 		raise Error(ErrKind.Ambiguous, msg=f"{u.ambiguous} lines read two ways")
 	if old_err is not None:
 		raise old_err
-	fixed, out.lost = _carry_reads(old, out.text, format_of(text) == 1)
+	# shcl gives the input back then, and this would read it the 2.x way.
+	if u.errors_left:
+		raise Error(
+			ErrKind.Refused,
+			msg=f"{len(u.errors_left)} lines would still have an error once converted; fix them and upgrade again",
+		)
+	out.lost = _check_reads(old, out.text, format_of(text) == 1)
 	if banner:
-		fixed = _place_block(_same_ends(text, fixed), src != text)
-	elif fixed == out.text and not out.changed:
-		return out
+		fixed = _place_block(_same_ends(text, out.text), src != text)
 	elif not out.changed:
-		# Left as it was, so no Format line yet, and the next upgrade would
-		# read the escapes a second time.
-		fixed = _finish_info(fixed, _Info.On, False)
+		return out
 	else:
-		fixed = _same_ends(text, fixed)
+		fixed = _same_ends(text, out.text)
 	out.text, out.changed = fixed, fixed != text
 	out.rewritten = rewritten_lines(text, fixed, out.lost)
 	return out
@@ -1817,14 +1819,13 @@ def _carry_diag(line: int, msg: str) -> Diag:
 	return Diag(line, Severity.Error, "W002", msg)
 
 
-def _carry_reads(old: Any, up: str, names_as_typed: bool) -> tuple[str, list[int]]:
-	"""up, made to read each value the way shcl 2.0 read it in old
-	(2026101910455900), and the lines with a value 2.0 read that up doesn't
-	have at all. Go's carryReads has the reasons."""
-	d = shcl.Document.parse_keep_lines(up, shcl.Strictness.Standard)
+def _check_reads(old: Any, up: str, names_as_typed: bool) -> list[int]:
+	"""The lines with a value 2.0 read in old that up, the upgraded text,
+	doesn't have at all. Refused when up reads a value another way
+	(2026101910455900). Go's checkReads has the reasons."""
+	now = shcl.Document.parse(up)
 	bad: list[Diag] = []
-	sets: list[tuple[str, list[str]]] = []
-	for f in d.fields():
+	for f in now.fields():
 		if not names_as_typed and _v2_escapes(f.name) != f.name:
 			bad.append(
 				_carry_diag(
@@ -1833,31 +1834,7 @@ def _carry_reads(old: Any, up: str, names_as_typed: bool) -> tuple[str, list[int
 					"rename it and upgrade again",
 				)
 			)
-			continue
-		if d.read_raw(f.path).status == shcl.Status.Good:
-			continue
-		arr = d.read_string_array(f.path)
-		if arr.status != shcl.Status.Good:
-			continue
-		want = [_v2_escapes(v) for v in arr.value]
-		if want == arr.value:
-			continue
-		s = d.read_string(f.path)
-		if len(want) == 1 and s.status == shcl.Status.Good and s.value == arr.value[0]:
-			st = d.set_string(f.path, want[0])
-		else:
-			st = d.set_string_array(f.path, want)
-		if st != shcl.SetStatus.Ok:
-			bad.append(_carry_diag(old.line(f.path), "the upgraded file can't hold this value as shcl 2.0 read it"))
-			continue
-		sets.append((f.path, want))
-	text = d.to_text_keep_lines()[0] if sets else up
-	now = shcl.Document.parse(text)
 	differs = "the upgraded file doesn't read this value as shcl 2.0 read it"
-	for p, want in sets:
-		g = now.read_string_array(p)
-		if g.status != shcl.Status.Good or g.value != want:
-			bad.append(_carry_diag(old.line(p), differs))
 	lost: set[int] = set()
 	for p in old.paths():
 		had, has = old.count(p), now.count(p)
@@ -1876,7 +1853,7 @@ def _carry_reads(old: Any, up: str, names_as_typed: bool) -> tuple[str, list[int
 		):
 			lost.add(old.line(p))
 	if not bad:
-		return text, sorted(lost)
+		return sorted(lost)
 	n = len({b.line for b in bad})
 	msg = f"{n} lines don't read as shcl 2.0 read them; fix them and upgrade again"
 	raise Error(ErrKind.Refused, msg=msg, diags=bad)

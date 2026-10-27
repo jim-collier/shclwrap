@@ -1,0 +1,5 @@
+## Analyzer, CodeQL and CTU findings in shcl.h 3.0 at this pin, each read
+## and judged. Tool, place, check, then why after the '#'. There are none:
+## arena_panic is marked noreturn now, which cleared gcc's, clang's and
+## CTU's, and shcl marks its own CodeQL ones in the source.
+## Backlog 2026102321270143, 2026102616480100.

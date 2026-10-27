@@ -1,4 +1,6 @@
 > open	doc.shcl
+error ambiguous
+> open	format2.shcl
 ok
 > upgraded
 from 2 backup none
@@ -52,9 +54,9 @@ Good	13	keep \\t as typed
 | ##    Syntax   https://github.com/yottacore/shcl/blob/v3.0.0-beta1/project/spec.md
 | ##    Legal    SHCL is Copyright © 2026 Jim Collier [ID: 2უNაɘ«҂թȹɤξπ๙¿ձϖ]. License: MIT. No warranty.
 | ##
-> open	doc.shcl
+> open	format2.shcl
 ok
-> write	doc.shcl
+> write	format2.shcl
 ok
 | # Backslashes as 2.x read them, typed by hand and as its setters wrote them
 | tab: "C:◉TAB◉emp"
@@ -81,7 +83,7 @@ ok
 | ##    Syntax   https://github.com/yottacore/shcl/blob/v3.0.0-beta1/project/spec.md
 | ##    Legal    SHCL is Copyright © 2026 Jim Collier [ID: 2უNაɘ«҂թȹɤξπ๙¿ձϖ]. License: MIT. No warranty.
 | ##
-> open	doc.shcl
+> open	format2.shcl
 ok
 > upgraded
 from 0 backup none
