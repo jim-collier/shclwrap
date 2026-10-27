@@ -117,6 +117,7 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- `SHCLW_GH` stands in for gh, like zuid's `ZUID_GH`.
 	- Branch: r1026
 	- Test case: defmn, `cicd/hosted-test.bash`. defmk and defmm are the steps' own lines.
+	- Commit: d09c379
 
 - shcl 4 adapters
 	- ID: 2026101512024163
@@ -184,7 +185,7 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 - bump-shcl.bash removes its temp folder with a bare rm -rf
 	- ID: 2026102617263369
 	- Type: Bug
-	- Status: Queued
+	- Status: Done
 	- Severity: High
 	- Opened: 2026-10-26 17:26
 	- Opened by: JC
@@ -192,6 +193,8 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Incorrect behavior: deean fails on `cicd/bump-shcl.bash` line 36, `rm -rf -- "${work}"` in its exit trap, so `--backlog-run-quick cicd` and the full run stop at Tests.
 	- Expected behavior: The removal goes through `fSafeRm` from `cicd/utility/include/safe-rm.bash`, per Safe removal, and deean passes.
 	- Reproduced: 2026-10-26, `bash cicd/temp-test.bash` on r1026 at `eba6db8`. It came in with `e3f2389`.
+	- Test case: deean, in cicd/temp-test.bash
+	- 2026-10-26: bump-shcl.bash removes its temp folder through fSafeRm, as the other cicd scripts do. Verified: PASS deean.
 
 - Run the tests on Windows and macOS
 	- ID: 2026101512024174

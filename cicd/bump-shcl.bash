@@ -18,6 +18,7 @@ url="https://github.com/yottacore/shcl"
 raw="https://raw.githubusercontent.com/yottacore/shcl"
 fDie(){ echo "bump-shcl: $*" >&2; exit 1; }
 
+source "${here}/utility/include/safe-rm.bash"
 source "${root}/source/c/shcl-pins.env"
 old="${SHCL3_REV}"
 
@@ -33,7 +34,7 @@ if [[ "${rev}" == "${old}" ]]; then echo "Already at ${rev}"; exit 0; fi
 work="$(mktemp -d "${TMPDIR:-/tmp}/bump_shcl_XXXXXX")"
 touch "${work}/.bump-shcl-owned"
 fCleanup(){
-	if [[ -f "${work}/.bump-shcl-owned" ]]; then rm -rf -- "${work}"; fi
+	if [[ -f "${work}/.bump-shcl-owned" ]]; then fSafeRm "${work}" >/dev/null; fi
 	return 0
 }
 trap fCleanup EXIT
