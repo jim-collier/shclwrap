@@ -1,0 +1,36 @@
+> upgrade	2
+from 2 changed true unsure 0
+lost [] rewritten [2 3]
+| # Seed rows as 1.2 and 2.0 read them, with a comma inside quotes
+| row: [idx=2, 'title="a, b"', 'description="say "hi""']
+| one: 'x="a, b"'
+| 
+| ##
+| ## This config file format is SHCL.
+| ## "Simple Hierarchical Config Language"
+| ##    Format   3
+| ##    Home     https://github.com/yottacore/shcl
+| ##    Syntax   https://github.com/yottacore/shcl/blob/v3.0.0-beta1/project/spec.md
+| ##    Legal    SHCL is Copyright © 2026 Jim Collier [ID: 2უNაɘ«҂թȹɤξπ๙¿ձϖ]. License: MIT. No warranty.
+| ##
+> upgrade
+from 2 changed true unsure 0
+lost [] rewritten [2 3]
+| # Seed rows as 1.2 and 2.0 read them, with a comma inside quotes
+| row: [idx=2, 'title="a, b"', 'description="say "hi""']
+| one: 'x="a, b"'
+| 
+| ##
+| ## This config file format is SHCL.
+| ## "Simple Hierarchical Config Language"
+| ##    Format   3
+| ##    Home     https://github.com/yottacore/shcl
+| ##    Syntax   https://github.com/yottacore/shcl/blob/v3.0.0-beta1/project/spec.md
+| ##    Legal    SHCL is Copyright © 2026 Jim Collier [ID: 2უNაɘ«҂թȹɤξπ๙¿ձϖ]. License: MIT. No warranty.
+| ##
+> open	doc.shcl
+ok
+> get	strs	row
+Good	2	3	idx=2	title="a, b"	description="say "hi""
+> get	str	one
+Good	3	x="a, b"

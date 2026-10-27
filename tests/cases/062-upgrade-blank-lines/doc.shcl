@@ -1,0 +1,20 @@
+
+
+# 2.x kept these blank lines
+t:
+	aliases: a, b
+
+
+	name: x
+
+
+
+end: y
+
+
+raw: ~~~
+keep
+~~~
+
+
+last: z

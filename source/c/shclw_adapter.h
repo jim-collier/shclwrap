@@ -185,6 +185,11 @@ bool shclw_i_old_block(const char *text, size_t len, const shclw_i_info_edit *e,
 shclw_kind shclw_i_place_block(const char *text, size_t len, bool marked, const shclw_i_info_edit *e, const char *path,
                                char **out, size_t *out_len, shclw_error *err);
 
+// Go's KeepBlanks: up, shcl's conversion of orig, with the blank lines it
+// dropped put back. malloc'd, or NULL when memory ran out.
+char *shclw_i_keep_blanks(const char *orig, size_t orig_len, const char *up, size_t up_len, const shclw_i_info_edit *e,
+                          size_t *out_len);
+
 // Go's SameEnds: text, an upgrade of orig, with orig's line ends where shcl
 // wrote it out with LF only. malloc'd, or NULL when memory ran out.
 char *shclw_i_same_ends(const char *orig, size_t orig_len, const char *text, size_t len, const shclw_i_info_edit *e,

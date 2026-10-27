@@ -673,6 +673,100 @@ done:
 	return k == SHCLW_OK ? shclw_i_ok(err) : k;
 }
 
+// Whether now's line i is one the conversion added, as 2.x's x: ~~~ comes
+// out as x: and a fence under it: was's next line with text from w isn't
+// it, and is now's next one after it.
+static bool added(const lines *was, size_t w, const lines *now, size_t i) {
+	while (w < was->n && blank(&was->v[w])) {
+		w++;
+	}
+	if (w == was->n) {
+		return false;
+	}
+	view want = trim(was->v[w].text), at = trim(now->v[i].text);
+	if (at.n == want.n && !memcmp(at.p, want.p, at.n)) {
+		return false;
+	}
+	size_t j = i + 1;
+	while (j < now->n && blank(&now->v[j])) {
+		j++;
+	}
+	if (j == now->n) {
+		return false;
+	}
+	view next = trim(now->v[j].text);
+	return next.n == want.n && !memcmp(next.p, want.p, next.n);
+}
+
+// Go's KeepBlanks: up, shcl's conversion of orig, with the blank lines it
+// dropped put back, so each line keeps its number (2026102618065634).
+char *shclw_i_keep_blanks(const char *orig, size_t orig_len, const char *up, size_t up_len, const shclw_i_info_edit *e,
+                          size_t *out_len) {
+	size_t ob = orig_len >= 3 && !memcmp(orig, bom, 3) ? 3 : 0;
+	size_t ub = up_len >= 3 && !memcmp(up, bom, 3) ? 3 : 0;
+	lines was = {NULL, 0, 0, "\n", false};
+	lines now = {NULL, 0, 0, "\n", false};
+	split(&was, orig + ob, orig_len - ob);
+	split(&now, up + ub, up_len - ub);
+	lines g = {NULL, 0, 0, now.eol, was.oom || now.oom};
+	size_t w = 0, seen = 0;
+	for (size_t i = 0; i < now.n && !g.oom; i++) {
+		if (blank(&now.v[i])) {
+			seen++;
+		} else if (added(&was, w, &now, i)) {
+			seen = 0;
+		} else {
+			size_t j = w;
+			while (j < was.n && blank(&was.v[j])) {
+				j++;
+			}
+			if (j < was.n) {
+				for (size_t b = w + (seen < j - w ? seen : j - w); b < j; b++) {
+					push(&g, was.v[b].text, now.eol);
+				}
+			}
+			w = j < was.n ? j + 1 : was.n;
+			seen = 0;
+		}
+		push(&g, now.v[i].text, now.v[i].end);
+	}
+	size_t n = 0;
+	char *joined = g.oom ? NULL : join(&g, NULL, &n);
+	free(was.v);
+	free(now.v);
+	free(g.v);
+	char *out = joined && n + ub >= n ? (char *)malloc(n + ub + 1) : NULL;
+	if (!out) {
+		free(joined);
+		return NULL;
+	}
+	memcpy(out, up, ub);
+	memcpy(out + ub, joined, n + 1);
+	free(joined);
+	n += ub;
+	if (n == up_len && !memcmp(out, up, n)) {
+		*out_len = n;
+		return out;
+	}
+	size_t vn = 0, on = 0;
+	char *v = e->values(up, up_len, &vn);
+	char *o = v ? e->values(out, n, &on) : NULL;
+	if (!o) {
+		free(v);
+		free(out);
+		return NULL;
+	}
+	bool same = vn == on && (!vn || !memcmp(v, o, vn));
+	free(v);
+	free(o);
+	if (!same) {
+		free(out);
+		return shclw_i_dup(up, up_len, out_len);
+	}
+	*out_len = n;
+	return out;
+}
+
 char *shclw_i_same_ends(const char *orig, size_t orig_len, const char *text, size_t len, const shclw_i_info_edit *e,
                         size_t *out_len) {
 	lines f = {NULL, 0, 0, "\n", false};
