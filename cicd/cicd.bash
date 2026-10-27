@@ -9,6 +9,8 @@
 ##	  The output numbers only the ones that run, and the first section says
 ##	  which flag turned off each of the rest.
 ##	   - remote sync (fast-forward from upstream before anything is built)
+##	   - GitHub ci: start (asks GitHub to run .github/workflows/ci.yml on the
+##	     pushed branch at HEAD; a full run only, so it overlaps the run here)
 ##	   - format (in place; check-only under the 3 runs below that rewrite nothing)
 ##	   - lint (go vet, staticcheck, clippy, clang-tidy, gcc-15, shellcheck, ruff)
 ##	   - tests (shared cases in every language, Python's included)
@@ -17,6 +19,8 @@
 ##	   - profile (Go's Run over the shared cases, as a flamegraph in
 ##	     cicd/artifacts/profiling/, with flame-report.py's summary; never fails a run
 ##	     on what it finds)
+##	   - GitHub ci: result (waits for that run; only a finished run that failed
+##	     fails it, and anything else is a SKIP)
 ##	- Syntax:
 ##	  cicd/cicd.bash [options]
 ##	  With no options it runs every stage, in about 10 minutes.
@@ -47,7 +51,7 @@
 ##	   --no-container  run C, Go, Rust and Python on the host, skipping what it has
 ##	                   no tool for, and the leak checks. Each also runs on the host
 ##	                   when docker is missing or its image won't build, and says so.
-##	   --no-remote     skip other hosts and VMs. There are none yet.
+##	   --no-remote     skip other hosts and VMs, and the ci workflow on GitHub
 ##	  Other:
 ##	   --keep-temp     keep the run's scratch folder, and print where it is
 ##	   --dry-run       show which stages would run, and stop
@@ -102,6 +106,9 @@ source "${here}/utility/include/steps.bash"
 source "${here}/utility/include/c-tests.bash"
 source "${here}/utility/include/docker-tidy.bash"
 source "${here}/utility/include/safe-rm.bash"
+source "${here}/utility/include/hosted.bash"
+# shellcheck disable=2034  ## Read by hosted.bash.
+hostedRoot="${root}"
 fLowPriority
 stamp="$(date +%Y%m%d-%H%M%S)"
 
@@ -113,23 +120,23 @@ fCpuCap
 
 cmdLine="$*"
 doQuick=0; doLeakcheck=""; doQuiet=0; assumeYes=0; dryRun=0; listTests=0; keepTemp=0
-doSync=1; doFormat=1; doLint=1; doTests=1; doFuzz=1; doContainer=1; doProfile=1
+doSync=1; doFormat=1; doLint=1; doTests=1; doFuzz=1; doContainer=1; doProfile=1; doRemote=1
 ## checkOnly: format checks and nothing syncs or prompts. runName is the named run that set it.
 checkOnly=0; runName=""; aliasNote=""
 declare -a areas=()
 ## Which flag turned each step off, for the first section. The later flag wins.
-syncOffBy=""; leakOffBy=""; fuzzOffBy=""; profileOffBy=""
+syncOffBy=""; leakOffBy=""; fuzzOffBy=""; profileOffBy=""; quickBy=""
 fNamedRun(){   ## fNamedRun FLAG: the 3 runs that rewrite nothing
 	checkOnly=1; assumeYes=1; runName="$1"; doSync=0; syncOffBy="$1"
 }
 while (($#)); do case "$1" in
-	--quick)    doQuick=1; doSync=0; syncOffBy="--quick"; doProfile=0; profileOffBy="--quick"; shift ;;
+	--quick)    doQuick=1; quickBy="$1"; doSync=0; syncOffBy="--quick"; doProfile=0; profileOffBy="--quick"; shift ;;
 	--long|--slow) shift ;;
 	--leakcheck) doLeakcheck=1; shift ;;
 	--no-leakcheck) doLeakcheck=0; leakOffBy="--no-leakcheck"; shift ;;
 	--gate|--backlog-run-quick)
 		if [[ "$1" == --gate ]]; then aliasNote="--gate is another name for --backlog-run-quick"; fi
-		fNamedRun --backlog-run-quick; doQuick=1; doFuzz=0; fuzzOffBy="--backlog-run-quick"; doProfile=0; profileOffBy="--backlog-run-quick"; shift
+		fNamedRun --backlog-run-quick; doQuick=1; quickBy="--backlog-run-quick"; doFuzz=0; fuzzOffBy="--backlog-run-quick"; doProfile=0; profileOffBy="--backlog-run-quick"; shift
 		while (($#)) && [[ "$1" != -* ]]; do
 			case "$1" in go|rust|python|c|cicd) areas+=("$1") ;; *) echo "unknown area: $1 (go, rust, python, c or cicd)" >&2; exit 2 ;; esac
 			shift
@@ -147,7 +154,7 @@ while (($#)); do case "$1" in
 	--no-fuzz)  doFuzz=0; fuzzOffBy="$1"; shift ;;
 	--no-profile) doProfile=0; profileOffBy="$1"; shift ;;
 	--no-container) doContainer=0; shift ;;
-	--no-remote) shift ;;
+	--no-remote) doRemote=0; shift ;;
 	--keep-temp) keepTemp=1; shift ;;
 	--dry-run)  dryRun=1; shift ;;
 	--list)     dryRun=1; listTests=1; shift ;;
@@ -170,8 +177,12 @@ export SHCLW_CARGO_LOCKED="${checkOnly}" SHCLW_AREAS="${areas[*]}"
 fArea(){ local a n; ((${#areas[@]})) || return 0; for a in "${areas[@]}"; do for n in "$@"; do [[ "${a}" != "${n}" ]] || return 0; done; done; return 1; }
 
 ## Every step in run order. A flag that turns one off adds a line here.
-fStep_Plan "Remote sync" "Format" "Lint" "Tests" "C leak checks" "Fuzz" "Profile"
+fStep_Plan "Remote sync" "GitHub ci: start" "Format" "Lint" "Tests" "C leak checks" "Fuzz" "Profile" "GitHub ci: result"
 ((doSync))      || fStep_Off "Remote sync"   "${syncOffBy}"
+## GitHub's run takes about as long as a full run here, so a quick run leaves it out.
+hostedOffBy=""
+if ((! doRemote)); then hostedOffBy="--no-remote"; elif ((doQuick)); then hostedOffBy="${quickBy}"; fi
+if [[ -n "${hostedOffBy}" ]]; then fStep_Off "GitHub ci: start" "${hostedOffBy}"; fStep_Off "GitHub ci: result" "${hostedOffBy}"; fi
 ((doFormat))    || fStep_Off "Format"        "--no-format"
 ((doLint))      || fStep_Off "Lint"          "--no-lint"
 ((doTests))     || fStep_Off "Tests"         "--no-tests"
@@ -302,6 +313,7 @@ fCicdTests(){
 	fTest -q dedta "stale headers and fuzz sets are pruned, and nothing else" bash "${here}/prune-test.bash"
 	fTest -q deean "run folders and safe removal" bash "${here}/temp-test.bash"
 	fTest -q deeap "profile flamegraphs and their summary" bash "${here}/profile-test.bash"
+	fTest -q defmn "the ci workflow on GitHub: which runs start it, and how its result reads" bash "${here}/hosted-test.bash"
 }
 
 ## --list: the test IDs each step that's on would run, one line each, by the flags given.
@@ -331,6 +343,8 @@ fListStep(){
 		Fuzz)
 			if ((fuzzSecs > 0)); then "${py[@]}" "${here}/fuzz.py" --list; fi
 			if ((goFuzzSecs > 0)); then fTest ddzw3 "Go's fuzzer finds no panic in Run" :; fi ;;
+		"GitHub ci: start")  fTest defmk "ci workflow started on GitHub" : ;;
+		"GitHub ci: result") fTest defmm "ci workflow passed on GitHub" : ;;
 	esac
 }
 fListOne(){
@@ -357,6 +371,7 @@ fPreflight(){
 	fEcho_Clean "Remote sync ..: $( ((doSync)) && echo 'fast-forward when behind; abort when diverged' || echo '(skipped)')"
 	fEcho_Clean "Leak checks ..: $( ((doLeakcheck)) && echo 'CodeQL, CTU, heaptrack soak' || echo '(skipped)')"
 	fEcho_Clean "Fuzz .........: $( ((doFuzz)) && echo "${fuzzSecs}s Rust, C, and Python against Go, ${goFuzzSecs}s Go fuzzer" || echo '(skipped)')"
+	fEcho_Clean "GitHub ci ....: $( fStep_On "GitHub ci: start" && echo "${hostedWorkflow} on the pushed branch at HEAD, waited for at the end" || echo '(skipped)')"
 	fEcho_Clean "Profile ......: $( ((doProfile)) && echo "${profileSecs}s of Go's Run over the shared cases -> cicd/artifacts/profiling/" || echo '(skipped)')"
 	fEcho_Clean "CPU cap ......: $(fCpuNote)"
 	## ps, since a BSD nice with no command only prints its usage.
@@ -459,6 +474,13 @@ if fStep_On "Remote sync"; then
 		else                 fEcho "OK: level with ${upstream}"
 		fi
 	fi
+	fStep_Pass
+fi
+
+#•••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••
+if fStep_On "GitHub ci: start"; then
+	fStep "GitHub ci: start"
+	fHosted_Start
 	fStep_Pass
 fi
 
@@ -607,6 +629,13 @@ if fStep_On "Profile"; then
 	fStep_Pass
 fi
 
+#•••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••
+if fStep_On "GitHub ci: result"; then
+	fStep "GitHub ci: result"
+	fHosted_Result || fDie "the ci workflow failed on GitHub"
+	fStep_Pass
+fi
+
 fStep_AllPassed
 runPassed=1
 fSection "shclwrap CI/CD: done."
@@ -635,3 +664,4 @@ fEcho_Clean
 ##		- 2026-10-25 JC: --list names the test IDs each step would run, and --dry-run stays the step list.
 ##		- 2026-10-25 JC: A profile step: Go's Run over the shared cases as a flamegraph, rotated, with flame-report.py's summary. --no-profile.
 ##		- 2026-10-25 JC: The run's folder is ${HOST_TEMP}/shclwrap/<stamp>_<NNN>, and TMPDIR, TEMP and TMP point there. Stale run folders go. Every recursive removal goes through safe-rm.bash.
+##		- 2026-10-26 JC: A full run starts the ci workflow on GitHub first and waits for it last. --no-remote skips it.
