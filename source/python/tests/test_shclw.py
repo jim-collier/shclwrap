@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import errno
 import math
 import os
 import subprocess
@@ -15,6 +16,7 @@ import threading
 import unittest
 from collections.abc import Callable
 from pathlib import Path
+from unittest import mock
 
 import shclw
 
@@ -215,3 +217,39 @@ class CreateRace(unittest.TestCase):
 	# Test ID: de8hw
 	def test_in_place(self) -> None:
 		self.race(shclw._create_in_place)  # noqa: SLF001 - the no-hard-link path
+
+
+def _fat_link_error() -> OSError:
+	"""What os.link raises on FAT on Windows, built the same way elsewhere."""
+	e = OSError(errno.EINVAL, "Incorrect function")
+	e.winerror = 1  # type: ignore[attr-defined] - only Windows sets it
+	return e
+
+
+class CreateNoLinks(unittest.TestCase):
+	"""A link error that says the filesystem has no hard links falls back to
+	the exclusive create, and any other link error is io."""
+
+	# Test ID: dejdh
+	def test_no_links(self) -> None:
+		cases: list[tuple[OSError, str | None]] = [
+			(_fat_link_error(), None),
+			(PermissionError(errno.EPERM, "Operation not permitted"), None),
+			(OSError(errno.ENOTSUP, "Not supported"), None),
+			(OSError(errno.EIO, "I/O error"), "io"),
+		]
+		for err, want in cases:
+			link = mock.patch.object(os, "link", side_effect=err)
+			with self.subTest(err=err), tempfile.TemporaryDirectory() as tmp, link:
+				path = os.path.join(tmp, "a.shcl")
+				try:
+					shclw.create_new(path, "a: 1\n")
+					got = None
+				except shclw.Error as e:
+					got = e.kind.value
+				self.assertEqual(got, want)
+				if want is None:
+					self.assertEqual(Path(path).read_bytes(), b"a: 1\n")
+					self.assertEqual(os.listdir(tmp), ["a.shcl"])
+				else:
+					self.assertEqual(os.listdir(tmp), [])

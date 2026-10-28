@@ -388,13 +388,22 @@ def create_new(path: str, data: str, mode: int | None = None) -> None:
 	except FileExistsError as e:
 		raise _exists(path) from e
 	except OSError as e:
-		if not isinstance(e, PermissionError) and e.errno not in (errno.ENOTSUP, errno.EOPNOTSUPP, errno.ENOSYS):
+		if not _no_links(e):
 			raise _create_err(path, e) from e
 		_create_in_place(path, data, mode)
 		return
 	finally:
 		os.remove(tmp)
 	_sync_dir(path)
+
+
+def _no_links(e: OSError) -> bool:
+	"""A link error that says the filesystem has no hard links. Linux gives
+	EPERM, and Windows on FAT gives ERROR_INVALID_FUNCTION (1), which Python
+	calls EINVAL, so the Windows codes go by winerror."""
+	if isinstance(e, PermissionError) or e.errno in (errno.ENOTSUP, errno.EOPNOTSUPP, errno.ENOSYS):
+		return True
+	return getattr(e, "winerror", None) in (1, 50, 120)
 
 
 def _write_temp(path: str, data: str, mode: int | None) -> str:
