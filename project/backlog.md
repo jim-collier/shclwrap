@@ -25,6 +25,20 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 
 ## Issues
 
+- Upgrade splits a quoted comma on a repeated key
+	- ID: 2026102814295798
+	- Type: Bug
+	- Status: Queued
+	- Opened: 20261028-142957
+	- Opened by: JC
+	- Related IDs: 2026102618065640, gitniblet-floss:2026102621002700, shcl:2026102620591100
+	- Steps to reproduce [Bug]: `Upgrade("row: idx=2, title=\"a, b\"\nrow: idx=3, title='x=y'\n", 2)` at 54dc6c6.
+	- Incorrect behavior [Bug]: The first row comes out as `row: [idx=2, 'title="a', 'b"']`, split at the comma, so a program that reads the row by field loses data.
+	- Expected behavior [Bug]: `row: [idx=2, 'title="a, b"']`, as 2.0 read it. With one `row:` line, or each under its own parent, it does come out that way.
+	- Possible cause [Bug]: `mendReads` skips a path where `old.Count(p) != 1` or `now.Count(p) != 1`, so a key that repeats under one parent is never mended. Seed rows always repeat.
+	- Priority: High
+	- Found by gitniblet-floss 2026102621002700, which keeps its own seed-row rewrite until this is in. shcl 2026102620591100 now reads a closed mid-piece quote as 2.0 did, so the next shcl pin may make `mendReads` needless here. High, since the split loses a field's value.
+
 - Create-only Write
 	- ID: 2026101513330015
 	- Type: Feature
