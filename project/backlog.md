@@ -231,25 +231,6 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- shcl 2.0 on Windows could lose the old file when a replace failed. 3.0 fixed it, and Wovenshell still keeps its own restore. The wrapper's own 1.2 write needs the same check.
 		- 2026-10-24, CICD reset: this is the reset's `other hosts and VMs` item, raised to High, per `Other hosts and VMs` in the shared CICD rules. The default run builds and tests on the test boxes: Windows on b29w, with vm925w for timed work, and macOS on b26 or vmKt6m. Each box is held through the shared host lock by `wrap` for the whole time it's used, and a VM is put back the way it was found through the VM state helper. `--no-remote` skips them, a box that isn't there is a `SKIP` that never stops a run, and each box gets a work folder of its own under its temp root. `b29w`, never `b29w-wif`.
 
-- Create-only Write fails on a FAT volume on Windows
-	- ID: 2026102412381602
-	- Type: Bug
-	- Status: Queued
-	- Needs external testing: Windows, on vm925w: `win-go-fat.ps1`, the FAT32 steps.
-	- Severity: Avg
-	- Opened: 2026-10-24 12:38
-	- Related IDs: 2026101513330015
-	- Target OS: Windows
-	- Steps to reproduce [Bug]:
-		- On Windows, point `TMP` and `TMPDIR` at a FAT32 volume, then run Go's `TestCreateRace`, Rust's `create_race_link`, Python's `CreateRace`, or shared case `057-write-create`.
-	- Incorrect behavior [Bug]:
-		- Every create-only `Write` fails as `io`, "Incorrect function", in Go, Rust and Python, where it should fall back to the exclusive create.
-	- Expected behavior [Bug]:
-		- It falls back, as design.md says for a filesystem with no hard links. C passes there, since on Windows it moves the temp into place without a link.
-	- Reproduced [Bug]: 2026-10-24, on vm925w, Windows 11, on a FAT32 volume, at `b9a392c`. The in-place races pass there, so only the fallback check misses.
-	- Possible cause [Bug]: `CreateHardLink` on FAT gives `ERROR_INVALID_FUNCTION` (1). Go's `ErrUnsupported` takes only `ERROR_NOT_SUPPORTED`, `ERROR_CALL_NOT_IMPLEMENTED` and a few errnos, and Rust doesn't call it `Unsupported` either. Python sees errno 22 with winerror 1. exFAT and network shares may give other codes, not tried.
-	- Test case: none yet. CI has no FAT volume. On vm925w `win-go-fat.ps1` makes one and runs the 3 languages' race tests and shared cases on it.
-
 - Go 1.27 prints a float32 halfway value differently
 	- ID: 2026102519333440
 	- Type: Bug
@@ -2007,6 +1988,40 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Swept: every row of design.md's "evens out" table has a case or an API test that runs on C 1.2 and 2.0, but the 2.x upgrade refusal, which is 3.0's alone. Every call `shclw3.c` defines is in `shclw1.c` and `shclw2.c`, which each link checks. The notes in `shclw.h` and design.md that hold only on 3.0 now say so.
 	- Closed: 20261017-11325800
 	- Acceptance signoff: Self-closed: every shared case passes on all 3 versions. The memory growth goes away with 1.2 and 2.0, in 2026101613005800.
+
+- Create-only Write fails on a FAT volume on Windows
+	- ID: 2026102412381602
+	- Type: Bug
+	- Status: Done
+	- Needs external testing: No. The FAT32 steps passed on b29w on 2026-10-28.
+	- Severity: Avg
+	- Opened: 2026-10-24 12:38
+	- Related IDs: 2026101513330015
+	- Target OS: Windows
+	- Steps to reproduce [Bug]:
+		- On Windows, point `TMP` and `TMPDIR` at a FAT32 volume, then run Go's `TestCreateRace`, Rust's `create_race_link`, Python's `CreateRace`, or shared case `057-write-create`.
+	- Incorrect behavior [Bug]:
+		- Every create-only `Write` fails as `io`, "Incorrect function", in Go, Rust and Python, where it should fall back to the exclusive create.
+	- Expected behavior [Bug]:
+		- It falls back, as design.md says for a filesystem with no hard links. C passes there, since on Windows it moves the temp into place without a link.
+	- Reproduced [Bug]: 2026-10-24, on vm925w, Windows 11, on a FAT32 volume, at `b9a392c`. The in-place races pass there, so only the fallback check misses.
+	- Possible cause [Bug]: `CreateHardLink` on FAT gives `ERROR_INVALID_FUNCTION` (1). Go's `ErrUnsupported` takes only `ERROR_NOT_SUPPORTED`, `ERROR_CALL_NOT_IMPLEMENTED` and a few errnos, and Rust doesn't call it `Unsupported` either. Python sees errno 22 with winerror 1. exFAT and network shares may give other codes, not tried.
+	- Actual cause [Bug]: Each language's fallback check took only the error kinds its runtime calls unsupported or a permission error. On Windows, `ERROR_INVALID_FUNCTION` is neither in Go, Rust or Python, and `ERROR_NOT_SUPPORTED` isn't in Rust or Python.
+	- Actual fix [Bug]: One no-links check per language, which also takes Windows' `ERROR_INVALID_FUNCTION` (1), `ERROR_NOT_SUPPORTED` (50) and `ERROR_CALL_NOT_IMPLEMENTED` (120). The link can be swapped in a test, by a package var in Go and a private `create_linking` in Rust.
+	- Progress log:
+		- 2026-10-28: Verified: `--backlog-run-quick go rust python` passed, lint CLEAN, and clippy pedantic for the Windows target.
+		- Verified on b29w, Windows 11, with a link that fails as FAT's does: Go's `TestCreateNoLinks` and Rust's `create_no_links` fail as `io`, "Incorrect function", without the fix, and pass with it. Python's `CreateNoLinks` does the same on Linux, since it goes by winerror.
+		- Verified on b29w on a FAT32 volume, at `cc5adc5`: the link probe gave winerror 1. The create races and the new tests passed in Go, Rust and Python, the C API tests too, and `057-write-create` in all 4. Only 058's `mode` lines differed, which print 0666 on Windows as before.
+		- `win-go-fat.ps1` now reads the shcl revs from the clone's pin files, and `win-go-fat.bash` has `start` and `poll`, so each fits in a short call.
+		- Swept: every link and create-only call in Go, Rust, Python and C. `shclw3` and the Python and Rust callers all go through the one create. C's POSIX check takes EPERM, ENOTSUP, EOPNOTSUPP and ENOSYS, and on Windows C moves the temp, so it needs none. Rust's std already calls ENOSYS and EOPNOTSUPP `Unsupported` on Unix.
+	- Decisions:
+		- Take 50 and 120 along with 1 in all 3, so each language falls back on the same Windows codes. Go already took them.
+		- Ran on b29w rather than vm925w, per the round's note.
+	- Branch: r1028
+	- Commit: cc5adc5
+	- Test case: Go `TestCreateNoLinks` (dejdf), Rust `create_no_links` (dejdg), Python `CreateNoLinks.test_no_links` (dejdh). The FAT32 run itself is `win-go-fat.ps1` on a Windows box.
+	- Closed: 2026-10-28 16:52
+	- Acceptance signoff: Self-closed: each test failed before the fix and passes after, and the FAT32 run passed on b29w.
 
 - The fuzz's drift guard fails a short run on a busy box
 	- ID: 2026102508080859
