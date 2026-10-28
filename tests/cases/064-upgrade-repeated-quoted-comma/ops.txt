@@ -1,0 +1,12 @@
+# Test ID: dejcx
+# A key that repeats under one parent, as seed rows do, keeps a comma or a
+# hash inside quotes in its element, as 1.2 and 2.0 read it. shcl's
+# conversion split it there (2026102814295798), and the wrapper's own fix
+# skipped a repeated key.
+upgrade	2
+open	doc.shcl
+upgraded
+first	strs	row
+last	strs	row
+first	strs	t.row
+last	strs	t.row

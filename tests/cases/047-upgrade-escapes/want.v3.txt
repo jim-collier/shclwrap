@@ -32,7 +32,7 @@ Good	13	keep \\t as typed
 | # Backslashes as 2.x read them, typed by hand and as its setters wrote them
 | tab: "C:◉TAB◉emp"
 | pair: "C:\\new"
-| lone: "C:\\dir\\file"
+| lone: C:\\dir\\file
 | quoted: "C:\\Program Files\\app"
 | qtab: "col1◉TAB◉col2"
 | say: 'say "hi"'
@@ -41,10 +41,9 @@ Good	13	keep \\t as typed
 | list: [one\\two, "p◉TAB◉q", "C:\\dir"]
 | rep: "a◉TAB◉b"
 | rep: plain
-| raw:
-| \t~~~
-| \tkeep \\t as typed
-| \t~~~
+| raw: ~~~
+| keep \\t as typed
+| ~~~
 | 
 | ##
 | ## This config file format is SHCL.
@@ -61,7 +60,7 @@ ok
 | # Backslashes as 2.x read them, typed by hand and as its setters wrote them
 | tab: "C:◉TAB◉emp"
 | pair: "C:\\new"
-| lone: "C:\\dir\\file"
+| lone: C:\\dir\\file
 | quoted: "C:\\Program Files\\app"
 | qtab: "col1◉TAB◉col2"
 | say: 'say "hi"'
@@ -70,10 +69,9 @@ ok
 | list: [one\\two, "p◉TAB◉q", "C:\\dir"]
 | rep: "a◉TAB◉b"
 | rep: plain
-| raw:
-| \t~~~
-| \tkeep \\t as typed
-| \t~~~
+| raw: ~~~
+| keep \\t as typed
+| ~~~
 | 
 | ##
 | ## This config file format is SHCL.

@@ -1,0 +1,30 @@
+> upgrade	2
+from 2 changed true unsure 0
+lost [] rewritten [2 3 5 6]
+| # Seed rows repeat their key, with a comma or a hash inside quotes
+| row: [idx=2, 'title="a, b"']
+| row: [idx=3, "title='x=y'"]
+| t:
+| \trow: [idx=4, 'title="c, d"', 'note="x # y"']
+| \trow: [idx=5, "title='e, f'"] # kept
+| 
+| ##
+| ## This config file format is SHCL.
+| ## "Simple Hierarchical Config Language"
+| ##    Format   3
+| ##    Home     https://github.com/yottacore/shcl
+| ##    Syntax   https://github.com/yottacore/shcl/blob/v3.0.0-beta1/project/spec.md
+| ##    Legal    SHCL is Copyright © 2026 Jim Collier [ID: 2უNაɘ«҂թȹɤξπ๙¿ձϖ]. License: MIT. No warranty.
+| ##
+> open	doc.shcl
+ok
+> upgraded
+from 2 backup none
+> first	strs	row
+Good	2	2	idx=2	title="a, b"
+> last	strs	row
+Good	3	2	idx=3	title='x=y'
+> first	strs	t.row
+Good	5	3	idx=4	title="c, d"	note="x # y"
+> last	strs	t.row
+Good	6	2	idx=5	title='e, f'

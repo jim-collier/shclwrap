@@ -8,24 +8,24 @@ from 0 backup none
 NotFound	0	0
 > upgrade	2
 from 3 changed true unsure 0
-lost [] rewritten [7 8 9 10 11 13 14 15 16 17 79 93 97 99 101 102 103 105 106 117 119 121 122 123 124 125 126 129 130 131 133 151 152 153 154 155 161 166 168 169 170 171 172 174 176 194 195 203 204 211 212 220 221 228 229 239 240 241 242 243 244 245 246 247 248 250 251 252 253 254 255 258]
+lost [] rewritten [154 194 195 203 204 211 212 220 221 228 229 253 254]
 | # Cobblevale Default Configuration
 | # Per-user overrides: ~/.config/cobblevale/cobblevale_user.shcl (Linux)
 | #                     %APPDATA%/cobblevale/cobblevale_user.shcl (Windows)
 | #                     ~/Library/Application Support/cobblevale/cobblevale_user.shcl (macOS)
 | 
 | world:
-| \tradius_scale: 1.0  # global size multiplier, 1.0 = literal real (Earth = 6371 km); lower to shrink all worlds for walkability
-| \torigin_rebasing: true  # shift the world origin onto the player so physics stays precise at real radii (makes a literal Earth walkable)
-| \tplanet_radius: 1.0  # relative to Earth
-| \tgravity: 1.0  # relative to Earth
-| \tatmospheric_density: 1.0  # relative to Earth
+| \tradius_scale: 1.0           # global size multiplier, 1.0 = literal real (Earth = 6371 km); lower to shrink all worlds for walkability
+| \torigin_rebasing: true       # shift the world origin onto the player so physics stays precise at real radii (makes a literal Earth walkable)
+| \tplanet_radius: 1.0          # relative to Earth
+| \tgravity: 1.0                # relative to Earth
+| \tatmospheric_density: 1.0    # relative to Earth
 | \tvertical_exaggeration: 1.0
-| \tavg_temperature: 15.0  # Celsius
-| \tavg_humidity: 0.5  # 0.0 - 1.0
-| \tday_length: 1200.0  # seconds (20 minutes real time)
-| \ttrial_all_flora: true  # trial: every world gets Earth's air, warmth and humidity, so every species grows somewhere; false restores the world's own values
-| \tatmosphere_style: earth  # which atmosphere.style block a world uses when nothing else names one
+| \tavg_temperature: 15.0       # Celsius
+| \tavg_humidity: 0.5           # 0.0 - 1.0
+| \tday_length: 1200.0          # seconds (20 minutes real time)
+| \ttrial_all_flora: true       # trial: every world gets Earth's air, warmth and humidity, so every species grows somewhere; false restores the world's own values
+| \tatmosphere_style: earth     # which atmosphere.style block a world uses when nothing else names one
 | 
 | \t# Size presets on the New World screen, listed smallest first. radius_km is the body's real
 | \t# mean radius. Add your own by repeating the block in the per-user file; repeating a name
@@ -87,7 +87,7 @@ lost [] rewritten [7 8 9 10 11 13 14 15 16 17 79 93 97 99 101 102 103 105 106 11
 | \t\tradius_km: 69911.0
 | \t\tatmosphere_style: jupiter
 | \t\tgravity: 2.53
-| \tdefault_planet: Phobos  # which preset the New World screen opens on
+| \tdefault_planet: Phobos      # which preset the New World screen opens on
 | \tbiomes:
 | \t\tprairie: true
 | \t\tmountain: true
@@ -101,20 +101,20 @@ lost [] rewritten [7 8 9 10 11 13 14 15 16 17 79 93 97 99 101 102 103 105 106 11
 | \t\tsuburban: false
 | 
 | player:
-| \twalk_speed: 400.0  # UE units/sec
+| \twalk_speed: 400.0           # UE units/sec
 | \tsprint_speed: 800.0
 | \tcrouch_speed: 150.0
 | \tjump_velocity: 600.0
-| \tdouble_jump_boost: 1.5  # multiplier on jump_velocity
+| \tdouble_jump_boost: 1.5      # multiplier on jump_velocity
 | \tfly_speed: 1200.0
-| \tswim_speed: 200.0  # jump swims up, crouch dives
+| \tswim_speed: 200.0            # jump swims up, crouch dives
 | \tswim_sprint_speed: 320.0
-| \tmouse_sensitivity: 1.0  # look speed multiplier
-| \tinvert_look_y: false  # invert vertical mouse look
-| \tlook_return_seconds: 1.0  # on foot, how long the camera takes to swing back behind once free look is let go; 0 snaps
+| \tmouse_sensitivity: 1.0       # look speed multiplier
+| \tinvert_look_y: false         # invert vertical mouse look
+| \tlook_return_seconds: 1.0     # on foot, how long the camera takes to swing back behind once free look is let go; 0 snaps
 | \tfov: 90.0
-| \tview: third  # first or third person; the view toggle key switches it and saves it here
-| \tunits: imperial  # HUD readouts: imperial or metric (Settings)
+| \tview: third                 # first or third person; the view toggle key switches it and saves it here
+| \tunits: imperial             # HUD readouts: imperial or metric (Settings)
 | 
 | flight:
 | \t# Fly mode is a thruster-driven craft, not a constant-speed free cam. Forward is the main
@@ -125,23 +125,23 @@ lost [] rewritten [7 8 9 10 11 13 14 15 16 17 79 93 97 99 101 102 103 105 106 11
 | \t#
 | \t# The drag numbers put the sea-level ceiling just past Mach 1.2. Thin air lifts that a lot;
 | \t# in real vacuum only the relativistic term is left, and light speed stays out of reach.
-| \tphysics: true  # false falls back to the old constant-speed fly mode
+| \tphysics: true               # false falls back to the old constant-speed fly mode
 | \tmass_kg: 6500.0
-| \tdrag_coefficient: 0.10  # subsonic base; the transonic rise is applied on top
+| \tdrag_coefficient: 0.10      # subsonic base; the transonic rise is applied on top
 | \tfrontal_area_m2: 2.0
-| \tthrust_g: 1.0  # main thruster, in Earth g
-| \tretro_fraction: 0.5  # retro thruster, as a fraction of the main one
-| \tlateral_fraction: 0.5  # strafe and vertical thrusters
-| \tblip_fraction: 0.5  # a tap fires at this power
-| \tblip_seconds: 0.25  # ...for this long
-| \ttap_seconds: 0.25  # a press shorter than this counts as a tap
+| \tthrust_g: 1.0               # main thruster, in Earth g
+| \tretro_fraction: 0.5         # retro thruster, as a fraction of the main one
+| \tlateral_fraction: 0.5       # strafe and vertical thrusters
+| \tblip_fraction: 0.5          # a tap fires at this power
+| \tblip_seconds: 0.25          # ...for this long
+| \ttap_seconds: 0.25           # a press shorter than this counts as a tap
 | \t# The mouse moves the nose target and the craft turns its nose onto it. The thrusters turn it
 | \t# anywhere, and the control surfaces add their share with the air's push.
-| \tturn_rate_thrusters: 25.0  # deg/s on the thrusters alone
-| \tturn_build_thrusters: 1.0  # seconds to build that rate or stop it
-| \tturn_rate_air: 180.0  # deg/s at full push, from about 30 m/s in sea-level air
+| \tturn_rate_thrusters: 25.0   # deg/s on the thrusters alone
+| \tturn_build_thrusters: 1.0   # seconds to build that rate or stop it
+| \tturn_rate_air: 180.0        # deg/s at full push, from about 30 m/s in sea-level air
 | \tturn_build_air: 0.1
-| \tlook_return_seconds: 0.0  # free look in flight: how long the view takes to come back onto the nose; 0 snaps
+| \tlook_return_seconds: 0.0     # free look in flight: how long the view takes to come back onto the nose; 0 snaps
 | 
 | input:
 | \t# Key bindings. Values are Unreal FKey names (e.g. W, SpaceBar, LeftShift,
@@ -159,32 +159,32 @@ lost [] rewritten [7 8 9 10 11 13 14 15 16 17 79 93 97 99 101 102 103 105 106 11
 | \tfree_look: RightMouseButton  # hold to look around without steering
 | 
 | graphics:
-| \trender_distance: 50000.0  # UE units
-| \tchunk_size: 25600.0  # UE units per terrain chunk side
-| \tchunk_resolution: 128  # vertices per chunk side
+| \trender_distance: 50000.0    # UE units
+| \tchunk_size: 25600.0         # UE units per terrain chunk side
+| \tchunk_resolution: 128       # vertices per chunk side
 | \tlod_distances: [10000, 25000, 50000]
-| \tshow_fps: true  # small FPS counter, top-right (toggle in Settings)
+| \tshow_fps: true              # small FPS counter, top-right (toggle in Settings)
 | 
 | display:
 | \t# Screen mode, resolution and profile are worked out from the machine on first launch, so they
 | \t# have no line here. These two are the defaults Settings puts back.
 | \tvsync: false
-| \tframe_rate_limit: 0  # fps, 0 = unlimited
+| \tframe_rate_limit: 0         # fps, 0 = unlimited
 | 
 | atmosphere:
 | \t# Look-dev knobs for the sky/fog/exposure stack, so tuning needs no recompile. Each still has a
 | \t# -cobblevale* command-line override for quick iteration (see CobblevaleAtmosphereBuilder).
-| \tsun_start_time: 0.363  # local day phase at the spawn site: 0=midnight, 0.25=sunrise, 0.5=noon (0.363 ~ 40 deg morning sun)
+| \tsun_start_time: 0.363       # local day phase at the spawn site: 0=midnight, 0.25=sunrise, 0.5=noon (0.363 ~ 40 deg morning sun)
 | \t# fog_density: 0.005        # raw haze density, overriding the style's visible distance (-cobblevalefog=)
-| \tfog_max_opacity: 1.0  # haze opacity ceiling; under 1, far land never fades all the way into the sky (-cobblevalefogop=)
-| \tfog_start_distance: 120000.0  # units before radius scaling; pushed back on bigger worlds, then capped inside the visible distance (-cobblevalefogstart=)
-| \tvolumetric_fog: false  # forward-scatters the low sun into a full-frame wash; god rays when on (-cobblevalevfog=)
-| \texposure_ev: -3.0  # the exposure a daylit scene gets; higher = brighter. Metered around it (-cobblevaleexpo= holds it fixed)
-| \texposure_key: 2.0  # the metered scene brightness that gets exposure_ev unchanged; darker opens up, brighter stops down
+| \tfog_max_opacity: 1.0        # haze opacity ceiling; under 1, far land never fades all the way into the sky (-cobblevalefogop=)
+| \tfog_start_distance: 120000.0 # units before radius scaling; pushed back on bigger worlds, then capped inside the visible distance (-cobblevalefogstart=)
+| \tvolumetric_fog: false       # forward-scatters the low sun into a full-frame wash; god rays when on (-cobblevalevfog=)
+| \texposure_ev: -3.0           # the exposure a daylit scene gets; higher = brighter. Metered around it (-cobblevaleexpo= holds it fixed)
+| \texposure_key: 2.0           # the metered scene brightness that gets exposure_ev unchanged; darker opens up, brighter stops down
 | \tbloom_intensity: 0.7
-| \tambient_occlusion: 0.6  # contact-shadow AO intensity, 0 to 1, on every performance profile
+| \tambient_occlusion: 0.6      # contact-shadow AO intensity, 0 to 1, on every performance profile
 | \t# visibility_km: 10.0       # force one visible distance on every world (-cobblevalevis=); off by default so each style keeps its own
-| \tunderwater_visibility_m: 20.0  # how far you see under the sea; it also gets darker and bluer with depth
+| \tunderwater_visibility_m: 20.0 # how far you see under the sea; it also gets darker and bluer with depth
 | 
 | \t# How much each weather thickens the haze, against fair at 1. It divides the visible distance,
 | \t# so storm at 2.6 turns a 10 km day into under 4 km.
@@ -247,26 +247,26 @@ lost [] rewritten [7 8 9 10 11 13 14 15 16 17 79 93 97 99 101 102 103 105 106 11
 | \t# The live scene behind the start menu, built when the game starts with no world. It is picked on
 | \t# today's terrain, so a change to world generation moves the hill out from under it; launch with
 | \t# -cobblevalestartscenefind to list hills over mild green valleys on this seed's world.
-| \tlive: true  # false puts the start menu over plain dark, with nothing drawn behind it
-| \tseed: sunrise  # as typed on New world
-| \tplanet: Earth  # a world.planet preset
-| \tlatitude: 37.3241  # degrees, south negative
-| \tlongitude: -71.9671  # degrees, west negative
-| \ttime: 0.24  # local day phase, 0.25 is about sunrise
-| \tweather: fair  # clear, fair, cloudy, overcast, storm or mist
-| \tcamera_height_m: 2.0  # above the ground
-| \tcamera_pitch_deg: -3.0  # negative looks down
-| \tview_from_sun_deg: -90.0  # the view's bearing turned from the sun's; positive puts the sun on the left
+| \tlive: true                  # false puts the start menu over plain dark, with nothing drawn behind it
+| \tseed: sunrise               # as typed on New world
+| \tplanet: Earth               # a world.planet preset
+| \tlatitude: 37.3241           # degrees, south negative
+| \tlongitude: -71.9671         # degrees, west negative
+| \ttime: 0.24                  # local day phase, 0.25 is about sunrise
+| \tweather: fair               # clear, fair, cloudy, overcast, storm or mist
+| \tcamera_height_m: 2.0        # above the ground
+| \tcamera_pitch_deg: -3.0      # negative looks down
+| \tview_from_sun_deg: -90.0    # the view's bearing turned from the sun's; positive puts the sun on the left
 | \t# The scene's own light, over what any world gets. Leave a row out and the world's value stands.
-| \texposure_ev: -1.25  # held fixed, over atmosphere.exposure_ev, which is set for a higher sun
-| \tsun_kelvin: 2700  # the sun's color, in place of the one its height gives
-| \tsun_strength: 7.0  # times the usual sun for its height
+| \texposure_ev: -1.25          # held fixed, over atmosphere.exposure_ev, which is set for a higher sun
+| \tsun_kelvin: 2700            # the sun's color, in place of the one its height gives
+| \tsun_strength: 7.0           # times the usual sun for its height
 | \tsky_zenith: [0.06, 0.22, 0.90]  # the sky's colors, in place of the air style's; the haze takes the horizon
 | \tsky_horizon: [1.0, 0.62, 0.42]
-| \tsky_light: 0.5  # fill in the shade from the sky, 1 as in a world
+| \tsky_light: 0.5              # fill in the shade from the sky, 1 as in a world
 | 
 | save:
-| \tautosave_interval: 60.0  # seconds
+| \tautosave_interval: 60.0     # seconds
 | 
 | ##
 | ## This config file format is SHCL.

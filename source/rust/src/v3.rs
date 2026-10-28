@@ -17,7 +17,7 @@ use crate::{
 };
 
 /// The shcl release this module wraps.
-pub const SHCL_VERSION: &str = "3.0.0-dev+2174f0d9";
+pub const SHCL_VERSION: &str = "3.0.0-dev+a010fdf8";
 
 /// The newest file format this shcl reads.
 pub const FORMAT_MAJOR: u32 = shcl::FORMAT_MAJOR;
@@ -136,7 +136,7 @@ pub struct Version;
 
 impl crate::Lib for Version {
 	type Doc = Doc;
-	const NAME: &'static str = "shcl 3.0.0-dev+2174f0d9";
+	const NAME: &'static str = "shcl 3.0.0-dev+a010fdf8";
 	const FORMAT_MAJOR: u32 = FORMAT_MAJOR;
 	fn parse(text: &str) -> Doc {
 		parse(text)
@@ -303,8 +303,8 @@ pub fn format_of(text: &str) -> u32 {
 /// `Refused`, with those errors in `diags`. A
 /// 2.x file comes out reading what 2.0 read, backslash escapes included, and
 /// one that can't is `Refused` too. 2.x's block is swapped for the current
-/// one where it sits, and the lines end as the file's did. Blank lines
-/// shcl's conversion drops are put back, so a line keeps its number.
+/// one where it sits, and the lines end as the file's did. Each line keeps
+/// its number, blank ones included.
 pub fn upgrade(text: &str, from: u32) -> Result<Upgraded, Error> {
 	let f = format_of(text).max(from);
 	if f > FORMAT_MAJOR {
@@ -361,7 +361,7 @@ pub fn upgrade(text: &str, from: u32) -> Result<Upgraded, Error> {
 		)));
 	}
 	if out.changed {
-		out.text = crate::info::keep_blanks(&input, &mend_reads(&old, &out.text), &e);
+		out.text = crate::info::keep_blanks(&input, &out.text, &e);
 	}
 	out.lost = check_reads(&old, &out.text, format_of(text) == 1)?;
 	out.text = if banner {
@@ -470,45 +470,6 @@ fn old_errors(old: &shcl2::Document) -> Option<Error> {
 	));
 	e.diags = errs;
 	Some(e)
-}
-
-/// `up`, the upgraded text, with each value that reads otherwise than 2.0
-/// read it in `old` set back to 2.0's reading. shcl's migrate splits a 2.x
-/// element at a comma inside quotes, as in `title="a, b"`, which 1.2 and 2.0
-/// read whole (2026102618065640). `check_reads` still checks the result.
-fn mend_reads(old: &shcl2::Document, up: &str) -> String {
-	let now = shcl::Document::parse(up);
-	let mut d: Option<shcl::Document> = None;
-	for p in old.paths() {
-		if old.count(&p) != 1 || now.count(&p) != 1 || now.read_raw(&p).status == shcl::Status::Good {
-			continue;
-		}
-		let (was, is) = (old.read_string_array(&p), now.read_string_array(&p));
-		if was.status != shcl2::Status::Good || is.status != shcl::Status::Good || was.value == is.value {
-			continue;
-		}
-		if d.is_none() {
-			match shcl::Document::parse_keep_lines(up, shcl::Strictness::Standard) {
-				Ok(doc) => d = Some(doc),
-				Err(_) => return up.to_owned(),
-			}
-		}
-		let Some(doc) = d.as_mut() else { return up.to_owned() };
-		// 2.0's read_string is Good on a list too, so its length says which.
-		let st = if let [one] = was.value.as_slice() {
-			doc.set_string(&p, one)
-		} else {
-			let refs: Vec<&str> = was.value.iter().map(String::as_str).collect();
-			doc.set_string_array(&p, &refs)
-		};
-		if st != shcl::SetStatus::Ok {
-			return up.to_owned();
-		}
-	}
-	match d.map(|doc| doc.to_text_keep_lines()) {
-		Some((text, true)) => text,
-		_ => up.to_owned(),
-	}
 }
 
 /// Reads every path 2.0 reads one value at in `old` back against `up`, the

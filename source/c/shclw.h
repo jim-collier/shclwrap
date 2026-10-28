@@ -51,7 +51,7 @@
 #error "shclw: this shcl.h is newer than 3.0, which shclw doesn't wrap yet"
 #endif
 #define SHCLW_FORMAT_MAJOR 3
-#define SHCLW_SHCL_VERSION "3.0.0-dev+2174f0d9"
+#define SHCLW_SHCL_VERSION "3.0.0-dev+a010fdf8"
 
 #ifdef __cplusplus
 extern "C" {
@@ -365,8 +365,8 @@ typedef struct {
 // reports errors on is SHCLW_ERR_REFUSED, with them in its diags. A 2.x file
 // comes out reading what 2.0 read, backslash escapes included, and one that
 // can't is SHCLW_ERR_REFUSED too. 2.x's info block is swapped for the
-// current one where it sits, and the lines end as the file's did. Blank
-// lines shcl's conversion drops are put back, so a line keeps its number.
+// current one where it sits, and the lines end as the file's did. Each
+// line keeps its number, blank ones included.
 // *out is set on a failure too, and is NULL only when memory ran out.
 shclw_kind shclw_upgrade(const char *text, size_t len, int64_t from, shclw_upgraded **out, shclw_error *err);
 // shclw_upgrade on a file. When it changes the file it first copies the

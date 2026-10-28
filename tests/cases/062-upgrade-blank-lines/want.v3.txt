@@ -1,6 +1,6 @@
 > upgrade	2
 from 2 changed true unsure 0
-lost [] rewritten [5 15 16 17]
+lost [] rewritten [5]
 | 
 | 
 | # 2.x kept these blank lines
@@ -15,10 +15,9 @@ lost [] rewritten [5 15 16 17]
 | end: y
 | 
 | 
-| raw:
-| \t~~~
-| \tkeep
-| \t~~~
+| raw: ~~~
+| keep
+| ~~~
 | 
 | 
 | last: z
@@ -44,4 +43,4 @@ Good	12	y
 > get	raw	raw
 Good	15	keep
 > get	str	last
-Good	21	z
+Good	20	z

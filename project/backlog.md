@@ -25,15 +25,49 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 
 ## Issues
 
+- Upgrade splits a quoted comma on a repeated key
+	- ID: 2026102814295798
+	- Type: Bug
+	- Status: Waiting on automated testing
+	- Needs local test suite run?: Yes, the full run with 2026102816215624.
+	- Opened: 20261028-142957
+	- Opened by: JC
+	- Related IDs: 2026102618065640, gitniblet-floss:2026102621002700, shcl:2026102620591100
+	- Steps to reproduce [Bug]: `Upgrade("row: idx=2, title=\"a, b\"\nrow: idx=3, title='x=y'\n", 2)` at 54dc6c6.
+	- Incorrect behavior [Bug]: The first row comes out as `row: [idx=2, 'title="a', 'b"']`, split at the comma, so a program that reads the row by field loses data.
+	- Expected behavior [Bug]: `row: [idx=2, 'title="a, b"']`, as 2.0 read it. With one `row:` line, or each under its own parent, it does come out that way.
+	- Possible cause [Bug]: `mendReads` skips a path where `old.Count(p) != 1` or `now.Count(p) != 1`, so a key that repeats under one parent is never mended. Seed rows always repeat.
+	- Reproduced [Bug]: 20261028 at d55ac94, in Go, in shared case 064. A `#` inside quotes did worse: `note="x # y"` came out as `'note="x'`, with `# y"` left as a comment.
+	- Actual cause [Bug]:
+		- shcl's conversion split a 2.x element at a comma inside quotes, and ended it at a `#` there. `mendReads` set a value back only on a key with one instance, so a repeated key kept the split.
+	- Priority: High
+	- Found by gitniblet-floss 2026102621002700, which keeps its own seed-row rewrite until this is in. shcl 2026102620591100 now reads a closed mid-piece quote as 2.0 did, so the next shcl pin may make `mendReads` needless here. High, since the split loses a field's value.
+	- Actual fix [Bug]: The pin to shcl `a010fdf8` (2026102816215624), whose conversion reads a closed quote inside a piece as 2.0 did, repeated keys included. `mendReads` is gone.
+	- Branch: r1028
+	- Test case: tests/cases/064-upgrade-repeated-quoted-comma (dejcx). It failed at d55ac94 in Go, and passes after in Go, Rust, C and Python.
+	- Swept: the 4 bindings, as in 2026102816215624. The read-back against 2.0 skips a repeated key too, so nothing caught the split. That's 2026102816332481.
+
 - Pin shcl dev a010fdf8, which reads 2.x quoted commas as 2.0 did and keeps each line on upgrade
 	- ID: 2026102816215624
 	- Type: Task
-	- Status: Queued
+	- Status: Waiting on automated testing
+	- Needs local test suite run?: Yes, `cicd/cicd.bash --backlog-run-full`, for the fuzz at the new pin.
 	- Opened: 20261028-162156
 	- Opened by: JC
 	- Related IDs: 2026102814295798, 2026102620430717, shcl:2026102620591100, shcl:2026102620591101
 	- Priority: High
 	- shcl r1028 merged as a010fdf8. Per the standing rule, the pin follows shcl's newest dev commit until v3.0.0-beta1 is tagged.
+	- Progress log:
+		- 2026-10-28: The 3.0 pin is at `a010fdf8` in all 4 languages, with `cicd/bump-shcl.bash`. The known list moved to the new pin's name, still with no findings.
+		- 2026-10-28: shcl now saves an upgrade keeping its lines, so a value keeps its spacing, a comment its column, and a name its case, as typed. `fmt` used to rewrite them. The want files of 038 (de5cq), 043 (de5cw), 047 (de5eq), 049 (de5es) and 062 (deftf) changed for that, and each reads the same values. 038 keeps `database.relationships:` as the file wrote it.
+		- 2026-10-28: It fixes 2026102814295798 and 2026102620430717 with no wrapper code of its own.
+	- Decisions:
+		- `mendReads` is gone in all 4, since shcl's conversion now reads a closed quote inside a 2.x element as 2.0 did. 063 (deftg) and 064 (dejcx) pass without it.
+		- `KeepBlanks` stays. Where shcl can't keep the lines it still writes the file the way `fmt` does, which drops blank lines. On a file shcl kept the lines of, it changes nothing.
+	- Branch: r1028
+	- Test case: deftf, deftg and dejcx (shared cases 062, 063 and 064), and de5cq, de5cw, de5eq and de5es for the want files that moved.
+	- Swept: `mendReads` in Go, `mend_reads` in Rust, C and Python, each one's `Upgrade` call site, and the doc comments on `Upgrade` and `KeepBlanks` in all 4. design.md's Format and upgrade. `UpgradeFile` and `Open` go through `Upgrade`, and nothing else called it.
+	- Verified: `cicd/cicd.bash --backlog-run-quick go rust python c` passed, lint CLEAN, with all 64 shared cases in Go, Rust, C and Python. `bash cicd/c-checks.bash lint 3 WORK` passed, clang-tidy and analyze-shcl included, and so did `bash cicd/c-checks.bash leakcheck 3 WORK`: CodeQL, CTU, the analyzers and the heaptrack soak, with 0 shcl findings at the new pin.
 
 - Create-only Write
 	- ID: 2026101513330015
@@ -130,6 +164,29 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Commit: d09c379
 	- 2026-10-26 Verified: PASS defmn in cicd.bash --backlog-run-full at 28bbbb0, run_20261026-173021. defmk and defmm were SKIP, as expected. Only the external row is left.
 
+- Upgrade of a 2.x raw block moves the lines after it by one
+	- ID: 2026102620430717
+	- Type: Bug
+	- Status: Waiting on automated testing
+	- Needs local test suite run?: Yes, the full run with 2026102816215624.
+	- Severity: Low
+	- Opened: 20261026-204307
+	- Opened by: JC
+	- Related IDs: 2026102618065634
+	- Steps to reproduce:
+		- On 3.0, `Upgrade` `"a: p, q\nraw: ~~~\nkeep\n~~~\nlast: z\n"` with `from` 2, then ask for the line of `last`.
+	- Incorrect behavior: shcl writes `raw: ~~~` as `raw:` with the fence on a line of its own, so `last` is on line 6, not 5, and so is every diagnostic after the block. A file shcl leaves alone keeps its lines.
+	- Expected behavior: The lines keep their numbers, or Open maps them back to the file's.
+	- Reproduced: 20261026 on r1026b, in all 4, in shared case 062.
+	- Note: Blank lines can't fix it. A fix joins the fence back onto its line where 3.0 reads that the same, or maps lines in Open.
+	- Actual cause:
+		- shcl's conversion wrote the file the way `fmt` does, which puts a raw block's fence on a line of its own.
+	- Actual fix: The pin to shcl `a010fdf8` (2026102816215624), which saves the upgrade keeping each line, `raw: ~~~` included.
+	- Branch: r1028
+	- Test case: tests/cases/062-upgrade-blank-lines (deftf). Its new want file failed at d55ac94 in Go, and passes after in Go, Rust, C and Python.
+		- 2026-10-28: deftf's want changed for this item: `last` on line 21 -> 20, `rewritten [5 15 16 17]` -> `[5]`, and the raw block on 3 lines, not 4.
+	- Swept: every shared case with a 2.x raw block, 047 (de5eq) and 062, keeps it on its field's line now. shcl's own `TestUpgradeKeepsEachLineWhereItWas` covers one after blank lines.
+
 - shcl 4 adapters
 	- ID: 2026101512024163
 	- Type: Feature
@@ -159,20 +216,6 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- shcl's Go module path is still `.../v2`, and Go won't take a v3 tag on it. Go stays on a commit until that changes.
 		- Quillroute plans to have its release refuse a commit pin. The same check would fit here.
 		- 2026-10-25: Until the beta, the pin follows shcl's newest dev commit, not an old one. `cicd/bump-shcl.bash` moves every 3.0 pin at once. Moved from `ea0998fa` to `a65eceb8`.
-
-- Upgrade splits a quoted comma on a repeated key
-	- ID: 2026102814295798
-	- Type: Bug
-	- Status: Queued
-	- Opened: 20261028-142957
-	- Opened by: JC
-	- Related IDs: 2026102618065640, gitniblet-floss:2026102621002700, shcl:2026102620591100
-	- Steps to reproduce [Bug]: `Upgrade("row: idx=2, title=\"a, b\"\nrow: idx=3, title='x=y'\n", 2)` at 54dc6c6.
-	- Incorrect behavior [Bug]: The first row comes out as `row: [idx=2, 'title="a', 'b"']`, split at the comma, so a program that reads the row by field loses data.
-	- Expected behavior [Bug]: `row: [idx=2, 'title="a, b"']`, as 2.0 read it. With one `row:` line, or each under its own parent, it does come out that way.
-	- Possible cause [Bug]: `mendReads` skips a path where `old.Count(p) != 1` or `now.Count(p) != 1`, so a key that repeats under one parent is never mended. Seed rows always repeat.
-	- Priority: High
-	- Found by gitniblet-floss 2026102621002700, which keeps its own seed-row rewrite until this is in. shcl 2026102620591100 now reads a closed mid-piece quote as 2.0 did, so the next shcl pin may make `mendReads` needless here. High, since the split loses a field's value.
 
 - Run the tests on Windows and macOS
 	- ID: 2026101512024174
@@ -223,6 +266,21 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- It passes, as it does on the pinned go1.26.2. Float ties print by Go's rule in every language, so a Go program built with 1.27 would write a value Rust, C and Python don't.
 	- Reproduced [Bug]: 2026-10-25, with go1.27.3 on b23 (linux/amd64) and on b26 (darwin/amd64). go1.26.2 passes on both.
 	- Possible cause [Bug]: Go 1.27 changed how `strconv` rounds a float32 halfway case. Not looked into yet.
+
+- The upgrade's read-back against 2.0 skips a repeated key
+	- ID: 2026102816332481
+	- Type: Bug
+	- Status: Queued
+	- Severity: Avg
+	- Opened: 20261028-163324
+	- Opened by: JC
+	- Related IDs: 2026102814295798, 2026101910455900
+	- Steps to reproduce:
+		- At d55ac94, `Upgrade("row: idx=2, title=\"a, b\"\nrow: idx=3\n", 2)` in Go.
+	- Incorrect behavior: The split row came back with no error. `checkReads` and its twins read a value back only where 2.0 has one instance of the path, so a repeated key, such as a seed row, is never checked.
+	- Expected behavior: Each instance 2.0 read is read back, and one that reads differently is refused, as a single key is.
+	- Possible cause: 3.0 reads one instance with `(i)` on the segment, as `InstancePaths` writes it, and 2.0 with `[i]`, so the two walks need pairing instance by instance.
+	- Note: Nothing reads wrong at `a010fdf8`, as far as the shared cases go. This is the net for the next shcl change, in all 4 bindings.
 
 - Let an upgrade keep a backtick value as 3.0 reads it
 	- ID: 2026102618065645
@@ -498,21 +556,6 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- 2026-10-24: JC wants a hosted workflow for this.
 		- 2026-10-24, CICD reset: per `macOS builds on GitHub` and `Merge gate` in the shared CICD rules. One small workflow on push and PR against main, plus `workflow_dispatch`, runs `--merge-gate` as far as the runner can, with the arm64 macOS job beside it. cicd.bash flags picked by how long the job takes start it. It's free while the repo is public.
 		- 2026-10-25: Split into 2026102519333240, the workflow, and 2026102519333340, cicd.bash starting it.
-
-- Upgrade of a 2.x raw block moves the lines after it by one
-	- ID: 2026102620430717
-	- Type: Bug
-	- Status: Queued
-	- Severity: Low
-	- Opened: 20261026-204307
-	- Opened by: JC
-	- Related IDs: 2026102618065634
-	- Steps to reproduce:
-		- On 3.0, `Upgrade` `"a: p, q\nraw: ~~~\nkeep\n~~~\nlast: z\n"` with `from` 2, then ask for the line of `last`.
-	- Incorrect behavior: shcl writes `raw: ~~~` as `raw:` with the fence on a line of its own, so `last` is on line 6, not 5, and so is every diagnostic after the block. A file shcl leaves alone keeps its lines.
-	- Expected behavior: The lines keep their numbers, or Open maps them back to the file's.
-	- Reproduced: 20261026 on r1026b, in all 4, in shared case 062.
-	- Note: Blank lines can't fix it. A fix joins the fence back onto its line where 3.0 reads that the same, or maps lines in Open.
 
 - Say which layer a read came from
 	- ID: 2026102114101028

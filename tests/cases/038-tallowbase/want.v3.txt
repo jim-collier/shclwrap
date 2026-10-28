@@ -6,7 +6,7 @@ doc.shcl
 ops.txt
 > upgrade	2
 from 2 changed true unsure 0
-lost [] rewritten [14 34 35 36 37 38 40 41 42 45 46 47 64 72 73 75 76 81 114 116 118 120 122 123 126 128 129 130 142 144 146 148 149 151 152 157 159 161 163 164 167 169 170 171 173 175 176 177 180 182 183 184 192 194 195 197 198 199 200 201 202 203 205 206 207 208 209 210 230 234]
+lost [] rewritten [14 34 81 159 192 194 195 230 234]
 | code:  ## Application-level
 | \tbefore_open:  ## Function to run when app is loaded, but before showing any UI. Can cancel by returning false. Gets passed <name>, <path to tx log folder>.
 | \tafter_open:
@@ -41,19 +41,19 @@ lost [] rewritten [14 34 35 36 37 38 40 41 42 45 46 47 64 72 73 75 76 81 114 116
 | \t\t\t\t\t\t\twhitelist:  ## Defaults to all unless populated
 | \t\t\t\t\t\t\tblacklist:  ## Defaults to none unless populated.
 | \t\t\t\t\taliases: [field99, "favorite_candy"]
-| \t\t\t\t\ttype: string  #..........: string|int|float|bool|datetime[_local]|datetime_utc|binary  ## datetime[_local] stores UTC but displays in user's local time.
-| \t\t\t\t\tspecial: "%|($0|$2|etc) [and other valid currency symbols]"  ## Defaults internal processing (e.g. % <--> float), defaults a UI format for currency unless overridden, etc.
-| \t\t\t\t\tis_active:  #..........: bool. Whether the field itself is in use.
-| \t\t\t\t\tdefaultval: @null  #...........: Three forms: a static value; a sentinel from the closed set @null|@previous (@previous = value from the previously entered row, this session, interactive front-ends only - programmatic writes never inherit it); or a script function name, in format (without quotes): "fMyFunction()". Args that will be passed: table_name, field_name. Quote a sentinel to mean its literal text instead: "@null" stores the five characters.
+| \t\t\t\t\ttype:          string  #..........: string|int|float|bool|datetime[_local]|datetime_utc|binary  ## datetime[_local] stores UTC but displays in user's local time.
+| \t\t\t\t\tspecial:       "%|($0|$2|etc) [and other valid currency symbols]"  ## Defaults internal processing (e.g. % <--> float), defaults a UI format for currency unless overridden, etc.
+| \t\t\t\t\tis_active:            #..........: bool. Whether the field itself is in use.
+| \t\t\t\t\tdefaultval:    @null  #...........: Three forms: a static value; a sentinel from the closed set @null|@previous (@previous = value from the previously entered row, this session, interactive front-ends only - programmatic writes never inherit it); or a script function name, in format (without quotes): "fMyFunction()". Args that will be passed: table_name, field_name. Quote a sentinel to mean its literal text instead: "@null" stores the five characters.
 | \t\t\t\t\tvalidation:  #....................: Not all validations are valid for all data types. Executable spits warnings if so, and ignores what it can. (Or errors if serious enough.)
-| \t\t\t\t\t\tnull_ok: true  #............: True if not specified.
-| \t\t\t\t\t\tempty_ok: n  #...............: True if not specified.
-| \t\t\t\t\t\trequired: no
+| \t\t\t\t\t\tnull_ok:       true  #............: True if not specified.
+| \t\t\t\t\t\tempty_ok:      n  #...............: True if not specified.
+| \t\t\t\t\t\trequired:  no
 | \t\t\t\t\t\tminlen:
 | \t\t\t\t\t\tmaxlen:
-| \t\t\t\t\t\tminval:  #...............: For numbers
-| \t\t\t\t\t\tmaxval:  #...............: For numbers
-| \t\t\t\t\t\tregex: "(?i)[a-z0-9 ]"  #.: As an example.
+| \t\t\t\t\t\tminval:       #...............: For numbers
+| \t\t\t\t\t\tmaxval:       #...............: For numbers
+| \t\t\t\t\t\tregex:     "(?i)[a-z0-9 ]"  #.: As an example.
 | \t\t\t\t\t\tmethod:  #....................: A script function that, if exists, passes inputs (table_name, field_name, value), and pass|fail boolean as return.
 | \t\t\t\t\tcode:
 | \t\t\t\t\t\tbefore_update:  #.............: Function that, if exists, is sent: table_name, field_name, and a value - to validate and/or change. Return pass|fail boolean to cancel update.
@@ -70,7 +70,7 @@ lost [] rewritten [14 34 35 36 37 38 40 41 42 45 46 47 64 72 73 75 76 81 114 116
 | \t\t\t\t\t\tformat:  ## e.g. printf format string. Display-only format after saving.
 | \t\t\t\t\t\tlist_type:  #............: literal|sql|lookup
 | \t\t\t\t\t\t\t## Checkbox can only be "literal", listbox can be any.
-| \t\t\t\t\t\tlist_source:  ## string
+| \t\t\t\t\t\tlist_source: ## string
 | \t\t\t\t\t\t\t## list_type:
 | \t\t\t\t\t\t\t\t## literal: e.g. "Bob", "Sally"
 | \t\t\t\t\t\t\t\t## sql: e.g. `SELECT idx, title FROM ...`, etc.
@@ -78,11 +78,11 @@ lost [] rewritten [14 34 35 36 37 38 40 41 42 45 46 47 64 72 73 75 76 81 114 116
 | \t\t\t\t\t\tlookup_in_lists: symbol  ## symbol|title|both. Default symbol; a value with no symbol falls back to its title. N/A if list_type <> "lookup".
 | \t\t\t\t\t\tlookup_in_forms: both  #.: symbol|title|both. Default both, rendered "<symbol> <title>".
 | \t\t\t\tfield: field_name2
-| \t\t\t\t\ttype: bool
-| \t\t\t\t\tdefaultval: false
+| \t\t\t\t\ttype:          bool
+| \t\t\t\t\tdefaultval:    false
 | \t\t\t\t\tvalidation:
-| \t\t\t\t\t\tnull_ok: no
-| \t\t\t\t\t\tempty_ok: n
+| \t\t\t\t\t\tnull_ok:   no
+| \t\t\t\t\t\tempty_ok:  n
 | \t\t\tcode:
 | \t\t\t\tbefore_update:  #.............: Function that, if exists, is sent: table_name, and a key:value array of field values [or something], to validate and/or update. Return pass|fail boolean to cancel update.
 | \t\t\t\tafter_update:  #..............: Function that, if exists, is sent: table_name, row_id.
@@ -120,23 +120,23 @@ lost [] rewritten [14 34 35 36 37 38 40 41 42 45 46 47 64 72 73 75 76 81 114 116
 | \t\t\t\t\tui:
 | \t\t\t\t\t\tvisible_form: y
 | \t\t\t\t\t\tvisible_list: n
-| \t\t\t\t\t\treadonly: y
+| \t\t\t\t\t\treadonly:     y
 | \t\t\t\tfield: idx
-| \t\t\t\t\ttype: int  ## Unique, auto-assigned max+1. The handle list_source points at.
+| \t\t\t\t\ttype:          int  ## Unique, auto-assigned max+1. The handle list_source points at.
 | \t\t\t\t\tui:
-| \t\t\t\t\t\treadonly: y
+| \t\t\t\t\t\treadonly:  y
 | \t\t\t\tfield: title
-| \t\t\t\t\ttype: string
+| \t\t\t\t\ttype:          string
 | \t\t\t\t\tvalidation:
-| \t\t\t\t\t\tnull_ok: n
-| \t\t\t\t\t\tempty_ok: n
+| \t\t\t\t\t\tnull_ok:   n
+| \t\t\t\t\t\tempty_ok:  n
 | \t\t\t\t\t\trequired: yes
 | \t\t\t\tfield: description
-| \t\t\t\t\ttype: string
+| \t\t\t\t\ttype:          string
 | \t\t\t\t\tvalidation:
-| \t\t\t\t\t\tnull_ok: y
-| \t\t\t\t\t\tempty_ok: y
-| \t\t\t\t\t\trequired: no
+| \t\t\t\t\t\tnull_ok:   y
+| \t\t\t\t\t\tempty_ok:  y
+| \t\t\t\t\t\trequired:  no
 | \t\t\t\t\t\tdefaultval: @null
 | \t\t\t\tfield: is_active  ## Already a system column, so this entry may only restyle it.
 | \t\t\t\t\tui:
@@ -148,49 +148,49 @@ lost [] rewritten [14 34 35 36 37 38 40 41 42 45 46 47 64 72 73 75 76 81 114 116
 | \t\t\t\t\tui:
 | \t\t\t\t\t\tvisible_form: y
 | \t\t\t\t\t\tvisible_list: n
-| \t\t\t\t\t\treadonly: y
+| \t\t\t\t\t\treadonly:     y
 | \t\t\t\tfield: idx
-| \t\t\t\t\ttype: int  ## Unique, auto-assigned max+1. What a lookup-backed field stores.
+| \t\t\t\t\ttype:          int  ## Unique, auto-assigned max+1. What a lookup-backed field stores.
 | \t\t\t\t\tui:
-| \t\t\t\t\t\treadonly: y
+| \t\t\t\t\t\treadonly:  y
 | \t\t\t\tfield: lookups_idx
-| \t\t\t\t\ttype: int
-| \t\t\t\t\tdefaultval: @previous
+| \t\t\t\t\ttype:          int
+| \t\t\t\t\tdefaultval:    @previous
 | \t\t\t\t\tvalidation:
-| \t\t\t\t\t\tnull_ok: n
-| \t\t\t\t\t\tempty_ok: n
+| \t\t\t\t\t\tnull_ok:   n
+| \t\t\t\t\t\tempty_ok:  n
 | \t\t\t\t\t\trequired: yes
 | \t\t\t\t\tui:
 | \t\t\t\t\t\tlabel: ""  #.............: Defaults to field name.
 | \t\t\t\t\t\tdescription: "Lookup group"
-| \t\t\t\t\t\twidget: listbox
+| \t\t\t\t\t\twidget:  listbox
 | \t\t\t\t\t\tlist_type: sql
 | \t\t\t\t\t\tlist_source: ["`SELECT idx", "title FROM lookups WHERE is_active ORDER BY title`"]
 | \t\t\t\tfield: title
-| \t\t\t\t\ttype: string
+| \t\t\t\t\ttype:          string
 | \t\t\t\t\tvalidation:
-| \t\t\t\t\t\tnull_ok: n
-| \t\t\t\t\t\tempty_ok: n
+| \t\t\t\t\t\tnull_ok:   n
+| \t\t\t\t\t\tempty_ok:  n
 | \t\t\t\t\t\trequired: yes
 | \t\t\t\tfield: symbol
-| \t\t\t\t\ttype: string  ## E.g. single emoji
+| \t\t\t\t\ttype:          string  ## E.g. single emoji
 | \t\t\t\t\tvalidation:
-| \t\t\t\t\t\tnull_ok: y
-| \t\t\t\t\t\tempty_ok: y
-| \t\t\t\t\t\trequired: no
+| \t\t\t\t\t\tnull_ok:   y
+| \t\t\t\t\t\tempty_ok:  y
+| \t\t\t\t\t\trequired:  no
 | \t\t\t\tfield: description
-| \t\t\t\t\ttype: string
+| \t\t\t\t\ttype:          string
 | \t\t\t\t\tvalidation:
-| \t\t\t\t\t\tnull_ok: y
-| \t\t\t\t\t\tempty_ok: y
-| \t\t\t\t\t\trequired: no
+| \t\t\t\t\t\tnull_ok:   y
+| \t\t\t\t\t\tempty_ok:  y
+| \t\t\t\t\t\trequired:  no
 | \t\t\t\t\t\tdefaultval: @null
 | \t\t\t\tfield: sort
-| \t\t\t\t\ttype: float  ## Picker order within a group; idx never sorts.
+| \t\t\t\t\ttype:          float  ## Picker order within a group; idx never sorts.
 | \t\t\t\t\tvalidation:
-| \t\t\t\t\t\tnull_ok: y
-| \t\t\t\t\t\tempty_ok: n
-| \t\t\t\t\t\trequired: no
+| \t\t\t\t\t\tnull_ok:   y
+| \t\t\t\t\t\tempty_ok:  n
+| \t\t\t\t\t\trequired:  no
 | \t\t\t\t\t\tdefaultval: @null
 | \t\t\t\tfield: is_active  ## Already a system column, so this entry may only restyle it.
 | \t\t\t\t\tui:
@@ -203,20 +203,20 @@ lost [] rewritten [14 34 35 36 37 38 40 41 42 45 46 47 64 72 73 75 76 81 114 116
 | \t\t\trow: [idx=1, lookups_idx=1, 'title="Open"', 'symbol="🟢"', sort=1]
 | \t\t\trow: [idx=2, lookups_idx=1, 'title="Closed"', 'symbol="✅"', sort=2]
 | 
-| \trelationships:
-| \t\trelationship: table1_table2  ## the 1:m link below
-| \t\t\ttype: "1:m"  ## The relationship is managed by a field on the child entity. This basically just provides optional cascading deletes, and isn't necessary to define, if not doing that.
-| \t\t\tparent: table_1
-| \t\t\tchild: table_2
-| \t\t\tparent_id_field: my_parent_id  ## Code makes sure this child field is indexed.
-| \t\t\tcascade_delete: y  ## "y" is the main reason to use this feature, otherwise can be redundant.
+| database.relationships:
+| \trelationship: table1_table2  ## the 1:m link below
+| \t\ttype:  "1:m"  ## The relationship is managed by a field on the child entity. This basically just provides optional cascading deletes, and isn't necessary to define, if not doing that.
+| \t\tparent: table_1
+| \t\tchild: table_2
+| \t\tparent_id_field: my_parent_id  ## Code makes sure this child field is indexed.
+| \t\tcascade_delete: y  ## "y" is the main reason to use this feature, otherwise can be redundant.
 | 
-| \t\trelationship: table1_table2_m2m  ## the m:m link below
-| \t\t\ttype: "m:m"  ## Implies use of the "Many-to-many relationships" table. Very much not redundant with anything two entities can do themselves.
-| \t\t\tparent: table_1
-| \t\t\tchild: table_2
-| \t\t\tcascade_delete: n
-| \t\t\tenable_audit_trail: n  ## The audit trail is on the m:m table.
+| \trelationship: table1_table2_m2m  ## the m:m link below
+| \t\ttype:  "m:m"  ## Implies use of the "Many-to-many relationships" table. Very much not redundant with anything two entities can do themselves.
+| \t\tparent: table_1
+| \t\tchild: table_2
+| \t\tcascade_delete: n
+| \t\tenable_audit_trail: n  ## The audit trail is on the m:m table.
 | 
 | ui:
 | \tviews:

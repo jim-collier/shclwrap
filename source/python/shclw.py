@@ -1810,7 +1810,7 @@ def upgrade(text: str, from_: int = 0) -> Upgraded:
 			msg=f"{len(u.errors_left)} lines would still have an error once converted; fix them and upgrade again",
 		)
 	if out.changed:
-		out.text = _keep_blanks(src, _mend_reads(old, out.text))
+		out.text = _keep_blanks(src, out.text)
 	out.lost = _check_reads(old, out.text, format_of(text) == 1)
 	if banner:
 		fixed = _place_block(_same_ends(text, out.text), src != text)
@@ -1859,37 +1859,6 @@ def _old_errors(old: Any) -> Error | None:
 
 def _carry_diag(line: int, msg: str) -> Diag:
 	return Diag(line, Severity.Error, "W002", msg)
-
-
-def _mend_reads(old: Any, up: str) -> str:
-	"""up, the upgraded text, with each value that reads otherwise than 2.0
-	read it in old set back to 2.0's reading. shcl's migrate splits a 2.x
-	element at a comma inside quotes, as in title="a, b", which 1.2 and 2.0
-	read whole (2026102618065640). _check_reads still checks the result."""
-	now = shcl.Document.parse(up)
-	d = None
-	for p in old.paths():
-		if old.count(p) != 1 or now.count(p) != 1 or now.read_raw(p).status == shcl.Status.Good:
-			continue
-		was, now_is = old.read_string_array(p), now.read_string_array(p)
-		if was.status != shcl2.Status.Good or now_is.status != shcl.Status.Good or was.value == now_is.value:
-			continue
-		if d is None:
-			try:
-				d = shcl.Document.parse_keep_lines(up, shcl.Strictness.Standard)
-			except shcl.LoadError:
-				return up
-		# 2.0's read_string is Good on a list too, so its length says which.
-		if len(was.value) == 1:
-			st = d.set_string(p, was.value[0])
-		else:
-			st = d.set_string_array(p, list(was.value))
-		if st != shcl.SetStatus.Ok:
-			return up
-	if d is None:
-		return up
-	text, kept = d.to_text_keep_lines()
-	return text if kept else up
 
 
 def _check_reads(old: Any, up: str, names_as_typed: bool) -> list[int]:
