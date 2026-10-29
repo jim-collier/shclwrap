@@ -123,38 +123,6 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- 2026-10-25: Until the beta, the pin follows shcl's newest dev commit, not an old one. `cicd/bump-shcl.bash` moves every 3.0 pin at once. Moved from `ea0998fa` to `a65eceb8`.
 	- Held for shcl's v3.0.0-beta1 tag. The pin is at shcl dev a010fdf8 until then.
 
-- Let an upgrade keep a backtick value as 3.0 reads it
-	- ID: 2026102618065645
-	- Type: Enhancement
-	- Status: Queued
-	- Priority: Avg
-	- Opened: 20261026-180656
-	- Opened by: JC
-	- Requirements:
-		- A file with no Format line, a bare `a, b` list and a backtick value, such as `` sql: `select a, b from t` ``, is ErrAmbiguous on Open. With from 2 the backtick value turns into a 2-element array. A program that read that line raw under 2.x, as gitniblet did, wants the list in brackets and the backtick value kept as typed, and neither from 0 nor from 2 gives that.
-		- Missing capability. Maybe an option naming the keys a program reads raw, or one that takes 3.0's reading for backtick lines.
-	- Note: Found in gitniblet, 2026102509204445, which swaps those lines out before the upgrade and puts them back after.
-
-- Comment doesn't stack, and leaves the user's own notes
-	- ID: 2026101513330022
-	- Type: Feature
-	- Status: Queued
-	- Priority: Avg
-	- Opened: 20261015-133300
-	- Opened by: JC
-	- Requirements:
-		- Comment replaces the text it wrote before, and leaves other comments above the key alone.
-	- Note: Each set adds another line, and clearing would delete notes the user wrote. Folderkite only sets a comment on a new key, so a reworded comment never reaches a key that's already set.
-
-- Remove keeps a key's comments when it's set again
-	- ID: 2026101513330023
-	- Type: Feature
-	- Status: Queued
-	- Priority: Avg
-	- Opened: 20261015-133300
-	- Opened by: JC
-	- Note: Wovenshell edits the lines by hand so that way a setting goes back to its default. Mossrealm lives with losing the comment.
-
 - Show the text a value would be written as
 	- ID: 2026101513330024
 	- Type: Feature
@@ -163,35 +131,7 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Opened: 20261015-133300
 	- Opened by: JC
 	- Note: Quillroute and Wovenshell set the value on a throwaway document and read its canonical text. Folderkite builds its defaults list the same way. Quillroute also checks that text for `\u` escapes.
-
-- Put writes Windows paths in single quotes
-	- ID: 2026101513330025
-	- Type: Feature
-	- Status: Queued
-	- Priority: Avg
-	- Opened: 20261015-133300
-	- Opened by: JC
-	- Requirements:
-		- A string with a backslash and no apostrophe or line break goes in single quotes.
-	- Note: shcl writes some paths bare, some in single quotes, and some in double quotes with every backslash doubled. Quillroute uses PutSyntax and a read-back. It's queued with shcl too.
-
-- Let a program treat chosen hints as errors
-	- ID: 2026101513330026
-	- Type: Feature
-	- Status: Queued
-	- Priority: Avg
-	- Opened: 20261015-133300
-	- Opened by: JC
-	- Note: Cobblevale counts errors only, so a mistyped table that merges every entry shows nothing. In Quillroute, `p: "C:\temp"` loads with a tab in it, and only hint H004 says so.
-
-- Check keeps schema faults apart from the file's
-	- ID: 2026101513330027
-	- Type: Feature
-	- Status: Queued
-	- Priority: Avg
-	- Opened: 20261015-133300
-	- Opened by: JC
-	- Note: A schema fault's line number is in the schema, not the file. On 1.2 it also turns off the unknown-key check. Tallowbase splits them out and tests that an unknown key still gets reported.
+	- Note: 20261029: shcl 3.0 has `FormatValue` and `FormatArray`.
 
 - Names as the file typed them
 	- ID: 2026101513330028
@@ -203,45 +143,7 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Requirements:
 		- Names and Each can give a name in its original case.
 	- Note: Radixmill's error messages can only show the lowercased name. Lenscart, Tallowbase, and Quillroute store names as values to keep their case.
-
-- Lists of records
-	- ID: 2026101513330029
-	- Type: Feature
-	- Status: Queued
-	- Priority: Avg
-	- Opened: 20261015-133300
-	- Opened by: JC
-	- Requirements:
-		- Write and read a list of rows with named fields. A write replaces the whole list.
-	- Note: Lenscart removes the section and writes `rowN` blocks. Mossrealm packs records into one flat float array. Cobblevale uses repeated blocks and walks them by index.
-
-- Save only what differs from the layers below
-	- ID: 2026101513330030
-	- Type: Feature
-	- Status: Queued
-	- Priority: Avg
-	- Opened: 20261015-133300
-	- Opened by: JC
-	- Related IDs: 2026101512024156
-	- Note: Mossrealm writes only the differences, and deletes the user file when nothing differs. Folderkite stores only changed values.
-
-- Int reads within a range
-	- ID: 2026101513330031
-	- Type: Feature
-	- Status: Queued
-	- Priority: Avg
-	- Opened: 20261015-133300
-	- Opened by: JC
-	- Note: shcl ints are 64-bit. Mossrealm guards u32 reads and Cobblevale int32 reads, and both fall back when a value is out of range.
-
-- Unsigned 64-bit values
-	- ID: 2026101513330032
-	- Type: Feature
-	- Status: Queued
-	- Priority: Avg
-	- Opened: 20261015-133300
-	- Opened by: JC
-	- Note: Mossrealm has seeds past the i64 limit, and stores them as base32 text.
+	- Note: 20261029: shcl 3.0 has `AuthoredName`, and v4 has `authored_name` on a node.
 
 - C: build with shcl's file calls left out
 	- ID: 2026101513330048
@@ -398,18 +300,6 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- 2026-10-24, CICD reset: per `macOS builds on GitHub` and `Merge gate` in the shared CICD rules. One small workflow on push and PR against main, plus `workflow_dispatch`, runs `--merge-gate` as far as the runner can, with the arm64 macOS job beside it. cicd.bash flags picked by how long the job takes start it. It's free while the repo is public.
 		- 2026-10-25: Split into 2026102519333240, the workflow, and 2026102519333340, cicd.bash starting it.
 
-- Say which layer a read came from
-	- ID: 2026102114101028
-	- Type: Enhancement
-	- Status: Queued
-	- Priority: Low
-	- Opened: 2026-10-21
-	- Opened by: JC
-	- Related IDs: 2026101512024156
-	- Notes:
-		- On a layered document, `Got.Line` and `Lines` give a line in some layer, with nothing to say which one, so a warning about a bad value can't name the file.
-		- `DropDeclared` on a layered document's `Diags` gives them back with `Layer` 0 in Go and Rust. C's drops hints from the merge's own list, which `shclw_diags` doesn't show for a layered document.
-
 - Commit and publish from cicd
 	- ID: 2026101512024171
 	- Type: Task
@@ -421,33 +311,6 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- `-m` and the usual commit, backup, and publish stage, as the other projects have.
 		- The pre-push hook runs the whole gate for a push that only deletes a branch. It should skip that.
 
-- Comment out a setting in place
-	- ID: 2026101513330033
-	- Type: Feature
-	- Status: Queued
-	- Priority: Low
-	- Opened: 20261015-133300
-	- Opened by: JC
-	- Note: Wovenshell turns a setting off by commenting its line by hand, since Remove takes the comments with it.
-
-- Reorder repeated entries
-	- ID: 2026101513330034
-	- Type: Feature
-	- Status: Queued
-	- Priority: Low
-	- Opened: 20261015-133300
-	- Opened by: JC
-	- Note: Wovenshell removes and rewrites a whole block to change its order.
-
-- Remove takes out a header it left empty
-	- ID: 2026101513330035
-	- Type: Feature
-	- Status: Queued
-	- Priority: Low
-	- Opened: 20261015-133300
-	- Opened by: JC
-	- Note: Removing the last key under a repeated header leaves the header, and takes the blank line above it. Quillroute lives with it. It's queued with shcl too.
-
 - Put replaces every copy of a repeated key
 	- ID: 2026101513330036
 	- Type: Feature
@@ -456,15 +319,7 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Opened: 20261015-133300
 	- Opened by: JC
 	- Note: The wrapper refuses with `BadPath` today. Cobblevale removes the key and then sets it.
-
-- Write skips a save when nothing changed
-	- ID: 2026101513330037
-	- Type: Feature
-	- Status: Queued
-	- Priority: Low
-	- Opened: 20261015-133300
-	- Opened by: JC
-	- Note: Wovenshell compares the text first.
+	- Note: 20261029: v4 sets every line a value is given by, so shcl will cover it there.
 
 - Read a number written as an int or a float
 	- ID: 2026101513330038
@@ -474,42 +329,7 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Opened: 20261015-133300
 	- Opened by: JC
 	- Note: Wovenshell merges the 2 for single values and for mixed lists.
-
-- Decimal reads
-	- ID: 2026101513330039
-	- Type: Feature
-	- Status: Queued
-	- Priority: Low
-	- Opened: 20261015-133300
-	- Opened by: JC
-	- Note: Tickerwren reads money as text and parses it itself, so no binary float gets in.
-
-- Warn on a value that's only a comment
-	- ID: 2026101513330040
-	- Type: Feature
-	- Status: Queued
-	- Priority: Low
-	- Opened: 20261015-133300
-	- Opened by: JC
-	- Note: `color: #112233` reads as `Empty`. Wovenshell finds those lines and names them.
-
-- Warn on lines under a key that has a value
-	- ID: 2026101513330041
-	- Type: Feature
-	- Status: Queued
-	- Priority: Low
-	- Opened: 20261015-133300
-	- Opened by: JC
-	- Note: Those lines are never read, and the key above reads as `Empty`. Radixmill refuses them. In Folderkite a file written that way loads as nothing, with no complaint.
-
-- Map a struct to a block
-	- ID: 2026101513330042
-	- Type: Feature
-	- Status: Queued
-	- Priority: Low
-	- Opened: 20261015-133300
-	- Opened by: JC
-	- Note: Mossrealm maps every field by hand, both ways. This may be past the size design.md sets for the wrapper.
+	- Note: 20261029: shcl 3.0 has `Kind(path)`, which tells an int from a float.
 
 - Check a copied wrapper against its commit
 	- ID: 2026101513330043
@@ -537,26 +357,6 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Opened: 20261015-133300
 	- Opened by: JC
 	- Note: Lenscart drops repeats by line, code, and message after validating.
-
-- C: out-of-memory hook
-	- ID: 2026101513330049
-	- Type: Feature
-	- Status: Queued
-	- Priority: Low
-	- Opened: 20261015-133300
-	- Opened by: JC
-	- Parent ID: 2026101512024159
-	- Note: shcl 1.2 and 2.0 print and exit on out of memory. Folderkite sets its own hook.
-
-- Ask shcl for a call that lists folded copies
-	- ID: 2026102115285934
-	- Type: Task
-	- Status: Queued
-	- Priority: Low
-	- Opened: 20261021-152859
-	- Opened by: JC
-	- Related IDs: 2026101513330009
-	- Note: `Merged` finds them with a second parse in each language. shcl's parser sees each fold, so a call there would be cheaper and could take that code's place.
 
 - vmKt6m: Python 3.11 for the macOS tests
 	- ID: 2026102818351459
@@ -3545,6 +3345,125 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Note: Moot since the upgrade is part of every build (2026101613005800), so every C build has 2.0.
 	- Closed: 20261016-132000
 
+- Let an upgrade keep a backtick value as 3.0 reads it
+	- ID: 2026102618065645
+	- Type: Enhancement
+	- Status: Moot
+	- Priority: Avg
+	- Opened: 20261026-180656
+	- Opened by: JC
+	- Requirements:
+		- A file with no Format line, a bare `a, b` list and a backtick value, such as `` sql: `select a, b from t` ``, is ErrAmbiguous on Open. With from 2 the backtick value turns into a 2-element array. A program that read that line raw under 2.x, as gitniblet did, wants the list in brackets and the backtick value kept as typed, and neither from 0 nor from 2 gives that.
+		- Missing capability. Maybe an option naming the keys a program reads raw, or one that takes 3.0's reading for backtick lines.
+	- Note: Found in gitniblet, 2026102509204445, which swaps those lines out before the upgrade and puts them back after.
+	- Note: 20261029: moved to shcl's backlog as 2026102911041665, for v4.
+	- Superseded by ID: shcl 2026102911041665
+
+- Comment doesn't stack, and leaves the user's own notes
+	- ID: 2026101513330022
+	- Type: Feature
+	- Status: Moot
+	- Priority: Avg
+	- Opened: 20261015-133300
+	- Opened by: JC
+	- Requirements:
+		- Comment replaces the text it wrote before, and leaves other comments above the key alone.
+	- Note: Each set adds another line, and clearing would delete notes the user wrote. Folderkite only sets a comment on a new key, so a reworded comment never reaches a key that's already set.
+	- Note: 20261029: moved to shcl's backlog as 2026102911041657, for v4.
+	- Superseded by ID: shcl 2026102911041657
+
+- Remove keeps a key's comments when it's set again
+	- ID: 2026101513330023
+	- Type: Feature
+	- Status: Moot
+	- Priority: Avg
+	- Opened: 20261015-133300
+	- Opened by: JC
+	- Note: Wovenshell edits the lines by hand so that way a setting goes back to its default. Mossrealm lives with losing the comment.
+	- Note: 20261029: moved to shcl's backlog as 2026102911041658, for v4.
+	- Superseded by ID: shcl 2026102911041658
+
+- Put writes Windows paths in single quotes
+	- ID: 2026101513330025
+	- Type: Feature
+	- Status: Moot
+	- Priority: Avg
+	- Opened: 20261015-133300
+	- Opened by: JC
+	- Requirements:
+		- A string with a backslash and no apostrophe or line break goes in single quotes.
+	- Note: shcl writes some paths bare, some in single quotes, and some in double quotes with every backslash doubled. Quillroute uses PutSyntax and a read-back. It's queued with shcl too.
+	- Note: 20261029: Moot. shcl's own item for this is Moot too. 3.0 has no backslash escapes, so a backslash plays no part in choosing quotes.
+
+- Let a program treat chosen hints as errors
+	- ID: 2026101513330026
+	- Type: Feature
+	- Status: Moot
+	- Priority: Avg
+	- Opened: 20261015-133300
+	- Opened by: JC
+	- Note: Cobblevale counts errors only, so a mistyped table that merges every entry shows nothing. In Quillroute, `p: "C:\temp"` loads with a tab in it, and only hint H004 says so.
+	- Note: 20261029: moved to shcl's backlog as 2026102911041660, for v4.
+	- Superseded by ID: shcl 2026102911041660
+
+- Check keeps schema faults apart from the file's
+	- ID: 2026101513330027
+	- Type: Feature
+	- Status: Moot
+	- Priority: Avg
+	- Opened: 20261015-133300
+	- Opened by: JC
+	- Note: A schema fault's line number is in the schema, not the file. On 1.2 it also turns off the unknown-key check. Tallowbase splits them out and tests that an unknown key still gets reported.
+	- Note: 20261029: moved to shcl's backlog as 2026102911041659, for v4.
+	- Superseded by ID: shcl 2026102911041659
+
+- Lists of records
+	- ID: 2026101513330029
+	- Type: Feature
+	- Status: Moot
+	- Priority: Avg
+	- Opened: 20261015-133300
+	- Opened by: JC
+	- Requirements:
+		- Write and read a list of rows with named fields. A write replaces the whole list.
+	- Note: Lenscart removes the section and writes `rowN` blocks. Mossrealm packs records into one flat float array. Cobblevale uses repeated blocks and walks them by index.
+	- Note: 20261029: moved to shcl's backlog as 2026102911041661, for v4.
+	- Superseded by ID: shcl 2026102911041661
+
+- Save only what differs from the layers below
+	- ID: 2026101513330030
+	- Type: Feature
+	- Status: Moot
+	- Priority: Avg
+	- Opened: 20261015-133300
+	- Opened by: JC
+	- Related IDs: 2026101512024156
+	- Note: Mossrealm writes only the differences, and deletes the user file when nothing differs. Folderkite stores only changed values.
+	- Note: 20261029: moved to shcl's backlog as 2026102911041662, for v4.
+	- Superseded by ID: shcl 2026102911041662
+
+- Int reads within a range
+	- ID: 2026101513330031
+	- Type: Feature
+	- Status: Moot
+	- Priority: Avg
+	- Opened: 20261015-133300
+	- Opened by: JC
+	- Note: shcl ints are 64-bit. Mossrealm guards u32 reads and Cobblevale int32 reads, and both fall back when a value is out of range.
+	- Note: 20261029: moved to shcl's backlog as 2026102911041663, for v4.
+	- Superseded by ID: shcl 2026102911041663
+
+- Unsigned 64-bit values
+	- ID: 2026101513330032
+	- Type: Feature
+	- Status: Moot
+	- Priority: Avg
+	- Opened: 20261015-133300
+	- Opened by: JC
+	- Note: Mossrealm has seeds past the i64 limit, and stores them as base32 text.
+	- Note: 20261029: moved to shcl's backlog as 2026102911041664, for v4.
+	- Superseded by ID: shcl 2026102911041664
+
 - Write into a folder that doesn't exist says IO on 1.2 and 2.0, and NotFound on 3.0
 	- ID: 2026101518385490
 	- Type: Bug
@@ -3563,6 +3482,128 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- 20261019: Moot, since 2026101613005800 took out 1.2 and 2.0. 3.0 gives `ErrNotFound` in every language.
 	- Test case: `test_errors` in `source/c/tests/api_test.c` pins `ErrNotFound` on 3.0.
 	- Closed: 20261019-104500
+
+- Say which layer a read came from
+	- ID: 2026102114101028
+	- Type: Enhancement
+	- Status: Moot
+	- Priority: Low
+	- Opened: 2026-10-21
+	- Opened by: JC
+	- Related IDs: 2026101512024156
+	- Notes:
+		- On a layered document, `Got.Line` and `Lines` give a line in some layer, with nothing to say which one, so a warning about a bad value can't name the file.
+		- `DropDeclared` on a layered document's `Diags` gives them back with `Layer` 0 in Go and Rust. C's drops hints from the merge's own list, which `shclw_diags` doesn't show for a layered document.
+	- Note: 20261029: moved to shcl's backlog as 2026102911041666, for v4.
+	- Superseded by ID: shcl 2026102911041666
+
+- Comment out a setting in place
+	- ID: 2026101513330033
+	- Type: Feature
+	- Status: Moot
+	- Priority: Low
+	- Opened: 20261015-133300
+	- Opened by: JC
+	- Note: Wovenshell turns a setting off by commenting its line by hand, since Remove takes the comments with it.
+	- Note: 20261029: moved to shcl's backlog as 2026102911041667, for v4.
+	- Superseded by ID: shcl 2026102911041667
+
+- Reorder repeated entries
+	- ID: 2026101513330034
+	- Type: Feature
+	- Status: Moot
+	- Priority: Low
+	- Opened: 20261015-133300
+	- Opened by: JC
+	- Note: Wovenshell removes and rewrites a whole block to change its order.
+	- Note: 20261029: moved to shcl's backlog as 2026102911041668, for v4.
+	- Superseded by ID: shcl 2026102911041668
+
+- Remove takes out a header it left empty
+	- ID: 2026101513330035
+	- Type: Feature
+	- Status: Moot
+	- Priority: Low
+	- Opened: 20261015-133300
+	- Opened by: JC
+	- Note: Removing the last key under a repeated header leaves the header, and takes the blank line above it. Quillroute lives with it. It's queued with shcl too.
+	- Note: 20261029: Moot. shcl fixed it in all 4 bindings under 2026100115323232, before the pin. The header goes with its last key, and the blank line above it too.
+
+- Write skips a save when nothing changed
+	- ID: 2026101513330037
+	- Type: Feature
+	- Status: Moot
+	- Priority: Low
+	- Opened: 20261015-133300
+	- Opened by: JC
+	- Note: Wovenshell compares the text first.
+	- Note: 20261029: moved to shcl's backlog as 2026102911041669, for v4.
+	- Superseded by ID: shcl 2026102911041669
+
+- Decimal reads
+	- ID: 2026101513330039
+	- Type: Feature
+	- Status: Moot
+	- Priority: Low
+	- Opened: 20261015-133300
+	- Opened by: JC
+	- Note: Tickerwren reads money as text and parses it itself, so no binary float gets in.
+	- Note: 20261029: moved to shcl's backlog as 2026102911041670, for v4.
+	- Superseded by ID: shcl 2026102911041670
+
+- Warn on a value that's only a comment
+	- ID: 2026101513330040
+	- Type: Feature
+	- Status: Moot
+	- Priority: Low
+	- Opened: 20261015-133300
+	- Opened by: JC
+	- Note: `color: #112233` reads as `Empty`. Wovenshell finds those lines and names them.
+	- Note: 20261029: Moot. shcl 3.0 gives `H008` for it, as in `color: #fff`, and the wrapper passes it on in `Diags`.
+
+- Warn on lines under a key that has a value
+	- ID: 2026101513330041
+	- Type: Feature
+	- Status: Moot
+	- Priority: Low
+	- Opened: 20261015-133300
+	- Opened by: JC
+	- Note: Those lines are never read, and the key above reads as `Empty`. Radixmill refuses them. In Folderkite a file written that way loads as nothing, with no complaint.
+	- Note: 20261029: Moot. 3.0 reads those lines, so `a: 1` with `b: 2` under it reads `a.b` as 2. Only 1.2 and 2.0 lost them, and their files are upgraded on open.
+
+- Map a struct to a block
+	- ID: 2026101513330042
+	- Type: Feature
+	- Status: Moot
+	- Priority: Low
+	- Opened: 20261015-133300
+	- Opened by: JC
+	- Note: Mossrealm maps every field by hand, both ways. This may be past the size design.md sets for the wrapper.
+	- Note: 20261029: moved to shcl's backlog as 2026102911041672, for v4.
+	- Superseded by ID: shcl 2026102911041672
+
+- C: out-of-memory hook
+	- ID: 2026101513330049
+	- Type: Feature
+	- Status: Moot
+	- Priority: Low
+	- Opened: 20261015-133300
+	- Opened by: JC
+	- Parent ID: 2026101512024159
+	- Note: shcl 1.2 and 2.0 print and exit on out of memory. Folderkite sets its own hook.
+	- Note: 20261029: Moot. shcl 3.0's C lets an embedder define `SHCL_OOM`, and the program builds shcl itself.
+
+- Ask shcl for a call that lists folded copies
+	- ID: 2026102115285934
+	- Type: Task
+	- Status: Moot
+	- Priority: Low
+	- Opened: 20261021-152859
+	- Opened by: JC
+	- Related IDs: 2026101513330009
+	- Note: `Merged` finds them with a second parse in each language. shcl's parser sees each fold, so a call there would be cheaper and could take that code's place.
+	- Note: 20261029: moved to shcl's backlog as 2026102911041671, for v4.
+	- Superseded by ID: shcl 2026102911041671
 
 ## Template
 
