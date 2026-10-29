@@ -25,19 +25,6 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 
 ## Issues
 
-- vmKt6m: Python 3.11 for the macOS tests
-	- ID: 2026102818351459
-	- Type: Task
-	- Status: Waiting for answers
-	- Opened: 20261028-183514
-	- Opened by: JC
-	- Priority: High
-	- Requirements:
-		- Python 3.11 or newer for `mactest` on vmKt6m, so the macOS tests run there when b26 is away.
-	- Note: vmKt6m has only the command line tools' Python 3.9.6, and the cases' runner needs 3.11. Its Homebrew builds every formula from source.
-	- Waits on the question in questions.md about how to put Python there.
-	- No longer a child of 2026101512024174, since b26 runs the macOS tests and vmKt6m is only its stand-by. It's box upkeep and stands alone.
-
 - shcl 4 adapters
 	- ID: 2026101512024163
 	- Type: Feature
@@ -570,6 +557,26 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Opened by: JC
 	- Related IDs: 2026101513330009
 	- Note: `Merged` finds them with a second parse in each language. shcl's parser sees each fold, so a call there would be cheaper and could take that code's place.
+
+- vmKt6m: Python 3.11 for the macOS tests
+	- ID: 2026102818351459
+	- Type: Task
+	- Status: Done
+	- Opened: 20261028-183514
+	- Opened by: JC
+	- Priority: High
+	- Requirements:
+		- Python 3.11 or newer for `mactest` on vmKt6m, so the macOS tests run there when b26 is away.
+	- Note: vmKt6m has only the command line tools' Python 3.9.6, and the cases' runner needs 3.11. Its Homebrew builds every formula from source.
+	- No longer a child of 2026101512024174, since b26 runs the macOS tests and vmKt6m is only its stand-by. It's box upkeep and stands alone.
+	- Decisions:
+		- `brew install python@3.14` as collierjr, per JC 20261029.
+	- Progress log:
+		- 20261029: Python 3.14.9 is at `/usr/local/bin/python3.14`, built from source in 6 minutes. ssl, sqlite3, lzma, ctypes and decimal all import. There's no bare `python3` link, and none is needed, since `remote-macos.bash` looks for `python3.14` first.
+		- Verified: `fFindTools` from `remote-macos.bash`, run as `mactest` under `/bin/bash`, finds Go, cargo and Python 3.14, where before it gave "no Python 3.11 or newer".
+	- Test case: dejgh, the next time it runs on vmKt6m.
+	- Closed: 20261029-073500
+	- Acceptance signoff: Self-closed: box upkeep, checked with the runner's own probe.
 
 - Rename the project shclwrap
 	- ID: 2026101513524769
