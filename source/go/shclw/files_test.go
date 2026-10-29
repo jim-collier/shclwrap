@@ -166,15 +166,32 @@ func TestReplaceRead(t *testing.T) {
 }
 
 // An edit made while UpgradeFile runs must not get past the 2.0 check. The
-// file flips between a clean 2.x text adn one 2.0 has errors on, so a backup
+// file flips between a clean 2.x text and one 2.0 has errors on, so a backup
 // holding the bad text means that text was converted unchecked.
+//
+// The flipping starts at a delay swept over what one upgrade takes on this
+// box. A flipper started with the upgrade lands its first flip in step with
+// it on a slow box, so every round there is refused (2026102818352324). An
+// edit after the last check is lost, as design.md says, so the late starts
+// let rounds finish.
 // Test ID: de00w
 func TestUpgradeFileEditedMeanwhile(t *testing.T) {
 	const bad = "x: [ab]\ny: 1\n"
 	root := t.TempDir()
-	deadline := time.Now().Add(2 * time.Second)
-	upgraded := 0
-	for i := 0; i < 200 && time.Now().Before(deadline); i++ {
+	// The first upgrade is slower, so the second one is timed.
+	var took time.Duration
+	for _, name := range []string{"cold", "timed"} {
+		path := filepath.Join(root, name+".shcl")
+		writeFile(t, path, clean2x, 0o644)
+		at := time.Now()
+		if _, err := shclw3.UpgradeFile(path, 2); err != nil {
+			t.Fatalf("upgrade with no edit: %v", err)
+		}
+		took = time.Since(at)
+	}
+	deadline := time.Now().Add(10 * time.Second)
+	upgraded, raced := 0, 0
+	for i := 0; i < 120 && time.Now().Before(deadline); i++ {
 		dir := filepath.Join(root, strconv.Itoa(i))
 		if err := os.Mkdir(dir, 0o755); err != nil {
 			t.Fatal(err)
@@ -182,8 +199,14 @@ func TestUpgradeFileEditedMeanwhile(t *testing.T) {
 		path := filepath.Join(dir, "c.shcl")
 		writeFile(t, path, clean2x, 0o644)
 		stop, done := make(chan struct{}), make(chan struct{})
+		wait := time.NewTimer(took * time.Duration(i%12) / 10)
 		go func() {
 			defer close(done)
+			select {
+			case <-stop:
+				return
+			case <-wait.C:
+			}
 			tmp := filepath.Join(dir, "flip")
 			for n := 0; ; n++ {
 				select {
@@ -203,6 +226,12 @@ func TestUpgradeFileEditedMeanwhile(t *testing.T) {
 		u, err := shclw3.UpgradeFile(path, 2)
 		close(stop)
 		<-done
+		wait.Stop()
+		// Any other failure ends the round too, as it always has. Only these
+		// two say the edit was seen.
+		if k := shclw.KindOf(err); k == shclw.ErrChanged || k == shclw.ErrRefused {
+			raced++
+		}
 		if err != nil || u.Backup == "" {
 			continue
 		}
@@ -212,7 +241,10 @@ func TestUpgradeFileEditedMeanwhile(t *testing.T) {
 		}
 	}
 	if upgraded == 0 {
-		t.Error("no round got as far as an upgrade")
+		t.Errorf("no round got as far as an upgrade, one takes %v", took)
+	}
+	if raced == 0 {
+		t.Errorf("no round was edited meanwhile, one upgrade takes %v", took)
 	}
 }
 

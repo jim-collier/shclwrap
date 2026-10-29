@@ -23,6 +23,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #include <dirent.h>
 #include <sys/stat.h>
@@ -1343,9 +1344,24 @@ static void test_open_fails_both(void) {
 	drop_dir(dir);
 }
 
+// Microseconds on a clock that only goes forward.
+static int64_t now_us(void) {
+#ifdef _WIN32
+	LARGE_INTEGER t, hz;
+	(void)QueryPerformanceCounter(&t);
+	(void)QueryPerformanceFrequency(&hz);
+	return t.QuadPart / hz.QuadPart * 1000000 + t.QuadPart % hz.QuadPart * 1000000 / hz.QuadPart;
+#else
+	struct timespec t;
+	(void)clock_gettime(CLOCK_MONOTONIC, &t);
+	return (int64_t)t.tv_sec * 1000000 + t.tv_nsec / 1000;
+#endif
+}
+
 #ifdef _WIN32
 typedef struct {
 	const char *path, *flip, *bad;
+	int64_t flip_at;
 	volatile LONG stop;
 } flipper;
 
@@ -1353,6 +1369,12 @@ typedef struct {
 // failed flip is skipped rather than the end of the loop.
 static unsigned __stdcall flip_loop(void *arg) {
 	flipper *f = (flipper *)arg;
+	while (now_us() < f->flip_at) {
+		if (InterlockedCompareExchange(&f->stop, 0, 0)) {
+			return 0;
+		}
+		(void)SwitchToThread();
+	}
 	for (unsigned n = 0; !InterlockedCompareExchange(&f->stop, 0, 0); n++) {
 		const char *t = n % 2 ? clean2x : f->bad;
 		FILE *out = fopen(f->flip, "wb");
@@ -1371,12 +1393,31 @@ static unsigned __stdcall flip_loop(void *arg) {
 // An edit made while the upgrade runs must not get past the 2.0 check. The
 // file flips between a clean 2.x text and one 2.0 has errors on, so a backup
 // holding the bad text means that text was converted unchecked.
+//
+// The flipping starts at a delay swept over what one upgrade takes on this
+// box. A flipper started with the upgrade lands its first flip in step with
+// it on a slow box, so every round there is refused (2026102818352324). An
+// edit after the last check is lost, as design.md says, so the late starts
+// let rounds finish.
 static void test_upgrade_raced(void) {
 	static const char bad[] = "x: [ab]\ny: 1\n";
 	char root[4200];
 	make_dir(root, sizeof root, "raced");
-	int upgraded = 0;
-	for (int i = 0; i < 100; i++) {
+	// The first upgrade is slower, so the second one is timed.
+	int64_t took = 0;
+	static const char *const timed[] = {"cold.shcl", "timed.shcl"};
+	for (size_t i = 0; i < 2; i++) {
+		char path[8300];
+		path_in(path, sizeof path, root, timed[i]);
+		write_mode(path, clean2x, 0644);
+		shclw_upgraded *u = NULL;
+		int64_t at = now_us();
+		CHECK(shclw_upgrade_file(path, 2, &u, NULL) == SHCLW_OK);
+		took = now_us() - at;
+		free(u);
+	}
+	int upgraded = 0, raced = 0;
+	for (int i = 0; i < 120; i++) {
 		char dir[8192], path[8300], flip[8300];
 		char sub[16];
 		(void)snprintf(sub, sizeof sub, "%d", i);
@@ -1385,8 +1426,9 @@ static void test_upgrade_raced(void) {
 		path_in(path, sizeof path, dir, "c.shcl");
 		path_in(flip, sizeof flip, dir, "flip");
 		write_mode(path, clean2x, 0644);
+		int64_t flip_at = now_us() + took * (i % 12) / 10;
 #ifdef _WIN32
-		flipper f = {path, flip, bad, 0};
+		flipper f = {path, flip, bad, flip_at, 0};
 		HANDLE h = (HANDLE)_beginthreadex(NULL, 0, flip_loop, &f, 0, NULL);
 		CHECK(h != NULL);
 		shclw_upgraded *u = NULL;
@@ -1399,6 +1441,13 @@ static void test_upgrade_raced(void) {
 #else
 		pid_t pid = fork();
 		if (pid == 0) {
+			int64_t wait = flip_at - now_us();
+			if (wait > 0) {
+				struct timespec d;
+				d.tv_sec = (time_t)(wait / 1000000);
+				d.tv_nsec = (long)(wait % 1000000 * 1000);
+				(void)nanosleep(&d, NULL);
+			}
 			for (unsigned n = 0;; n++) {
 				const char *t = n % 2 ? clean2x : bad;
 				FILE *f = fopen(flip, "wb");
@@ -1415,6 +1464,11 @@ static void test_upgrade_raced(void) {
 			(void)waitpid(pid, NULL, 0);
 		}
 #endif
+		// Any other failure ends the round too, as it always has. Only these
+		// two say the edit was seen.
+		if (k == SHCLW_ERR_CHANGED || k == SHCLW_ERR_REFUSED) {
+			raced++;
+		}
 		if (k == SHCLW_OK && u && u->backup.n) {
 			upgraded++;
 			if (!file_is(u->backup.p, clean2x)) {
@@ -1425,7 +1479,12 @@ static void test_upgrade_raced(void) {
 		free(u);
 		drop_dir(dir);
 	}
+	if (!upgraded || !raced) {
+		(void)fprintf(stderr, "%d rounds upgraded, %d edited meanwhile, one upgrade takes %lld us\n", upgraded, raced,
+		              (long long)took);
+	}
 	CHECK(upgraded > 0);
+	CHECK(raced > 0);
 	drop_dir(root);
 }
 

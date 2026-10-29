@@ -211,14 +211,31 @@ fn replace_read_write_fails() {
 /// An edit made while `upgrade_file` runs must not get past the 2.0 check.
 /// The file flips between a clean 2.x text and one 2.0 has errors on, so a
 /// backup holding the bad text means that text was converted unchecked.
+///
+/// The flipping starts at a delay swept over what one upgrade takes on this
+/// box. A flipper started with the upgrade lands its first flip in step with
+/// it on a slow box, so every round there is refused (2026102818352324). An
+/// edit after the last check is lost, as design.md says, so the late starts
+/// let rounds finish.
 // Test ID: de017
 #[test]
 fn upgrade_file_edited_meanwhile() {
 	const BAD: &str = "x: [ab]\ny: 1\n";
 	let scratch = Scratch::new("upgrade-race");
-	let deadline = Instant::now() + Duration::from_secs(2);
-	let mut upgraded = 0;
-	for round in 0..200 {
+	// The first upgrade is slower, so the second one is timed.
+	let mut took = Duration::ZERO;
+	for name in ["cold", "timed"] {
+		let dir = scratch.path().join(name);
+		fs::create_dir(&dir).unwrap();
+		let path = dir.join("c.shcl");
+		fs::write(&path, CLEAN_2X).unwrap();
+		let at = Instant::now();
+		shclw::v3::upgrade_file(&s(&path), 2).expect("upgrade with no edit");
+		took = at.elapsed();
+	}
+	let deadline = Instant::now() + Duration::from_secs(10);
+	let (mut upgraded, mut raced) = (0, 0);
+	for round in 0..120u32 {
 		if Instant::now() > deadline {
 			break;
 		}
@@ -226,9 +243,16 @@ fn upgrade_file_edited_meanwhile() {
 		fs::create_dir(&dir).unwrap();
 		let path = dir.join("c.shcl");
 		fs::write(&path, CLEAN_2X).unwrap();
+		let flip_at = Instant::now() + took * (round % 12) / 10;
 		let stop = AtomicBool::new(false);
 		let got = std::thread::scope(|sc| {
-			sc.spawn(|| {
+			let flipper = sc.spawn(|| {
+				while Instant::now() < flip_at {
+					if stop.load(Ordering::Relaxed) {
+						return;
+					}
+					std::thread::park_timeout(flip_at.saturating_duration_since(Instant::now()));
+				}
 				let tmp = dir.join("flip");
 				for n in 0.. {
 					if stop.load(Ordering::Relaxed) {
@@ -242,9 +266,18 @@ fn upgrade_file_edited_meanwhile() {
 			});
 			let got = shclw::v3::upgrade_file(&s(&path), 2);
 			stop.store(true, Ordering::Relaxed);
+			flipper.thread().unpark();
 			got
 		});
-		let Ok(u) = got else { continue };
+		// Any other failure ends the round too, as it always has. Only these
+		// two say the edit was seen.
+		let u = match got {
+			Ok(u) => u,
+			Err(e) => {
+				raced += usize::from(matches!(e.kind, ErrKind::Changed | ErrKind::Refused));
+				continue;
+			}
+		};
 		if u.backup.is_empty() {
 			continue;
 		}
@@ -255,7 +288,8 @@ fn upgrade_file_edited_meanwhile() {
 			"round {round}: that text was converted"
 		);
 	}
-	assert!(upgraded > 0, "no round got as far as an upgrade");
+	assert!(upgraded > 0, "no round got as far as an upgrade, one takes {took:?}");
+	assert!(raced > 0, "no round was edited meanwhile, one upgrade takes {took:?}");
 }
 
 // Test ID: de018
