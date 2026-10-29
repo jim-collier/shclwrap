@@ -598,21 +598,6 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- 2026-10-24, CICD reset: per `macOS builds on GitHub` and `Merge gate` in the shared CICD rules. One small workflow on push and PR against main, plus `workflow_dispatch`, runs `--merge-gate` as far as the runner can, with the arm64 macOS job beside it. cicd.bash flags picked by how long the job takes start it. It's free while the repo is public.
 		- 2026-10-25: Split into 2026102519333240, the workflow, and 2026102519333340, cicd.bash starting it.
 
-- Rust upgrade_file_edited_meanwhile can fail on a slow box
-	- ID: 2026102818352324
-	- Type: Bug
-	- Status: Queued
-	- Opened: 20261028-183523
-	- Opened by: JC
-	- Related IDs: 2026102817403563
-	- Severity: Low
-	- Steps to reproduce:
-		- Run Rust's tests on b26, such as with `cicd/remote-test.bash WORK macos`.
-	- Incorrect behavior: `FAIL de017 Rust upgrade_file_edited_meanwhile`, "no round got as far as an upgrade". Once in 3 runs.
-	- Expected behavior: it passes on every box.
-	- Possible cause: the test stops at a 2 second wall clock deadline, and a round counts only when the upgrade wins its race with the thread that flips the file. On a slower box every round in those 2 seconds can lose it. Go's `TestUpgradeFileEditedMeanwhile` may have the same shape.
-	- Note: found by 2026102817403563's first runs on b26.
-
 - Say which layer a read came from
 	- ID: 2026102114101028
 	- Type: Enhancement
@@ -772,6 +757,40 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Opened by: JC
 	- Related IDs: 2026101513330009
 	- Note: `Merged` finds them with a second parse in each language. shcl's parser sees each fold, so a call there would be cheaper and could take that code's place.
+
+- Rust upgrade_file_edited_meanwhile can fail on a slow box
+	- ID: 2026102818352324
+	- Type: Bug
+	- Status: Done
+	- Opened: 20261028-183523
+	- Opened by: JC
+	- Related IDs: 2026102817403563
+	- Severity: Low
+	- Steps to reproduce:
+		- Run Rust's tests on b26, such as with `cicd/remote-test.bash WORK macos`.
+	- Incorrect behavior: `FAIL de017 Rust upgrade_file_edited_meanwhile`, "no round got as far as an upgrade". Once in 3 runs.
+	- Expected behavior: it passes on every box.
+	- Reproduced: 20261028 on b26, through `cicd/remote-test.bash WORK macos`. Of 200 rounds, 199 were `ErrChanged` and 1 upgraded. The 200 rounds took half a second, so the round cap ended the test, not the 2 second deadline.
+	- Possible cause: the test stops at a 2 second wall clock deadline, and a round counts only when the upgrade wins its race with the thread that flips the file. On a slower box every round in those 2 seconds can lose it. Go's `TestUpgradeFileEditedMeanwhile` may have the same shape.
+	- Actual cause:
+		- The test, not the code. On b26 the thread that flips the file starts after the upgrade's read, and its first flip lands between the read and the first check, round after round. Each of those is refused with `ErrChanged`, as it should be. No round converted the bad text.
+		- `UpgradeFile` can't lose an edit on macOS that it can't lose elsewhere. The check compares the bytes, so the file time's precision doesn't matter. An edit between the last check and the rename is still lost on every OS, as design.md's Format and upgrade says.
+	- Note: found by 2026102817403563's first runs on b26.
+	- Progress log:
+		- 2026-10-28: Watched to fail: with `UpgradeFile` made to read the file a second time for the backup and the write, each of the 3 tests failed in 2 runs out of 2, Rust at rounds 0 and 13, Go at 12 and 50, and C at 24 and 96.
+		- Verified: on b26 through `cicd/remote-test.bash WORK macos`, 5 runs in a row of the committed tree, each with a fresh WORK folder, each with 357 PASS and 6 SKIP lines and no FAIL, de017, de00w and de07p included. Before the change, de017 failed there in the round's full run and in a rerun. On b29w, 355 PASS and 7 SKIP lines, no FAIL. `cicd/cicd.bash --backlog-run-quick go rust c` passed, lint CLEAN, and so did `bash cicd/c-checks.bash lint 3 WORK`, decbj included, and C's sanitized and C++ API tests.
+	- Decisions:
+		- The test changed and the code didn't, since every round on b26 that didn't upgrade was a right refusal.
+		- The flipping starts at a delay swept from 0 to 1.1 times what one upgrade takes, timed on the box as the test starts. Early starts race the upgrade, and late ones let it finish, on a box of any speed. 120 rounds, so each delay comes up 10 times, with a 10 second deadline kept as a backstop.
+		- A second assert, that some round was refused for the edit, so a sweep that never meets the upgrade fails rather than passing on nothing. Any other error still just ends the round, as before.
+		- Go's de00w and C's de07p had the same shape and got the same change, though neither failed on b26.
+	- Actual fix: de017, de00w and de07p start the flipping at a swept delay, and check that some round raced the upgrade as well as that some round finished. No library code changed.
+	- Swept: the edit-while-upgrading tests in all 4: Rust de017, Go de00w and C de07p. Python has none. Go's `TestOpenUpgradeEditedMeanwhile` has no thread and no timing. No other test flips a file.
+	- Branch: r1028
+	- Commit: 6b750dc
+	- Test case: de017 (Rust `upgrade_file_edited_meanwhile`), de00w (Go `TestUpgradeFileEditedMeanwhile`) and de07p (C `test_upgrade_raced`).
+	- Acceptance signoff: Self-closed: a test fix with no change to what the library does, which passes 5 times in a row on b26 and still fails on the bug it was written for.
+	- Closed: 2026-10-28 19:32
 
 - Rename the project shclwrap
 	- ID: 2026101513524769
