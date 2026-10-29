@@ -274,6 +274,7 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- The 1.2 write that the note names was dropped with the 3.0 floor, along with the 2.0 adapter, so there's no wrapper write of its own left to check. The atomic write's failure path on Windows is 2026102817403582.
 	- Swept: the Not on Windows line in all 4 languages' case runners: Go's `TestCases`, Rust's `tests/cases.rs`, and `cicd/c_cases.py` for C and Python. Go's `BenchmarkCases` and the fuzz never run on Windows. The pre-push hook and ci.yml pass `--no-remote`, so neither reaches a box.
 	- Test case: dejex, the Other hosts step's line for the box, with each test's own line from b29w; dejey, `cicd/remote-skip-test.bash`, for a box that's away or can't be held.
+	- Commit: f453c15
 
 - The upgrade's read-back against 2.0 skips a repeated key
 	- ID: 2026102816332481
