@@ -1,15 +1,18 @@
 #!/usr/bin/env bash
 #  shellcheck disable=1091  ## 'Not following.' The pins files are found at run time.
 #  shellcheck disable=2016  ## 'Expressions don't expand in single quotes.' That's PowerShell for the box.
+#  shellcheck disable=2029  ## 'This expands on the client side.' The work folder is this side's, checked by shape.
 
 ##	- Purpose: Run the Go, Rust, Python and C tests and the shared cases on the
-##	  other test boxes, natively. Ships the tracked tree and the pinned shcl
+##	  other test boxes, natively: Windows on b29w, and macOS on b26, or vmKt6m
+##	  when b26 is away. Ships the tracked tree and the pinned shcl
 ##	  caches as one tarball, then holds each box through the shared host lock's
 ##	  wrap for the whole time it's used, which also puts a VM back as found.
 ##	- Syntax: remote-test.bash WORK [target...]
-##	  WORK is the run's scratch folder. Targets: windows. Default: all of them.
-##	- A box that doesn't answer, or can't be held, is a SKIP line, never a
-##	  failure. Only a test that ran and failed fails the run.
+##	  WORK is the run's scratch folder. Targets: windows, macos. Default: all of them.
+##	- A box that doesn't answer, can't be held, or lacks a tool the tests need,
+##	  is a SKIP line, never a failure. Only a test that ran and failed fails the
+##	  run. A target with more than one box takes the first that can run it.
 ##	- The wrap helper is SHCLW_VM_WRAP, else the *_vm-state.bash in the synced
 ##	  util folder. Without one every target is a SKIP.
 ##	- SHCLW_REMOTE_WAIT is how long to wait in line for a box, default 900s.
@@ -32,6 +35,7 @@ meFile="${here}/remote-test.bash"
 ## target | test ID | what | ssh destinations, first that answers
 declare -ra targetTable=(
 	"windows | dejex | Windows tests | collierjr@b29w"
+	"macos   | dejgh | macOS tests   | mactest@b26 mactest@vmKt6m"
 )
 declare -ra sshOpts=(-o BatchMode=yes -o ConnectTimeout=15 -o ServerAliveInterval=30 -o ServerAliveCountMax=4)
 
@@ -59,10 +63,33 @@ fBundle(){
 }
 
 ## Runs inside the wrap, so the box is held and awake. Writes a status file the
-## caller reads, since the wrap's own exit also covers putting a VM back.
+## caller reads, since the wrap's own exit also covers putting a VM back:
+## pass, fail, skip with the reason in <target>.why, or noanswer.
 fOnBox(){
 	local -r runDir="$1" target="$2" dest="$3"
 	local -r statusFile="${runDir}/${target}.status"
+	local work rc=0 s3 s2 p3
+	echo "started" > "${statusFile}"
+	if ! ssh "${sshOpts[@]}" "${dest}" exit 0 < /dev/null &> /dev/null; then echo "noanswer" > "${statusFile}"; return 0; fi
+	case "${target}" in
+		windows) fOnBox_Windows ;;
+		macos)   fOnBox_Mac ;;
+	esac
+	if [[ -s "${runDir}/${target}.why" ]]; then echo "skip" > "${statusFile}"; return 0; fi
+	if ((rc == 0)); then echo "pass" > "${statusFile}"; else echo "fail" > "${statusFile}"; fi
+	return "${rc}"
+}
+## Made once a box answers, and once for every box. Sets s3, s2 and p3 in the caller.
+fOnBox_Bundle(){
+	if [[ ! -s "${runDir}/tree.tgz" ]] && ! fBundle "${runDir}/tree.tgz"; then
+		fWarn "${target}: couldn't pack the tree and the pinned shcl caches"; return 1
+	fi
+	read -r s3 s2 p3 < "${runDir}/pins"
+}
+## Each line from the box keeps its ID and says where it ran. The ** lines are ssh's own notice.
+fOnBox_Lines(){ sed -u -E "s/\r$//; s/^(PASS|FAIL|SKIP) (.*)$/\1 \2 on ${dest#*@}/"; }
+
+fOnBox_Windows(){
 	local -r mkWork='$r = if ($env:HOST_TEMP) { $env:HOST_TEMP } else { $env:TEMP }
 		$r = Join-Path $r shclwrap; $null = New-Item -ItemType Directory -Force $r
 		$s = Get-Date -Format yyyyMMdd-HHmmss
@@ -70,37 +97,47 @@ fOnBox(){
 			$p = "{0}\{1}_{2:d3}" -f $r, $s, $n
 			try { $null = New-Item -ItemType Directory $p -ErrorAction Stop; $p; break } catch { }
 		}'
-	local work rc=0 s3 s2 p3
-	echo "started" > "${statusFile}"
-	if ! ssh "${sshOpts[@]}" "${dest}" exit 0 < /dev/null &> /dev/null; then echo "noanswer" > "${statusFile}"; return 0; fi
-	## Made once a box answers, and once for every box.
-	if [[ ! -s "${runDir}/tree.tgz" ]] && ! fBundle "${runDir}/tree.tgz"; then
-		echo "fail" > "${statusFile}"; fWarn "${target}: couldn't pack the tree and the pinned shcl caches"; return 1
-	fi
+	fOnBox_Bundle || { rc=1; return; }
 	## ssh there opens cmd, so the setup goes as encoded PowerShell.
 	work="$(ssh "${sshOpts[@]}" "${dest}" pwsh -NoProfile -EncodedCommand "$(iconv -f utf-8 -t utf-16le <<< "${mkWork}" | base64 -w0)" < /dev/null 2> /dev/null | tr -d '\r')" \
-		|| { echo "fail" > "${statusFile}"; fWarn "${target}: couldn't make a work folder on ${dest}"; return 1; }
+		|| { rc=1; fWarn "${target}: couldn't make a work folder on ${dest}"; return; }
 	work="${work##*$'\n'}"
 	[[ "${work}" =~ ^[A-Za-z]:\\[A-Za-z0-9._~\\-]+\\shclwrap\\[0-9]{8}-[0-9]{6}_[0-9]{3}$ ]] \
-		|| { echo "fail" > "${statusFile}"; fWarn "${target}: odd work folder '${work}'"; return 1; }
+		|| { rc=1; fWarn "${target}: odd work folder '${work}'"; return; }
 	echo "${target}: ${dest}:${work}"
-	read -r s3 s2 p3 < "${runDir}/pins"
-	scp -q "${sshOpts[@]}" "${runDir}/tree.tgz" "${here}/remote-windows.ps1" "${dest}:${work//\\//}/" 2> /dev/null || rc=1
-	if ((rc == 0)); then
-		## Each line from the box keeps its ID and says where it ran. The ** lines are ssh's own notice.
-		timeout 2400 ssh "${sshOpts[@]}" "${dest}" \
-			pwsh -NoProfile -ExecutionPolicy Bypass -File "${work}\\remote-windows.ps1" -Work "${work}" -Shcl3 "${s3}" -Shcl2 "${s2}" -Py3 "${p3}" -KeepTemp "${SHCLW_KEEP_TEMP:-0}" \
-			< /dev/null 2> >(grep -v '^\*\*' >&2) | sed -u -E "s/\r$//; s/^(PASS|FAIL|SKIP) (.*)$/\1 \2 on ${dest#*@}/" || rc=$?
-	fi
-	if ((rc == 0)); then echo "pass" > "${statusFile}"; else echo "fail" > "${statusFile}"; fi
-	return "${rc}"
+	scp -q "${sshOpts[@]}" "${runDir}/tree.tgz" "${here}/remote-windows.ps1" "${dest}:${work//\\//}/" 2> /dev/null || { rc=1; return; }
+	timeout 2400 ssh "${sshOpts[@]}" "${dest}" \
+		pwsh -NoProfile -ExecutionPolicy Bypass -File "${work}\\remote-windows.ps1" -Work "${work}" -Shcl3 "${s3}" -Shcl2 "${s2}" -Py3 "${p3}" -KeepTemp "${SHCLW_KEEP_TEMP:-0}" \
+		< /dev/null 2> >(grep -v '^\*\*' >&2) | fOnBox_Lines || rc=$?
+}
+
+## The box script checks its tools and makes the work folder before the tree
+## is sent, so a box without them costs no pack and no copy.
+fOnBox_Mac(){
+	local out line why=""
+	out="$(ssh "${sshOpts[@]}" "${dest}" /bin/bash -s -- --prep < "${here}/remote-macos.bash" 2> /dev/null)" || rc=$?
+	work=""
+	while IFS= read -r line; do
+		case "${line}" in CANT\ *) why="${line#CANT }" ;; WORK\ *) work="${line#WORK }" ;; esac
+	done <<< "${out}"
+	if [[ -n "${why}" ]]; then printf '%s\n' "${why}" > "${runDir}/${target}.why"; rc=0; return; fi
+	((rc == 0)) || { fWarn "${target}: couldn't make a work folder on ${dest} (exit ${rc})"; return; }
+	[[ "${work}" =~ ^/[A-Za-z0-9._/-]+/shclwrap/[0-9]{8}-[0-9]{6}_[0-9]{3}$ ]] \
+		|| { rc=1; fWarn "${target}: odd work folder '${work}'"; return; }
+	echo "${target}: ${dest}:${work}"
+	fOnBox_Bundle || { rc=1; return; }
+	ssh "${sshOpts[@]}" "${dest}" "mkdir '${work}/repo' && tar -xzf - -C '${work}/repo'" < "${runDir}/tree.tgz" 2> >(grep -v '^\*\*' >&2) \
+		|| { rc=1; fWarn "${target}: couldn't unpack the tree on ${dest}"; return; }
+	timeout 2400 ssh "${sshOpts[@]}" "${dest}" \
+		"/bin/bash '${work}/repo/cicd/remote-macos.bash' '${work}' '${s3}' '${s2}' '${p3}' '${SHCLW_KEEP_TEMP:-0}'" \
+		< /dev/null 2> >(grep -v '^\*\*' >&2) | fOnBox_Lines || rc=$?
 }
 
 fMain(){
 	if [[ "${1:-}" == --on-box ]]; then shift; fOnBox "$@"; return; fi
 	local -r work="${1:?usage: remote-test.bash WORK [target...]}"; shift
 	local -a want=("$@") rows=()
-	local row target tid what dests dest host status vmWrap="${SHCLW_VM_WRAP:-}" why=""
+	local row target tid what dests dest host status vmWrap="${SHCLW_VM_WRAP:-}" why="" away notHere
 	local -i failed=0 wrapRc
 	for row in "${targetTable[@]}"; do
 		fParseRow "${row}"
@@ -123,23 +160,28 @@ fMain(){
 	mkdir -p "${runDir}"
 	for row in "${rows[@]}"; do
 		fParseRow "${row}"
-		status="noanswer"
+		status="noanswer"; away=""; notHere=""
 		for dest in ${dests}; do
 			host="${dest#*@}"
-			rm -f -- "${runDir}/${target}.status"
+			rm -f -- "${runDir}/${target}.status" "${runDir}/${target}.why"
 			wrapRc=0
 			"${vmWrap}" wrap "${host}" --wait "${SHCLW_REMOTE_WAIT:-900}" -- bash "${meFile}" --on-box "${runDir}" "${target}" "${dest}" || wrapRc=$?
 			status="$(cat "${runDir}/${target}.status" 2> /dev/null || echo unheld)"
 			case "${status}" in
 				pass) echo "PASS ${tid} ${what} on ${host}" ;;
 				fail) echo "FAIL ${tid} ${what} on ${host}"; failed+=1 ;;
-				*)    fWarn "${target}: couldn't hold or reach ${host} (${status}, exit ${wrapRc})"; status="noanswer"; continue ;;
+				## The box answered, but lacks a tool the tests need.
+				skip) notHere+="; ${host}: $(cat "${runDir}/${target}.why")"; continue ;;
+				*)    fWarn "${target}: couldn't hold or reach ${host} (${status}, exit ${wrapRc})"; away+=" ${host}"; continue ;;
 			esac
 			## The status is the tests' result, so a non-zero wrap after a pass is the put-back.
 			if [[ "${status}" == pass ]] && ((wrapRc)); then fWarn "${target}: ${host} may not be back as it was found"; fi
 			break
 		done
-		[[ "${status}" != noanswer ]] || echo "SKIP ${tid} ${what}: no answer from ${dests//[^ ]*@/}"
+		if [[ "${status}" != pass && "${status}" != fail ]]; then
+			why="${away:+; no answer from${away}}${notHere}"
+			echo "SKIP ${tid} ${what}: ${why#; }"
+		fi
 	done
 	((failed == 0))
 }
@@ -149,3 +191,4 @@ fMain "$@"
 
 ##	History:
 ##		- 2026-10-28 JC: Created. Windows on b29w, through the host lock's wrap. Modeled on gitniblet-floss's remote-test.bash.
+##		- 2026-10-28 JC: macOS on b26 or vmKt6m, through remote-macos.bash. A box without a tool the tests need is a SKIP.

@@ -20,7 +20,8 @@
 ##	     cicd/artifacts/profiling/, with flame-report.py's summary; never fails a run
 ##	     on what it finds)
 ##	   - other hosts (the Go, Rust, Python and C tests and the shared cases on
-##	     Windows, on b29w, through cicd/remote-test.bash; a box that's away is a SKIP)
+##	     Windows, on b29w, and macOS, on b26 or vmKt6m, through
+##	     cicd/remote-test.bash; a box that's away is a SKIP)
 ##	   - GitHub ci: result (waits for that run; only a finished run that failed
 ##	     fails it, and anything else is a SKIP)
 ##	- Syntax:
@@ -349,7 +350,9 @@ fListStep(){
 		Fuzz)
 			if ((fuzzSecs > 0)); then "${py[@]}" "${here}/fuzz.py" --list; fi
 			if ((goFuzzSecs > 0)); then fTest ddzw3 "Go's fuzzer finds no panic in Run" :; fi ;;
-		"Other hosts") fTest dejex "Windows tests on b29w" : ;;
+		"Other hosts")
+			fTest dejex "Windows tests on b29w" :
+			fTest dejgh "macOS tests on b26, or vmKt6m when b26 is away" : ;;
 		"GitHub ci: start")  fTest defmk "ci workflow started on GitHub" : ;;
 		"GitHub ci: result") fTest defmm "ci workflow passed on GitHub" : ;;
 	esac
@@ -380,7 +383,7 @@ fPreflight(){
 	fEcho_Clean "Fuzz .........: $( ((doFuzz)) && echo "${fuzzSecs}s Rust, C, and Python against Go, ${goFuzzSecs}s Go fuzzer" || echo '(skipped)')"
 	fEcho_Clean "GitHub ci ....: $( fStep_On "GitHub ci: start" && echo "${hostedWorkflow} on the pushed branch at HEAD, waited for at the end" || echo '(skipped)')"
 	fEcho_Clean "Profile ......: $( ((doProfile)) && echo "${profileSecs}s of Go's Run over the shared cases -> cicd/artifacts/profiling/" || echo '(skipped)')"
-	fEcho_Clean "Other hosts ..: $( fStep_On "Other hosts" && echo 'Windows on b29w, held through the host lock' || echo '(skipped)')"
+	fEcho_Clean "Other hosts ..: $( fStep_On "Other hosts" && echo 'Windows on b29w and macOS on b26 or vmKt6m, held through the host lock' || echo '(skipped)')"
 	fEcho_Clean "CPU cap ......: $(fCpuNote)"
 	## ps, since a BSD nice with no command only prints its usage.
 	ni="$(ps -o ni= -p "$$" 2>/dev/null || true)"
@@ -684,3 +687,4 @@ fEcho_Clean
 ##		- 2026-10-25 JC: The run's folder is ${HOST_TEMP}/shclwrap/<stamp>_<NNN>, and TMPDIR, TEMP and TMP point there. Stale run folders go. Every recursive removal goes through safe-rm.bash.
 ##		- 2026-10-26 JC: A full run starts the ci workflow on GitHub first and waits for it last. --no-remote skips it.
 ##		- 2026-10-28 JC: An Other hosts step runs the tests on Windows, on b29w, held through the host lock. --no-remote and the quick runs skip it.
+##		- 2026-10-28 JC: The Other hosts step runs them on macOS too, on b26 or vmKt6m.

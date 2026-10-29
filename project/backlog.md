@@ -25,10 +25,24 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 
 ## Issues
 
+- vmKt6m: Python 3.11 for the macOS tests
+	- ID: 2026102818351459
+	- Type: Task
+	- Status: Waiting for answers
+	- Opened: 20261028-183514
+	- Opened by: JC
+	- Parent ID: 2026102817403563
+	- Priority: High
+	- Requirements:
+		- Python 3.11 or newer for `mactest` on vmKt6m, so the macOS tests run there when b26 is away.
+	- Note: vmKt6m has only the command line tools' Python 3.9.6, and the cases' runner needs 3.11. Its Homebrew builds every formula from source.
+	- Waits on the question in questions.md about how to put Python there.
+
 - Run the tests on macOS
 	- ID: 2026102817403563
 	- Type: Task
-	- Status: Queued
+	- Status: Waiting on automated testing
+	- Needs local test suite run?: Yes, `--backlog-run-full`, for the Other hosts step (dejex and dejgh) inside a whole run, and dejey in its tests.
 	- Opened: 20261028-174035
 	- Opened by: JC
 	- Parent ID: 2026101512024174
@@ -38,6 +52,24 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- The shared cases and each language's own tests, natively on macOS in the Other hosts step: on b26, or on vmKt6m when b26 is away.
 		- A new row in the step's box table, held through the host lock's wrap like Windows. vmKt6m is put back as it was found.
 	- Note: split from 2026101512024174, which did Windows first. b26 has bash 3.2 and no GNU tools, so the box side is plain sh or bash 3.2.
+	- Children: vmKt6m's Python is 2026102818351459.
+	- Progress log:
+		- 2026-10-28: The Other hosts step runs the Go, Rust, Python and C tests and the shared cases on macOS too, on b26, or on vmKt6m when b26 is away (dejgh). The box side, `cicd/remote-macos.bash`, is plain bash 3.2. It checks its tools and makes its work folder before the tree is sent, and removes the folder through the tree's own `safe-rm.bash`. design.md, Other hosts, says how.
+		- A Mac that answers but lacks a tool is a `SKIP` with the reason, and the next box is tried. vmKt6m has only Python 3.9, so it's a `SKIP` there for now. That part is in child 2026102818351459.
+		- `tests/api_test.c` didn't build on macOS, since plain POSIX 2008 hides `mkdtemp` there. It asks for `_DARWIN_C_SOURCE` on Apple only.
+		- Verified: on b26 through `cicd/remote-test.bash WORK macos`, 357 PASS lines and 6 SKIP lines (the 4 Windows-only held-open tests and C's 2 memory checks), with no FAIL, in about 80 seconds. Before the C fix, the same run gave `FAIL dejgh C builds on macOS`. The box's run folders were gone after each run. On vmKt6m, held through the wrap, the step said SKIP for its Python, packed nothing, and put the VM back to paused. b29w still passes after the change, 355 PASS and 7 SKIP lines, no FAIL. dejey passes, and fails on the old `remote-test.bash`. `--backlog-run-quick c cicd` passed, lint CLEAN.
+		- Found Bug 2026102818352324: Rust's de017 failed once in 3 runs on b26.
+	- Decisions:
+		- b26 first and vmKt6m second, in one row of the box table, so the first box that can run it does. One Mac per run.
+		- As `mactest`, the test user on both, not the admin.
+		- A missing tool is a `SKIP`, not a `FAIL`, since it's the box's setup and not the code.
+		- The box uses the tools it has: Homebrew's Go, rustup's cargo with the crate's pinned 1.96, and Python 3.14 when it's there, else the newest at 3.11 or later. b26 has Go 1.27.3.
+		- C builds plain with Apple's clang through the Makefile, as the hosted Mac job's `drive-plain` does, so no gcc-15 is needed there. The C++ build and the sanitized one stay with the Linux run.
+		- The box uses the tree's own `cpu-cap.bash` and `safe-rm.bash`, which already handle macOS, not copies. macOS has no ionice, so it's nice 19 only.
+		- The tree goes by ssh straight into tar, so no tarball is left on the box, and a shell that prints at login can't break the copy, as it breaks `scp` for collierjr on b26.
+	- Swept: every `remote-test.bash` caller: cicd.bash's Other hosts step, which runs every target, its `--list` and `--dry-run` lines, and dejey. The Windows path moved into `fOnBox_Windows` as it was, and passed on b29w. The held-open tests' SKIP off Windows already covers macOS in all 4 languages: dejfx, dejfy, dejfz and dejg0 each said SKIP on b26.
+	- Test case: dejgh, the Other hosts step's line for the Mac, with each test's own line from b26; dejey, `cicd/remote-skip-test.bash`, now also for a Mac that's away, can't be held, or lacks a tool.
+	- Branch: r1028
 
 - Upgrade splits a quoted comma on a repeated key
 	- ID: 2026102814295798
@@ -564,6 +596,21 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- 2026-10-24: JC wants a hosted workflow for this.
 		- 2026-10-24, CICD reset: per `macOS builds on GitHub` and `Merge gate` in the shared CICD rules. One small workflow on push and PR against main, plus `workflow_dispatch`, runs `--merge-gate` as far as the runner can, with the arm64 macOS job beside it. cicd.bash flags picked by how long the job takes start it. It's free while the repo is public.
 		- 2026-10-25: Split into 2026102519333240, the workflow, and 2026102519333340, cicd.bash starting it.
+
+- Rust upgrade_file_edited_meanwhile can fail on a slow box
+	- ID: 2026102818352324
+	- Type: Bug
+	- Status: Queued
+	- Opened: 20261028-183523
+	- Opened by: JC
+	- Related IDs: 2026102817403563
+	- Severity: Low
+	- Steps to reproduce:
+		- Run Rust's tests on b26, such as with `cicd/remote-test.bash WORK macos`.
+	- Incorrect behavior: `FAIL de017 Rust upgrade_file_edited_meanwhile`, "no round got as far as an upgrade". Once in 3 runs.
+	- Expected behavior: it passes on every box.
+	- Possible cause: the test stops at a 2 second wall clock deadline, and a round counts only when the upgrade wins its race with the thread that flips the file. On a slower box every round in those 2 seconds can lose it. Go's `TestUpgradeFileEditedMeanwhile` may have the same shape.
+	- Note: found by 2026102817403563's first runs on b26.
 
 - Say which layer a read came from
 	- ID: 2026102114101028

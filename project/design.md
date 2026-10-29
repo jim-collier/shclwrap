@@ -471,11 +471,15 @@ An ops script is one op per line, with fields split by tabs. `\t`, `\n`, `\r`, a
 
 - A full run's Other hosts step runs the Go, Rust, Python and C tests and the shared cases natively on Windows, on b29w, through `cicd/remote-test.bash`. It sends the tracked tree as it is on disk, with the pinned shcl caches, and `cicd/remote-windows.ps1` runs them there. Each line keeps its test's ID, with ` on b29w` added, and the box as a whole is `dejex`.
 
+- macOS goes the same way, on b26, or on vmKt6m when b26 is away, through `cicd/remote-macos.bash`. That's plain bash 3.2, since it's the stock `/bin/bash` there. The box as a whole is `dejgh`, and its lines end ` on b26` or ` on vmKt6m`. C builds plain with Apple's clang, since macOS has no LeakSanitizer, and the C++ and sanitized builds stay with the Linux run.
+
+- A Mac that answers but has no Go, no cargo in `~/.cargo/bin`, no Python 3.11 or newer, or no Xcode command line tools, is a `SKIP` with the reason, and the next box is tried. The box checks that before the tree is sent. vmKt6m has only Python 3.9 so far, so it's a `SKIP` there.
+
 - A save that fails on Windows has a test of its own in each language, which says `SKIP` elsewhere: Go's `TestWriteHeldOpen` (dejfx), Rust's `write_held_open` (dejfy), Python's `WriteHeldOpen` (dejfz) and C's `test_write_held_open` (dejg0). Each holds the file open without delete sharing, as most Windows programs open one, so the replace fails. The save is `io`, and the old file is whole with nothing beside it, for a current file, one `Open` upgraded, and `UpgradeFile`.
 
 - The box is held through the shared host lock's wrap for the whole run, which also puts a VM back as it was found. A box that's away, or that can't be held, is a `SKIP` and never stops a run. `--no-remote`, `--quick` and `--backlog-run-quick` leave the step out, and so do the pre-push hook and the ci workflow, which both pass `--no-remote`.
 
-- Its work folder there is `%TEMP%\shclwrap\<YYYYmmDD-HHMMSS>_<NNN>`, removed at the end unless `--keep-temp`. Each run also removes the project's run folders there older than 2 days, through the same kind of guard as `safe-rm.bash`. Rust builds cold there, since a target folder kept between runs keeps test binaries that still point at the last run's folder.
+- Its work folder there is `%TEMP%\shclwrap\<YYYYmmDD-HHMMSS>_<NNN>`, removed at the end unless `--keep-temp`. Each run also removes the project's run folders there older than 2 days, through the same kind of guard as `safe-rm.bash`. Rust builds cold there, since a target folder kept between runs keeps test binaries that still point at the last run's folder. On a Mac the folder is `${TMPDIR}/shclwrap/<YYYYmmDD-HHMMSS>_<NNN>`, and the box removes it, and the old ones, through the tree's own `safe-rm.bash`.
 
 ### Fuzzing
 
