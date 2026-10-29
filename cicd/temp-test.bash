@@ -118,7 +118,7 @@ done
 ## Image builds clean their own layers, and the guard has the one real removal.
 bad="$(git -C "${root}" grep -nE 'rm[[:space:]]+-[a-zA-Z]*[rR]|shutil[.]rmtree|Remove-Item[^#]*-Recurse' -- cicd source/c/Makefile \
 	':!cicd/*.Dockerfile' ':!cicd/utility/include/safe-rm.bash' ':!cicd/cache' ':!cicd/artifacts' \
-	| grep -vE '^cicd/fuzz[.]py:[0-9]+:[[:space:]]*shutil[.]rmtree[(]path[)]$' || true)"
+	| grep -vE '^cicd/fuzz[.]py:[0-9]+:[[:space:]]*shutil[.]rmtree[(]path[)]$|^cicd/remote-windows[.]ps1:[0-9]+:[[:space:]]*Remove-Item -LiteralPath [$]p -[R]ecurse -Force$' || true)"
 [[ -z "${bad}" ]] || fFail "a recursive removal goes around the guard: ${bad}"
 echo "PASS deean run folders and safe removal"
 

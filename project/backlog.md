@@ -25,6 +25,34 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 
 ## Issues
 
+- Windows: a replace that fails keeps the old file
+	- ID: 2026102817403582
+	- Type: Task
+	- Status: Queued
+	- Opened: 20261028-174035
+	- Opened by: JC
+	- Parent ID: 2026101512024174
+	- Related IDs: 2026101513330015
+	- Priority: High
+	- Requirements:
+		- A test in each of the 4 languages, Windows only: the file is held open so the replace fails, and the old file is still whole after, with no temp file left beside it.
+		- It runs in the Other hosts step, on b29w.
+	- Note: split from 2026101512024174. shcl 2.0 on Windows could lose the old file when a replace failed, and that issue's Windows run has no test that makes a replace fail.
+
+- Run the tests on macOS
+	- ID: 2026102817403563
+	- Type: Task
+	- Status: Queued
+	- Opened: 20261028-174035
+	- Opened by: JC
+	- Parent ID: 2026101512024174
+	- Related IDs: 2026102307090301
+	- Priority: High
+	- Requirements:
+		- The shared cases and each language's own tests, natively on macOS in the Other hosts step: on b26, or on vmKt6m when b26 is away.
+		- A new row in the step's box table, held through the host lock's wrap like Windows. vmKt6m is put back as it was found.
+	- Note: split from 2026101512024174, which did Windows first. b26 has bash 3.2 and no GNU tools, so the box side is plain sh or bash 3.2.
+
 - Upgrade splits a quoted comma on a repeated key
 	- ID: 2026102814295798
 	- Type: Bug
@@ -220,7 +248,8 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 - Run the tests on Windows and macOS
 	- ID: 2026101512024174
 	- Type: Task
-	- Status: Queued
+	- Status: Waiting on automated testing
+	- Needs local test suite run?: Yes, `--backlog-run-full`, for the Other hosts step (dejex) inside a whole run, and dejey in its tests.
 	- Priority: High
 	- Opened: 2026-10-15
 	- Opened by: JC
@@ -230,6 +259,21 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Notes:
 		- shcl 2.0 on Windows could lose the old file when a replace failed. 3.0 fixed it, and Wovenshell still keeps its own restore. The wrapper's own 1.2 write needs the same check.
 		- 2026-10-24, CICD reset: this is the reset's `other hosts and VMs` item, raised to High, per `Other hosts and VMs` in the shared CICD rules. The default run builds and tests on the test boxes: Windows on b29w, with vm925w for timed work, and macOS on b26 or vmKt6m. Each box is held through the shared host lock by `wrap` for the whole time it's used, and a VM is put back the way it was found through the VM state helper. `--no-remote` skips them, a box that isn't there is a `SKIP` that never stops a run, and each box gets a work folder of its own under its temp root. `b29w`, never `b29w-wif`.
+	- Children: macOS is 2026102817403563, and a test that makes a Windows replace fail is 2026102817403582. This item closes with them.
+	- Progress log:
+		- 2026-10-28: A full run's new Other hosts step runs the Go, Rust, Python and C tests and the shared cases natively on b29w, held through the host lock's wrap. The box gets the tracked tree as it is on disk and the pinned shcl caches, in a work folder of its own under its temp root, removed at the end. Each line keeps its test's ID with "on b29w" added. `--no-remote` and both quick runs leave it out. design.md, Testing, says how.
+		- `058-write-mode` failed on Windows in all 4 languages, since Windows ignores the mode by design. A `# Not on Windows:` line in its ops.txt now makes each language's runner say SKIP there with the reason.
+		- Verified: on b29w, 351 PASS lines and 7 SKIP lines (058 in all 4, plus 3 that skip on Windows already), with no FAIL, in about 3 minutes. Before the 058 line, the same run gave 4 FAIL lines, one for 058 in each language. dejey passes, and fails with a box that's away counted as a failure. deean fails on a removal in the box script that skips its guard. The box's run folder is gone after each run, and a planted run folder 5 days old went at the next run's start while a folder of another shape stayed. `--backlog-run-quick` over every area passed, lint CLEAN, and PSScriptAnalyzer is clean on the box script.
+	- Decisions:
+		- b29w only for now, per the shared rules, and vm925w not at all, since nothing here is timed.
+		- The box gets the tree on disk, not a commit, so it tests what the run tests here, uncommitted edits included.
+		- Not on Windows is a whole-case skip with its reason, not a second want file for Windows, since a second want file would need keeping by hand, and the case's writes are covered by others there.
+		- The quick runs leave the step out: waiting in line for a box can take 15 minutes.
+		- Rust builds cold in each run's folder on the box. A target folder kept between runs failed Rust's cases on the next run, since its test binary still pointed at the last run's folder.
+		- The box removes its own folder through a guard of the same kind as safe-rm.bash, and deean allows that one line.
+		- The 1.2 write that the note names was dropped with the 3.0 floor, along with the 2.0 adapter, so there's no wrapper write of its own left to check. The atomic write's failure path on Windows is 2026102817403582.
+	- Swept: the Not on Windows line in all 4 languages' case runners: Go's `TestCases`, Rust's `tests/cases.rs`, and `cicd/c_cases.py` for C and Python. Go's `BenchmarkCases` and the fuzz never run on Windows. The pre-push hook and ci.yml pass `--no-remote`, so neither reaches a box.
+	- Test case: dejex, the Other hosts step's line for the box, with each test's own line from b29w; dejey, `cicd/remote-skip-test.bash`, for a box that's away or can't be held.
 
 - The upgrade's read-back against 2.0 skips a repeated key
 	- ID: 2026102816332481
