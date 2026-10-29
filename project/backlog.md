@@ -751,6 +751,7 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Test case: dejfx Go `TestWriteHeldOpen`, dejfy Rust `write_held_open`, dejfz Python `WriteHeldOpen.test_held` and dejg0 C `test_write_held_open`, each on b29w in the Other hosts step (dejex).
 	- Closed: 2026-10-28 18:20
 	- Acceptance signoff: Self-closed: the test runs in all 4 languages on b29w, passes, and was watched to fail. No binding needed a change.
+	- Commit: 5e92a2d
 
 - Go 1.27 prints a float32 halfway value differently
 	- ID: 2026102519333440
