@@ -1,4 +1,5 @@
 # Test ID: de8hs
+# Not on Windows: Windows ignores the mode, so each mode op prints 0666
 # A mode goes on a file the Write creates, exactly, past the umask.
 write	secret.shcl	mode=0600
 mode	secret.shcl

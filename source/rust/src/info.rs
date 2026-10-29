@@ -193,7 +193,8 @@ pub(crate) fn place_block(text: &str, marked: bool, e: &InfoEdit<'_>) -> Result<
 /// n-th line of `up` with text on it is the n-th of `orig`'s, except where it
 /// writes one as two, as 2.x's `x: ~~~` comes out as `x:` and a fence under
 /// it. Where putting them back would change a value, `up` comes back as it
-/// was.
+/// was. Since `a010fdf8` shcl keeps the lines itself where it can, so this
+/// covers the files it writes the way `fmt` does.
 pub(crate) fn keep_blanks(orig: &str, up: &str, e: &InfoEdit<'_>) -> String {
 	let body = up.strip_prefix('\u{feff}').unwrap_or(up);
 	let bom = &up[..up.len() - body.len()];

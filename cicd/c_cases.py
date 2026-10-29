@@ -17,12 +17,19 @@ import tempfile
 from pathlib import Path
 
 ID_LINE = re.compile(r"# Test ID: ([0-9a-hjkmnp-tv-z]{5})\r?")
+NOT_ON_WINDOWS = re.compile(r"^# Not on Windows: ([^\r\n]+)", re.M)
 
 
 def case_id(case: Path) -> str | None:
 	"""The test ID on the first line of the case's ops.txt, kept with the case."""
 	with open(case / "ops.txt", "rb") as f:
 		m = ID_LINE.fullmatch(f.readline().decode("utf-8").rstrip("\n"))
+	return m.group(1) if m else None
+
+
+def not_on_windows(case: Path) -> str | None:
+	"""The reason on a case's "# Not on Windows:" line, for a case whose output differs there by design."""
+	m = NOT_ON_WINDOWS.search((case / "ops.txt").read_text(encoding="utf-8"))
 	return m.group(1) if m else None
 
 
@@ -101,6 +108,10 @@ def main() -> int:
 			work.mkdir()
 			if not materialize(case, work, args.version):
 				print(f"SKIP {tid} {name}, no doc for shcl v{args.version}", flush=True)
+				continue
+			why = not_on_windows(case) if sys.platform == "win32" else None
+			if why:
+				print(f"SKIP {tid} {name}, {why}", flush=True)
 				continue
 			want_file = case / f"want.v{args.version}.txt"
 			if not want_file.exists():

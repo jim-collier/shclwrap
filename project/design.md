@@ -32,6 +32,7 @@ Status: draft, 2026-10-15. Go, Rust, C, and Python are built over shcl 3.0, with
 - [Testing](#testing)
 	- [Shared cases](#shared-cases)
 	- [Each language's own tests](#each-languages-own-tests)
+	- [Other hosts](#other-hosts)
 	- [Fuzzing](#fuzzing)
 - [Sharing the code](#sharing-the-code)
 - [Decisions](#decisions)
@@ -283,7 +284,7 @@ Go names are listed. Rust uses the same words in snake case, and `ShclDoc` has t
 | `d.Remove(path)`          | Takes out a path and everything under it, and says how many instances went. That's every instance, and also the ones under any step that repeats.
 
 - A Go `float32` or Rust `f32` is written as its own shortest digits, so 0.9 is written `0.9` and not as the float64 it widens to. C has `shclw_put_float32` for a `float`.
-	- A tie between 2 spellings goes to the even one, except at a float32 power of 2, where Go rounds up. Rust and C give the same digits as Go.
+	- A tie between 2 spellings goes to the even one. Rust and C give the same digits as Go. go1.26 alone rounds the tie at 2^-12 up, so Go evens that one out itself (2026102519333440).
 
 - Infinity and NaN are refused with `BadValue`, and nothing changes, since no read would take them back.
 
@@ -309,8 +310,8 @@ Go names are listed. Rust uses the same words in snake case, and `ShclDoc` has t
 	- The new text goes to a temp file that's renamed into place, so a failed write leaves the original. If a failed replace left nothing at the path, the backup is moved back. The backup is removed whenever the original is still there, and only kept, and named in the error, when it can't be put back.
 	- A file whose Format line names a newer format is `ErrTooNew`, as `Upgrade` says, and anything that isn't a regular file is `ErrIO`.
 	- A file its Format line, its 2.x block, or `from` 2 marks as 2.x, and that shcl 2.0 reports errors on, is `ErrRefused`, with those errors in the error's `Diags`. Nothing is written and no backup is made. 2.0 read such a line the way it repaired it, or not at all, and a raw block that never closes took the rest of the file. The upgrade would make a clean file out of it that means something else.
-	- A 2.x file comes out reading the values 2.0 read. A backslash pair was an escape in 2.x and is text in 3.0, so `C:\\new` read as `C:\new` in 2.x. shcl's `migrate` writes the text 2.x read, and the upgrade reads every path 2.0 reads one value at back against 2.0, rather than trust it.
-	- shcl's conversion splits a 2.x element at a comma inside quotes, so `title="a, b"` in a list came out as 2 elements. 1.2 and 2.0 read it whole, quotes and all. Each value that reads otherwise than 2.0 read it is set to 2.0's reading first, then read back like the rest (2026102618065640).
+	- A 2.x file comes out reading the values 2.0 read. A backslash pair was an escape in 2.x and is text in 3.0, so `C:\\new` read as `C:\new` in 2.x. shcl's `migrate` writes the text 2.x read, and the upgrade reads every value 2.0 reads back against 2.0, rather than trust it. A repeated key is read one instance at a time, each against the one in the same place in 2.0.
+	- 1.2 and 2.0 read a quote inside a 2.x element as text, with a comma or a `#` before its close kept in the element, so `title="a, b"` is one element, quotes and all. shcl's conversion reads it that way since `a010fdf8`, repeated keys included, so the wrapper no longer sets those values itself (2026102618065640, 2026102814295798).
 	- With nothing in the file to say it's 2.x, a backslash pair reads two ways, as `a,b` does, so it's `ErrAmbiguous` until `from` 2 or a Format line says which (2026102616480100).
 	- A 2.x file that would still have an error once converted is `ErrRefused`, as shcl's own upgrade refuses it. That's what a 2.x comma list with lines under it comes to.
 	- 1.2 read values the same way, but read names as typed, as 3.0 does. A name 2.0 read with an escape resolved can't be renamed, so it's refused, unless the file's Format line names 1.
@@ -320,7 +321,7 @@ Go names are listed. Rust uses the same words in snake case, and `ShclDoc` has t
 	- In C, 2.0's `shcl.h` and 3.0's declare the same names, so 2.0's goes in 2 files of its own with each call renamed. The C upgrade gives 2.0's errors in its result, `shclw_upgraded`, since C's error has no list.
 	- 2.x's `#` info block is swapped for the current one where it sits, in a file with no Format line. shcl leaves a clean file's block alone, and puts the new block at the end of a file it writes out again.
 	- When shcl writes a CRLF file out again with LF only, the upgrade puts the CRLF back, unless that would change a value.
-	- shcl's conversion drops the blank lines at the top of a file and folds a run of them to one. The upgrade puts them back, so each line keeps its number, and a diagnostic or a read on the upgraded text names the file's own line (2026102618065634). Where that would change a value it leaves shcl's text. A line shcl writes as two, such as 2.x's `x: ~~~`, still moves the lines after it.
+	- Each line keeps its number, so a diagnostic or a read on the upgraded text names the file's own line. shcl's conversion keeps the lines since `a010fdf8`, 2.x's `x: ~~~` included (2026102620430717). Where it can't, it writes the file the way `fmt` does, which drops the blank lines at the top and folds a run of them to one. The upgrade puts those back (2026102618065634), and where that would change a value it leaves shcl's text.
 	- `Lost` and `Rewritten` list lines of the original, from 1, so a program can point the user at them in the backup (2026101513330012, 2026101513330013).
 		- `Lost` is each line with a value 2.0 read taht the upgraded file doesn't have at all. A value that comes through reading differently is refused instead, as above, and so is a 2.x comma list with lines under it, which used to be lost.
 		- `Rewritten` is every other line the upgraded text doesn't have as typed, like `tags: a, b` written as `tags: [a, b]`, or 2.x's info block. A line that only moved isn't one, and lines the upgrade added aren't listed.
@@ -454,6 +455,8 @@ An ops script is one op per line, with fields split by tabs. `\t`, `\n`, `\r`, a
 
 - Each case's test ID is the first line of its `ops.txt`, as `# Test ID: <id>`, given once from the case's first commit. Each language prints one line per case, such as `PASS ddzvq Go case 001-reads`, with `Rust`, `C` or `Python` in place of `Go`. A case with no ID fails. Go's lines come from `go test -json` through `cicd/go_test_lines.py`, since `go test` hides a passing test's output, and Rust's case runner is its own harness for the same reason.
 
+- A case whose output differs on Windows by design has a `# Not on Windows: <why>` line in its `ops.txt`. There every language says `SKIP` with that reason, and elsewhere the line is a comment. `058-write-mode` is the one today, since Windows ignores the mode.
+
 ### Each language's own tests
 
 - Each Go, Rust and Python test function has its test ID on a `Test ID: <id>` comment just above it, given once from the commit that added it. C's sit in the table in `api_test.c`'s `main`.
@@ -463,6 +466,20 @@ An ops script is one op per line, with fields split by tabs. `\t`, `\n`, `\r`, a
 - Go's lines come from `go test -json` through `cicd/go_test_lines.py`, Rust's from libtest's own per-test lines through `cicd/rust_test_lines.py`, and Python's from `cicd/py_tests.py`, which runs the tests as `unittest discover` does. A Go subtest is part of its function's line. Go's `TestCases` has no ID, since each case has its own.
 
 - A Rust test can't mark itself skipped once it runs, so one that returns early, such as on a folder the user can still write to, says `PASS`.
+
+### Other hosts
+
+- A full run's Other hosts step runs the Go, Rust, Python and C tests and the shared cases natively on Windows, on b29w, through `cicd/remote-test.bash`. It sends the tracked tree as it is on disk, with the pinned shcl caches, and `cicd/remote-windows.ps1` runs them there. Each line keeps its test's ID, with ` on b29w` added, and the box as a whole is `dejex`.
+
+- macOS goes the same way, on b26, or on vmKt6m when b26 is away, through `cicd/remote-macos.bash`. That's plain bash 3.2, since it's the stock `/bin/bash` there. The box as a whole is `dejgh`, and its lines end ` on b26` or ` on vmKt6m`. C builds plain with Apple's clang, since macOS has no LeakSanitizer, and the C++ and sanitized builds stay with the Linux run.
+
+- A Mac that answers but has no Go, no cargo in `~/.cargo/bin`, no Python 3.11 or newer, or no Xcode command line tools, is a `SKIP` with the reason, and the next box is tried. The box checks that before the tree is sent. vmKt6m has only Python 3.9 so far, so it's a `SKIP` there.
+
+- A save that fails on Windows has a test of its own in each language, which says `SKIP` elsewhere: Go's `TestWriteHeldOpen` (dejfx), Rust's `write_held_open` (dejfy), Python's `WriteHeldOpen` (dejfz) and C's `test_write_held_open` (dejg0). Each holds the file open without delete sharing, as most Windows programs open one, so the replace fails. The save is `io`, and the old file is whole with nothing beside it, for a current file, one `Open` upgraded, and `UpgradeFile`.
+
+- The box is held through the shared host lock's wrap for the whole run, which also puts a VM back as it was found. A box that's away, or that can't be held, is a `SKIP` and never stops a run. `--no-remote`, `--quick` and `--backlog-run-quick` leave the step out, and so do the pre-push hook and the ci workflow, which both pass `--no-remote`.
+
+- Its work folder there is `%TEMP%\shclwrap\<YYYYmmDD-HHMMSS>_<NNN>`, removed at the end unless `--keep-temp`. Each run also removes the project's run folders there older than 2 days, through the same kind of guard as `safe-rm.bash`. Rust builds cold there, since a target folder kept between runs keeps test binaries that still point at the last run's folder. On a Mac the folder is `${TMPDIR}/shclwrap/<YYYYmmDD-HHMMSS>_<NNN>`, and the box removes it, and the old ones, through the tree's own `safe-rm.bash`.
 
 ### Fuzzing
 

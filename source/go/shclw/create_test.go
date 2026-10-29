@@ -10,8 +10,38 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 )
+
+// A link error that says the filesystem has no hard links falls back to the
+// exclusive create, and any other link error is ErrIO. Errno 1 is what FAT
+// gives: EPERM on Linux, ERROR_INVALID_FUNCTION on Windows.
+// Test ID: dejdf
+func TestCreateNoLinks(t *testing.T) {
+	defer func(old func(string, string) error) { linkFile = old }(linkFile)
+	for _, c := range []struct {
+		err  syscall.Errno
+		want ErrKind
+	}{{syscall.Errno(1), 0}, {syscall.ENOTSUP, 0}, {syscall.EIO, ErrIO}} {
+		linkFile = func(old, new string) error { return &os.LinkError{Op: "link", Old: old, New: new, Err: c.err} }
+		dir := t.TempDir()
+		path := filepath.Join(dir, "a.shcl")
+		if err := CreateNew(path, "a: 1\n", 0); KindOf(err) != c.want {
+			t.Fatalf("link gives %v: %v, want kind %v", c.err, err, c.want)
+		}
+		want := []string{"a.shcl"}
+		if c.want != 0 {
+			want = nil
+		} else if b, err := os.ReadFile(path); err != nil || string(b) != "a: 1\n" {
+			t.Fatalf("link gives %v: file %q, %v", c.err, b, err)
+		}
+		ents, _ := os.ReadDir(dir)
+		if len(ents) != len(want) {
+			t.Fatalf("link gives %v: %d files left, want %d", c.err, len(ents), len(want))
+		}
+	}
+}
 
 // Of several creates of one name at once, exactly one wins, and the file is
 // all of the winner's text.

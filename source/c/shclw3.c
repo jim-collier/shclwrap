@@ -1377,31 +1377,6 @@ static bool v2_changes(const char *s, size_t n) {
 	return false;
 }
 
-// What check_reads checks 2.0's reads against, one element at a time.
-typedef struct {
-	shcl_doc *now;
-	old_list *bad;
-	shcl_read_str_arr is;
-	bool differs;
-} carry_check;
-
-static void check_old(void *ctx, const char *path, size_t plen, size_t line, size_t i, size_t n, const char *v,
-                      size_t vlen) {
-	carry_check *c = (carry_check *)ctx;
-	if (i == 0) {
-		c->is = shcl_read_string_array(c->now, path, plen);
-		c->differs = false;
-	}
-	if (c->differs || c->is.status != SHCL_GOOD) {
-		return;
-	}
-	// The walk keeps i < n, but clang's CTU pass starts here without it.
-	if (c->is.n != n || i >= n || c->is.values[i].n != vlen || (vlen && memcmp(c->is.values[i].p, v, vlen) != 0)) {
-		c->differs = true;
-		keep_old(c->bad, line, "W002", not_as_read, sizeof not_as_read - 1);
-	}
-}
-
 // The lines with a value 2.0 read that the upgraded text doesn't have.
 typedef struct {
 	shcl_doc *now;
@@ -1425,6 +1400,53 @@ static void keep_lost(lost_list *l, size_t line) {
 		l->cap = cap;
 	}
 	l->v[l->n++] = line;
+}
+
+// What check_reads checks 2.0's reads against, one element at a time.
+typedef struct {
+	shcl_doc *now;
+	old_list *bad;
+	lost_list *lost;
+	shcl_read_str_arr is;
+	bool differs, oom;
+} carry_check;
+
+static void check_old(void *ctx, const char *path, size_t plen, size_t inst, size_t insts, size_t line, size_t i,
+                      size_t n, const char *v, size_t vlen) {
+	carry_check *c = (carry_check *)ctx;
+	if (i == 0) {
+		c->differs = false;
+		c->is.status = SHCL_NOT_FOUND;
+		// A repeated key is read one instance at a time, the i-th against the
+		// i-th, as [#i] in 2.0 and (i) in 3.0 (2026102816332481).
+		if (insts == 1) {
+			c->is = shcl_read_string_array(c->now, path, plen);
+		} else if (shcl_count(c->now, path, plen) == insts) {
+			char *at = (char *)malloc(plen + 24);
+			if (!at) {
+				c->oom = true;
+				return;
+			}
+			memcpy(at, path, plen);
+			size_t an = plen + (size_t)snprintf(at + plen, 24, "(%zu)", inst);
+			// The raw read goes first, so it can't move what is points at. A
+			// single key's lost line is in check_lost.
+			bool raw = shcl_read_raw(c->now, at, an).status == SHCL_GOOD;
+			c->is = shcl_read_string_array(c->now, at, an);
+			free(at);
+			if (c->is.status != SHCL_GOOD && !raw) {
+				keep_lost(c->lost, line);
+			}
+		}
+	}
+	if (c->differs || c->is.status != SHCL_GOOD) {
+		return;
+	}
+	// The walk keeps i < n, but clang's CTU pass starts here without it.
+	if (c->is.n != n || i >= n || c->is.values[i].n != vlen || (vlen && memcmp(c->is.values[i].p, v, vlen) != 0)) {
+		c->differs = true;
+		keep_old(c->bad, line, "W002", not_as_read, sizeof not_as_read - 1);
+	}
 }
 
 static void check_lost(void *ctx, const char *path, size_t plen, const size_t *lines, size_t n, int reads) {
@@ -1460,9 +1482,11 @@ static shclw_kind check_reads(shclw_i_v2_doc *old, const char *up, size_t up_len
 			keep_old(bad, shclw_i_v2_line(old, fs[k].path.p, fs[k].path.n), "W002", bad_name, sizeof bad_name - 1);
 		}
 	}
-	carry_check c = {now, bad, {NULL, 0, SHCL_NOT_FOUND, NULL}, false};
-	shclw_i_v2_reads(old, check_old, &c);
 	lost->now = now;
+	carry_check c = {now, bad, lost, {NULL, 0, SHCL_NOT_FOUND, NULL}, false, false};
+	if (!shclw_i_v2_reads(old, check_old, &c) || c.oom) {
+		lost->oom = true;
+	}
 	shclw_i_v2_paths(old, check_lost, lost);
 	size_t kept = 0;
 	if (lost->n) {
@@ -1478,98 +1502,27 @@ static shclw_kind check_reads(shclw_i_v2_doc *old, const char *up, size_t up_len
 	return lost->oom || bad->oom ? SHCLW_ERR_NO_MEMORY : SHCLW_OK;
 }
 
-// What mend_reads gathers of 2.0's read of one path, an element at a time.
-typedef struct {
-	shcl_doc *now, *d;
-	const char *up;
-	size_t up_len;
-	const char **items;
-	size_t *lens;
-	size_t cap;
-	bool oom, failed;
-} mend;
-
-static void mend_old(void *ctx, const char *path, size_t plen, size_t line, size_t i, size_t n, const char *v,
-                     size_t vlen) {
-	(void)line;
-	mend *m = (mend *)ctx;
-	if (m->oom || m->failed) {
-		return;
+shclw_kind shclw_i_check_reads(const char *old, size_t old_len, const char *up, size_t up_len, size_t *bad,
+                               size_t *n_bad, size_t *lost, size_t *n_lost, size_t cap) {
+	shclw_i_v2_doc *v2 = shclw_i_v2_parse(old, old_len);
+	if (!v2) {
+		return SHCLW_ERR_NO_MEMORY;
 	}
-	if (i == 0 && n > m->cap) {
-		const char **items =
-			n < SIZE_MAX / sizeof(char *) ? (const char **)realloc((void *)m->items, n * sizeof(char *)) : NULL;
-		if (items) {
-			m->items = items;
-		}
-		size_t *lens = items && n < SIZE_MAX / sizeof(size_t) ? (size_t *)realloc(m->lens, n * sizeof(size_t)) : NULL;
-		if (!lens) {
-			m->oom = true;
-			return;
-		}
-		m->lens = lens;
-		m->cap = n;
+	old_list l = {NULL, 0, 0, false};
+	lost_list ls = {NULL, NULL, 0, 0, false};
+	shclw_kind k = check_reads(v2, up, up_len, false, &l, &ls);
+	shclw_i_v2_free(v2);
+	*n_bad = !l.v ? 0 : l.n < cap ? l.n : cap;
+	for (size_t i = 0; i < *n_bad; i++) {
+		bad[i] = l.v[i].line;
 	}
-	if (i >= m->cap) {
-		return;
+	*n_lost = !ls.v ? 0 : ls.n < cap ? ls.n : cap;
+	for (size_t i = 0; i < *n_lost; i++) {
+		lost[i] = ls.v[i];
 	}
-	m->items[i] = v;
-	m->lens[i] = vlen;
-	if (i + 1 != n || shcl_count(m->now, path, plen) != 1 || shcl_read_raw(m->now, path, plen).status == SHCL_GOOD) {
-		return;
-	}
-	shcl_read_str_arr is = shcl_read_string_array(m->now, path, plen);
-	if (is.status != SHCL_GOOD) {
-		return;
-	}
-	bool same = is.n == n;
-	for (size_t k = 0; same && k < n; k++) {
-		same = is.values[k].n == m->lens[k] && (!m->lens[k] || !memcmp(is.values[k].p, m->items[k], m->lens[k]));
-	}
-	if (same) {
-		return;
-	}
-	if (!m->d) {
-		m->d = shcl_parse_keep_lines(m->up, m->up_len, SHCL_STANDARD);
-	}
-	if (!m->d) {
-		m->oom = true;
-		return;
-	}
-	// 2.0's string read is Good on a list too, so its length says which.
-	shcl_set_status st = n == 1 ? shcl_set_string(m->d, path, plen, m->items[0], m->lens[0])
-	                            : shcl_set_string_array(m->d, path, plen, m->items, m->lens, n);
-	m->failed = st != SHCL_SET_OK;
-}
-
-// Go's mendReads: up with each value that reads otherwise than 2.0 read it
-// in old set back to 2.0's reading. shcl's migrate splits a 2.x element at a
-// comma inside quotes, as in title="a, b", which 1.2 and 2.0 read whole
-// (2026102618065640). check_reads still checks the result. malloc'd, or NULL
-// when memory ran out.
-static char *mend_reads(shclw_i_v2_doc *old, const char *up, size_t up_len, size_t *out_len) {
-	shcl_doc *now = shcl_parse(up, up_len);
-	if (!now) {
-		return NULL;
-	}
-	mend m = {now, NULL, up, up_len, NULL, NULL, 0, false, false};
-	shclw_i_v2_reads(old, mend_old, &m);
-	char *out = NULL;
-	if (!m.oom) {
-		int kept = 0;
-		shcl_str t = {NULL, 0};
-		if (m.d && !m.failed) {
-			t = shcl_to_text_keep_lines(m.d, &kept);
-		}
-		out = kept && t.p ? shclw_i_dup(t.p, t.n, out_len) : shclw_i_dup(up, up_len, out_len);
-	}
-	if (m.d) {
-		shcl_free(m.d);
-	}
-	shcl_free(now);
-	free((void *)m.items);
-	free(m.lens);
-	return out;
+	free_old(&l);
+	free(ls.v);
+	return k;
 }
 
 // The result of an upgrade of text to up, with text's line ends, and with the
@@ -1680,12 +1633,8 @@ static shclw_kind upgrade(const char *text, size_t len, int64_t from, const char
 		size_t up_len = u.len;
 		if (!l.oom && !l.n && !u.ambiguous && !u.errors_left_n) {
 			if (!u.current) {
-				size_t mended_len = 0;
-				char *mended = mend_reads(old, u.text, u.len, &mended_len);
-				fixed = mended ? shclw_i_keep_blanks(marked ? marked : text, marked ? marked_len : len, mended,
-				                                     mended_len, &info_edit, &up_len)
-				               : NULL;
-				free(mended);
+				fixed = shclw_i_keep_blanks(marked ? marked : text, marked ? marked_len : len, u.text, u.len,
+				                            &info_edit, &up_len);
 				up = fixed;
 			}
 			if (up) {

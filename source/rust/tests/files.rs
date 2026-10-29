@@ -211,14 +211,31 @@ fn replace_read_write_fails() {
 /// An edit made while `upgrade_file` runs must not get past the 2.0 check.
 /// The file flips between a clean 2.x text and one 2.0 has errors on, so a
 /// backup holding the bad text means that text was converted unchecked.
+///
+/// The flipping starts at a delay swept over what one upgrade takes on this
+/// box. A flipper started with the upgrade lands its first flip in step with
+/// it on a slow box, so every round there is refused (2026102818352324). An
+/// edit after the last check is lost, as design.md says, so the late starts
+/// let rounds finish.
 // Test ID: de017
 #[test]
 fn upgrade_file_edited_meanwhile() {
 	const BAD: &str = "x: [ab]\ny: 1\n";
 	let scratch = Scratch::new("upgrade-race");
-	let deadline = Instant::now() + Duration::from_secs(2);
-	let mut upgraded = 0;
-	for round in 0..200 {
+	// The first upgrade is slower, so the second one is timed.
+	let mut took = Duration::ZERO;
+	for name in ["cold", "timed"] {
+		let dir = scratch.path().join(name);
+		fs::create_dir(&dir).unwrap();
+		let path = dir.join("c.shcl");
+		fs::write(&path, CLEAN_2X).unwrap();
+		let at = Instant::now();
+		shclw::v3::upgrade_file(&s(&path), 2).expect("upgrade with no edit");
+		took = at.elapsed();
+	}
+	let deadline = Instant::now() + Duration::from_secs(10);
+	let (mut upgraded, mut raced) = (0, 0);
+	for round in 0..120u32 {
 		if Instant::now() > deadline {
 			break;
 		}
@@ -226,9 +243,16 @@ fn upgrade_file_edited_meanwhile() {
 		fs::create_dir(&dir).unwrap();
 		let path = dir.join("c.shcl");
 		fs::write(&path, CLEAN_2X).unwrap();
+		let flip_at = Instant::now() + took * (round % 12) / 10;
 		let stop = AtomicBool::new(false);
 		let got = std::thread::scope(|sc| {
-			sc.spawn(|| {
+			let flipper = sc.spawn(|| {
+				while Instant::now() < flip_at {
+					if stop.load(Ordering::Relaxed) {
+						return;
+					}
+					std::thread::park_timeout(flip_at.saturating_duration_since(Instant::now()));
+				}
 				let tmp = dir.join("flip");
 				for n in 0.. {
 					if stop.load(Ordering::Relaxed) {
@@ -242,9 +266,18 @@ fn upgrade_file_edited_meanwhile() {
 			});
 			let got = shclw::v3::upgrade_file(&s(&path), 2);
 			stop.store(true, Ordering::Relaxed);
+			flipper.thread().unpark();
 			got
 		});
-		let Ok(u) = got else { continue };
+		// Any other failure ends the round too, as it always has. Only these
+		// two say the edit was seen.
+		let u = match got {
+			Ok(u) => u,
+			Err(e) => {
+				raced += usize::from(matches!(e.kind, ErrKind::Changed | ErrKind::Refused));
+				continue;
+			}
+		};
 		if u.backup.is_empty() {
 			continue;
 		}
@@ -255,7 +288,8 @@ fn upgrade_file_edited_meanwhile() {
 			"round {round}: that text was converted"
 		);
 	}
-	assert!(upgraded > 0, "no round got as far as an upgrade");
+	assert!(upgraded > 0, "no round got as far as an upgrade, one takes {took:?}");
+	assert!(raced > 0, "no round was edited meanwhile, one upgrade takes {took:?}");
 }
 
 // Test ID: de018
@@ -527,4 +561,57 @@ fn open_fails_both() {
 			assert_eq!(got, Some(ErrKind::Refused), "{name}: open");
 		}
 	}
+}
+
+/// Opens `p` without delete sharing, as most Windows programs open a file.
+fn hold(p: &Path) -> fs::File {
+	let mut o = fs::OpenOptions::new();
+	o.read(true);
+	#[cfg(windows)]
+	{
+		use std::os::windows::fs::OpenOptionsExt;
+		const FILE_SHARE_READ: u32 = 1;
+		const FILE_SHARE_WRITE: u32 = 2;
+		o.share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE);
+	}
+	o.open(p).unwrap_or_else(|e| panic!("{}: {e}", p.display()))
+}
+
+/// On Windows a file held open without delete sharing can't be replaced. The
+/// save fails, and leaves the old file whole with nothing beside it, for a
+/// current file, one `open` upgraded, and `upgrade_file`.
+// Test ID: dejfy
+#[test]
+#[cfg_attr(not(windows), ignore = "only Windows blocks a rename over an open file")]
+fn write_held_open() {
+	for (name, text) in [("current", "a: 1\n"), ("upgraded", CLEAN_2X)] {
+		let scratch = Scratch::new(&format!("held-open-{name}"));
+		let dir = scratch.path();
+		let path = dir.join("c.shcl");
+		let p = s(&path);
+		fs::write(&path, text).unwrap();
+		let mut d = shclw::v3::open(&p).expect("open");
+		d.put("n", 1).expect("put");
+		let held = hold(&path);
+		let got = d.write(&p).err().map(|e| e.kind);
+		drop(held);
+		assert_eq!(got, Some(ErrKind::Io), "{name}");
+		assert_eq!(read(&path), text, "{name}");
+		assert_eq!(names(dir), ["c.shcl"], "{name}");
+		assert_eq!(d.backup_name(), "", "{name}");
+		d.write(&p).unwrap_or_else(|e| panic!("{name}: write once let go: {e}"));
+		assert!(read(&path).contains("n: 1"), "{name}");
+	}
+	let scratch = Scratch::new("held-open-upgrade-file");
+	let dir = scratch.path();
+	let path = dir.join("c.shcl");
+	fs::write(&path, CLEAN_2X).unwrap();
+	let held = hold(&path);
+	let got = shclw::v3::upgrade_file(&s(&path), 2).err().map(|e| e.kind);
+	drop(held);
+	assert_eq!(got, Some(ErrKind::Io), "upgrade_file");
+	assert_eq!(read(&path), CLEAN_2X);
+	assert_eq!(names(dir), ["c.shcl"]);
+	shclw::v3::upgrade_file(&s(&path), 2).expect("upgrade once let go");
+	assert_eq!(names(dir).len(), 2);
 }

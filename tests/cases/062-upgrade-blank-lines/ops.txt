@@ -1,8 +1,9 @@
 # Test ID: deftf
-# shcl's conversion drops the blank lines at the top and folds a run of them
-# to one, so every line after them moved. The upgrade puts them back, so a
-# diagnostic or a read names the file's own line (2026102618065634). 2.x's
-# raw: ~~~ comes out as 2 lines, so the lines after it move by one.
+# shcl's conversion dropped the blank lines at the top and folded a run of
+# them to one, so every line after them moved (2026102618065634). It wrote
+# 2.x's raw: ~~~ as 2 lines, which moved the rest by one (2026102620430717).
+# Each line keeps its number, so a diagnostic or a read names the file's own
+# line.
 upgrade	2
 open	doc.shcl
 upgraded

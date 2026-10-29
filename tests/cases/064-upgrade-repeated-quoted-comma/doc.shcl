@@ -1,0 +1,6 @@
+# Seed rows repeat their key, with a comma or a hash inside quotes
+row: idx=2, title="a, b"
+row: idx=3, title='x=y'
+t:
+	row: idx=4, title="c, d", note="x # y"
+	row: idx=5, title='e, f' # kept

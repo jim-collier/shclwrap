@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"sort"
 	"strconv"
 	"testing"
@@ -43,6 +44,9 @@ func TestCases(t *testing.T) {
 				if !materialize(t, filepath.Join(casesDir, c.Name()), dir, v.n) {
 					t.Skip("no doc for this version")
 				}
+				if why := notOnWindows(mustRead(t, filepath.Join(dir, "ops.txt"))); why != "" && runtime.GOOS == "windows" {
+					t.Skip(why)
+				}
 				ran++
 				doc := mustRead(t, filepath.Join(dir, "doc.shcl"))
 				ops := mustRead(t, filepath.Join(dir, "ops.txt"))
@@ -68,6 +72,18 @@ func TestCases(t *testing.T) {
 		t.Fatal("no cases ran")
 	}
 }
+
+// notOnWindows is the reason on a case's "# Not on Windows:" line, for a
+// case whose output differs there by design, or "".
+func notOnWindows(ops string) string {
+	m := notOnWindowsLine.FindStringSubmatch(ops)
+	if m == nil {
+		return ""
+	}
+	return m[1]
+}
+
+var notOnWindowsLine = regexp.MustCompile(`(?m)^# Not on Windows: ([^\r\n]+)`)
 
 // BenchmarkCases runs every shared case through Run, for cicd's profile
 // step. A case that writes files writes into the same folder each round.

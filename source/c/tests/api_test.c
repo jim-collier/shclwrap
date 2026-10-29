@@ -9,6 +9,10 @@
 #if !defined(_POSIX_C_SOURCE)
 #define _POSIX_C_SOURCE 200809L // NOLINT(bugprone-reserved-identifier,cert-dcl37-c,cert-dcl51-cpp)
 #endif
+// macOS hides mkdtemp under plain POSIX 2008.
+#if defined(__APPLE__) && !defined(_DARWIN_C_SOURCE)
+#define _DARWIN_C_SOURCE // NOLINT(bugprone-reserved-identifier,cert-dcl37-c,cert-dcl51-cpp)
+#endif
 
 // The adapter header too, for the read-back check, which no 3.0 put fails.
 #include "shclw_adapter.h"
@@ -19,6 +23,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #include <dirent.h>
 #include <sys/stat.h>
@@ -525,6 +530,36 @@ static void test_verify_put(void) {
 	shclw_free(d);
 }
 
+// Go's TestCheckReadsRepeated: each instance of a repeated key is read back
+// against 2.0, so one shcl split, as it did before a010fdf8, is refused on its
+// own line (2026102816332481).
+static void test_check_reads_repeated(void) {
+	static const char old[] = "row: idx=2, title=\"a, b\"\nrow: idx=3\nt:\n\tx: 1\nt:\n\tx: 2\n";
+	static const char good[] = "row: [idx=2, 'title=\"a, b\"']\nrow: idx=3\nt:\n\tx: 1\nt:\n\tx: 2\n";
+	static const struct {
+		const char *up;
+		size_t line;
+	} cases[] = {
+		{"row: [idx=2, 'title=\"a', 'b\"']\nrow: idx=3\nt:\n\tx: 1\nt:\n\tx: 2\n", 1},
+		{"row: [idx=2, 'title=\"a, b\"']\nrow: idx=4\nt:\n\tx: 1\nt:\n\tx: 2\n", 2},
+		{"row: [idx=2, 'title=\"a, b\"']\nrow: idx=3\nt:\n\tx: 1\nt:\n\tx: 3\n", 6},
+	};
+	size_t bad[4], lost[4], n_bad = 9, n_lost = 9;
+	CHECK(shclw_i_check_reads(old, sizeof old - 1, good, sizeof good - 1, bad, &n_bad, lost, &n_lost, 4) == SHCLW_OK);
+	CHECK(n_bad == 0 && n_lost == 0);
+	for (size_t i = 0; i < sizeof cases / sizeof cases[0]; i++) {
+		n_bad = n_lost = 9;
+		CHECK(shclw_i_check_reads(old, sizeof old - 1, cases[i].up, strlen(cases[i].up), bad, &n_bad, lost, &n_lost,
+		                          4) == SHCLW_OK);
+		CHECK(n_bad == 1 && bad[0] == cases[i].line);
+	}
+	// An instance 3.0 reads as empty is lost, as a single key's would be.
+	static const char empty[] = "row: [idx=2, 'title=\"a, b\"']\nrow:\nt:\n\tx: 1\nt:\n\tx: 2\n";
+	n_bad = n_lost = 9;
+	CHECK(shclw_i_check_reads(old, sizeof old - 1, empty, sizeof empty - 1, bad, &n_bad, lost, &n_lost, 4) == SHCLW_OK);
+	CHECK(n_bad == 0 && n_lost == 1 && lost[0] == 2);
+}
+
 // A float32 goes in as its own shortest digits. Go's TestPutFloat32, with
 // want from Go's strconv.FormatFloat(float64(f), 'g', -1, 32).
 static void test_put_float32(void) {
@@ -540,9 +575,10 @@ static void test_put_float32(void) {
 		{FLT_MAX, 3.4028235e+38, NULL},
 		{16777216, 1.6777216e+07, NULL},
 		{FLT_TRUE_MIN, 1e-45, NULL},
-		// 2^-12 is an exact tie at 8 digits. Go rounds it up, where glibc's
-	    // printf goes to even.
-		{0x1p-12f, 0.00024414063, NULL},
+		// 2^-12 is an exact tie at 8 digits, which goes to even. go1.26
+	    // alone rounds it up.
+		{0x1p-12f, 0.00024414062, NULL},
+		{-0x1p-12f, -0.00024414062, NULL},
 		{-0.0f, -0.0, NULL},
 	};
 	for (size_t i = 0; i < sizeof cases / sizeof cases[0]; i++) {
@@ -562,8 +598,8 @@ static void test_put_float32(void) {
 }
 
 // The digits floats print and float32 puts write with, against Go's
-// strconv.FormatFloat. An exact tie goes to even. At a power of 2 it goes
-// up, except the one Go leaves at even.
+// strconv.FormatFloat. An exact tie goes to even. At a float64 power of 2
+// it goes up, except the one Go leaves at even.
 static void test_shortest(void) {
 	static const struct {
 		double f;
@@ -573,7 +609,7 @@ static void test_shortest(void) {
 	} cases[] = {
 		{0x1p-25, "29802322387695312", -8, false},
 		{-0x1p-25, "29802322387695312", -8, false},
-		{0x1p-12, "24414063", -4, true},
+		{0x1p-12, "24414062", -4, true},
 		{0x1p-54, "5551115", -17, true},
 		{7.120236347223045e-307, "7120236347223045", -307, false},
 		{0.1, "1", -1, false},
@@ -1308,9 +1344,24 @@ static void test_open_fails_both(void) {
 	drop_dir(dir);
 }
 
+// Microseconds on a clock that only goes forward.
+static int64_t now_us(void) {
+#ifdef _WIN32
+	LARGE_INTEGER t, hz;
+	(void)QueryPerformanceCounter(&t);
+	(void)QueryPerformanceFrequency(&hz);
+	return t.QuadPart / hz.QuadPart * 1000000 + t.QuadPart % hz.QuadPart * 1000000 / hz.QuadPart;
+#else
+	struct timespec t;
+	(void)clock_gettime(CLOCK_MONOTONIC, &t);
+	return (int64_t)t.tv_sec * 1000000 + t.tv_nsec / 1000;
+#endif
+}
+
 #ifdef _WIN32
 typedef struct {
 	const char *path, *flip, *bad;
+	int64_t flip_at;
 	volatile LONG stop;
 } flipper;
 
@@ -1318,6 +1369,12 @@ typedef struct {
 // failed flip is skipped rather than the end of the loop.
 static unsigned __stdcall flip_loop(void *arg) {
 	flipper *f = (flipper *)arg;
+	while (now_us() < f->flip_at) {
+		if (InterlockedCompareExchange(&f->stop, 0, 0)) {
+			return 0;
+		}
+		(void)SwitchToThread();
+	}
 	for (unsigned n = 0; !InterlockedCompareExchange(&f->stop, 0, 0); n++) {
 		const char *t = n % 2 ? clean2x : f->bad;
 		FILE *out = fopen(f->flip, "wb");
@@ -1336,12 +1393,31 @@ static unsigned __stdcall flip_loop(void *arg) {
 // An edit made while the upgrade runs must not get past the 2.0 check. The
 // file flips between a clean 2.x text and one 2.0 has errors on, so a backup
 // holding the bad text means that text was converted unchecked.
+//
+// The flipping starts at a delay swept over what one upgrade takes on this
+// box. A flipper started with the upgrade lands its first flip in step with
+// it on a slow box, so every round there is refused (2026102818352324). An
+// edit after the last check is lost, as design.md says, so the late starts
+// let rounds finish.
 static void test_upgrade_raced(void) {
 	static const char bad[] = "x: [ab]\ny: 1\n";
 	char root[4200];
 	make_dir(root, sizeof root, "raced");
-	int upgraded = 0;
-	for (int i = 0; i < 100; i++) {
+	// The first upgrade is slower, so the second one is timed.
+	int64_t took = 0;
+	static const char *const timed[] = {"cold.shcl", "timed.shcl"};
+	for (size_t i = 0; i < 2; i++) {
+		char path[8300];
+		path_in(path, sizeof path, root, timed[i]);
+		write_mode(path, clean2x, 0644);
+		shclw_upgraded *u = NULL;
+		int64_t at = now_us();
+		CHECK(shclw_upgrade_file(path, 2, &u, NULL) == SHCLW_OK);
+		took = now_us() - at;
+		free(u);
+	}
+	int upgraded = 0, raced = 0;
+	for (int i = 0; i < 120; i++) {
 		char dir[8192], path[8300], flip[8300];
 		char sub[16];
 		(void)snprintf(sub, sizeof sub, "%d", i);
@@ -1350,8 +1426,9 @@ static void test_upgrade_raced(void) {
 		path_in(path, sizeof path, dir, "c.shcl");
 		path_in(flip, sizeof flip, dir, "flip");
 		write_mode(path, clean2x, 0644);
+		int64_t flip_at = now_us() + took * (i % 12) / 10;
 #ifdef _WIN32
-		flipper f = {path, flip, bad, 0};
+		flipper f = {path, flip, bad, flip_at, 0};
 		HANDLE h = (HANDLE)_beginthreadex(NULL, 0, flip_loop, &f, 0, NULL);
 		CHECK(h != NULL);
 		shclw_upgraded *u = NULL;
@@ -1364,6 +1441,13 @@ static void test_upgrade_raced(void) {
 #else
 		pid_t pid = fork();
 		if (pid == 0) {
+			int64_t wait = flip_at - now_us();
+			if (wait > 0) {
+				struct timespec d;
+				d.tv_sec = (time_t)(wait / 1000000);
+				d.tv_nsec = (long)(wait % 1000000 * 1000);
+				(void)nanosleep(&d, NULL);
+			}
 			for (unsigned n = 0;; n++) {
 				const char *t = n % 2 ? clean2x : bad;
 				FILE *f = fopen(flip, "wb");
@@ -1380,6 +1464,11 @@ static void test_upgrade_raced(void) {
 			(void)waitpid(pid, NULL, 0);
 		}
 #endif
+		// Any other failure ends the round too, as it always has. Only these
+		// two say the edit was seen.
+		if (k == SHCLW_ERR_CHANGED || k == SHCLW_ERR_REFUSED) {
+			raced++;
+		}
 		if (k == SHCLW_OK && u && u->backup.n) {
 			upgraded++;
 			if (!file_is(u->backup.p, clean2x)) {
@@ -1390,7 +1479,12 @@ static void test_upgrade_raced(void) {
 		free(u);
 		drop_dir(dir);
 	}
+	if (!upgraded || !raced) {
+		(void)fprintf(stderr, "%d rounds upgraded, %d edited meanwhile, one upgrade takes %lld us\n", upgraded, raced,
+		              (long long)took);
+	}
 	CHECK(upgraded > 0);
+	CHECK(raced > 0);
 	drop_dir(root);
 }
 
@@ -1601,6 +1695,68 @@ static void test_check(void) {
 	shclw_free(d);
 }
 
+#ifdef _WIN32
+static HANDLE hold(const char *path) {
+	HANDLE h = CreateFileA(path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING,
+	                       FILE_ATTRIBUTE_NORMAL, NULL);
+	CHECK(h != INVALID_HANDLE_VALUE);
+	return h;
+}
+#endif
+
+// On Windows a file held open without delete sharing, as most programs open
+// one, can't be replaced. The save fails, and leaves the old file whole with
+// nothing beside it, for a current file, one shclw_open upgraded, and
+// shclw_upgrade_file.
+static void test_write_held_open(void) {
+#ifdef _WIN32
+	static const char *const texts[] = {"a: 1\n", clean2x};
+	for (size_t i = 0; i < sizeof texts / sizeof texts[0]; i++) {
+		char dir[4200], path[8192];
+		make_dir(dir, sizeof dir, i ? "held-upgraded" : "held-current");
+		path_in(path, sizeof path, dir, "c.shcl");
+		write_mode(path, texts[i], 0644);
+		shclw_doc *d = NULL;
+		CHECK(shclw_open(path, &d, NULL) == SHCLW_OK && shclw_put_int(d, "n", 1, NULL) == SHCLW_OK);
+		HANDLE held = hold(path);
+		shclw_kind k = shclw_write(d, path, NULL);
+		if (held != INVALID_HANDLE_VALUE) {
+			(void)CloseHandle(held);
+		}
+		CHECK(k == SHCLW_ERR_IO);
+		CHECK(file_is(path, texts[i]) && count_dir(dir) == 1);
+		size_t n = 1;
+		char *name = shclw_backup_name(d, &n);
+		CHECK(name != NULL && n == 0);
+		free(name);
+		CHECK(shclw_write(d, path, NULL) == SHCLW_OK);
+		shclw_free(d);
+		d = NULL;
+		CHECK(shclw_open(path, &d, NULL) == SHCLW_OK && shclw_get_int(d, "n").value == 1);
+		shclw_free(d);
+		drop_dir(dir);
+	}
+	char dir[4200], path[8192];
+	make_dir(dir, sizeof dir, "held-upgrade-file");
+	path_in(path, sizeof path, dir, "c.shcl");
+	write_mode(path, clean2x, 0644);
+	HANDLE held = hold(path);
+	shclw_upgraded *u = NULL;
+	shclw_kind k = shclw_upgrade_file(path, 2, &u, NULL);
+	if (held != INVALID_HANDLE_VALUE) {
+		(void)CloseHandle(held);
+	}
+	free(u);
+	u = NULL;
+	CHECK(k == SHCLW_ERR_IO && file_is(path, clean2x) && count_dir(dir) == 1);
+	CHECK(shclw_upgrade_file(path, 2, &u, NULL) == SHCLW_OK && count_dir(dir) == 2);
+	free(u);
+	drop_dir(dir);
+#else
+	skip_why = "only Windows blocks a rename over an open file";
+#endif
+}
+
 static void cleanup(void) {
 	static const char *const made[] = {"nul0.shcl", "bad.shcl", "newer.shcl", "good.shcl", "strict.shcl", "loop.shcl"};
 	// Each test from test_replace_read on takes away its own folders.
@@ -1646,6 +1802,7 @@ int main(void) {
 		{"de05h", "test_first_last", test_first_last},
 		{"de05k", "test_puts", test_puts},
 		{"de05q", "test_verify_put", test_verify_put},
+		{"dejej", "test_check_reads_repeated", test_check_reads_repeated},
 		{"de05j", "test_put_float32", test_put_float32},
 		{"de05p", "test_shortest", test_shortest},
 		{"de05n", "test_several", test_several},
@@ -1663,6 +1820,7 @@ int main(void) {
 		{"de07h", "test_info", test_info},
 		{"de07k", "test_rewrites", test_rewrites},
 		{"de07g", "test_check", test_check},
+		{"dejg0", "test_write_held_open", test_write_held_open},
 	};
 	for (size_t i = 0; i < sizeof tests / sizeof tests[0]; i++) {
 		int before = failures;

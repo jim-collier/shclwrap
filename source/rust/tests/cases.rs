@@ -72,6 +72,15 @@ fn case_id(case: &Path) -> Option<String> {
 	(id.len() == 5 && id.bytes().all(crockford)).then(|| id.to_owned())
 }
 
+/// The reason on a case's `# Not on Windows:` line, for a case whose output
+/// differs there by design.
+fn not_on_windows(case: &Path) -> Option<String> {
+	let ops = fs::read_to_string(case.join("ops.txt")).ok()?;
+	ops.lines()
+		.find_map(|l| l.strip_prefix("# Not on Windows: "))
+		.map(|why| why.trim_end_matches('\r').to_owned())
+}
+
 #[derive(Default)]
 struct Tally {
 	ran: usize,
@@ -110,6 +119,12 @@ fn run_all<L: Lib>(root: &Path, n: u32, filter: Option<&str>, tally: &mut Tally)
 		if !materialize(&case, &dir, n) {
 			println!("SKIP {line}, no doc for shcl v{n}");
 			continue;
+		}
+		if cfg!(windows) {
+			if let Some(why) = not_on_windows(&case) {
+				println!("SKIP {line}, {why}");
+				continue;
+			}
 		}
 		tally.ran += 1;
 		let doc = fs::read_to_string(dir.join("doc.shcl")).unwrap();

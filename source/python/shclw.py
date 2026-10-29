@@ -388,13 +388,22 @@ def create_new(path: str, data: str, mode: int | None = None) -> None:
 	except FileExistsError as e:
 		raise _exists(path) from e
 	except OSError as e:
-		if not isinstance(e, PermissionError) and e.errno not in (errno.ENOTSUP, errno.EOPNOTSUPP, errno.ENOSYS):
+		if not _no_links(e):
 			raise _create_err(path, e) from e
 		_create_in_place(path, data, mode)
 		return
 	finally:
 		os.remove(tmp)
 	_sync_dir(path)
+
+
+def _no_links(e: OSError) -> bool:
+	"""A link error that says the filesystem has no hard links. Linux gives
+	EPERM, and Windows on FAT gives ERROR_INVALID_FUNCTION (1), which Python
+	calls EINVAL, so the Windows codes go by winerror."""
+	if isinstance(e, PermissionError) or e.errno in (errno.ENOTSUP, errno.EOPNOTSUPP, errno.ENOSYS):
+		return True
+	return getattr(e, "winerror", None) in (1, 50, 120)
 
 
 def _write_temp(path: str, data: str, mode: int | None) -> str:
@@ -1810,7 +1819,7 @@ def upgrade(text: str, from_: int = 0) -> Upgraded:
 			msg=f"{len(u.errors_left)} lines would still have an error once converted; fix them and upgrade again",
 		)
 	if out.changed:
-		out.text = _keep_blanks(src, _mend_reads(old, out.text))
+		out.text = _keep_blanks(src, out.text)
 	out.lost = _check_reads(old, out.text, format_of(text) == 1)
 	if banner:
 		fixed = _place_block(_same_ends(text, out.text), src != text)
@@ -1861,37 +1870,6 @@ def _carry_diag(line: int, msg: str) -> Diag:
 	return Diag(line, Severity.Error, "W002", msg)
 
 
-def _mend_reads(old: Any, up: str) -> str:
-	"""up, the upgraded text, with each value that reads otherwise than 2.0
-	read it in old set back to 2.0's reading. shcl's migrate splits a 2.x
-	element at a comma inside quotes, as in title="a, b", which 1.2 and 2.0
-	read whole (2026102618065640). _check_reads still checks the result."""
-	now = shcl.Document.parse(up)
-	d = None
-	for p in old.paths():
-		if old.count(p) != 1 or now.count(p) != 1 or now.read_raw(p).status == shcl.Status.Good:
-			continue
-		was, now_is = old.read_string_array(p), now.read_string_array(p)
-		if was.status != shcl2.Status.Good or now_is.status != shcl.Status.Good or was.value == now_is.value:
-			continue
-		if d is None:
-			try:
-				d = shcl.Document.parse_keep_lines(up, shcl.Strictness.Standard)
-			except shcl.LoadError:
-				return up
-		# 2.0's read_string is Good on a list too, so its length says which.
-		if len(was.value) == 1:
-			st = d.set_string(p, was.value[0])
-		else:
-			st = d.set_string_array(p, list(was.value))
-		if st != shcl.SetStatus.Ok:
-			return up
-	if d is None:
-		return up
-	text, kept = d.to_text_keep_lines()
-	return text if kept else up
-
-
 def _check_reads(old: Any, up: str, names_as_typed: bool) -> list[int]:
 	"""The lines with a value 2.0 read in old that up, the upgraded text,
 	doesn't have at all. Refused when up reads a value another way
@@ -1910,21 +1888,25 @@ def _check_reads(old: Any, up: str, names_as_typed: bool) -> list[int]:
 	differs = "the upgraded file doesn't read this value as shcl 2.0 read it"
 	lost: set[int] = set()
 	for p in old.paths():
-		had, has = old.count(p), now.count(p)
+		had, has, lines = old.count(p), now.count(p), old.lines(p)
 		# Instances past the ones 3.0 still has are gone.
-		lost.update(line for line in old.lines(p)[min(had, has) :] if line > 0)
-		if had != 1:
+		lost.update(line for line in lines[min(had, has) :] if line > 0)
+		if had != 1 and has != had:
 			continue
-		was, now_is = old.read_string_array(p), now.read_string_array(p)
-		if was.status == shcl2.Status.Good and now_is.status == shcl.Status.Good and was.value != now_is.value:
-			bad.append(_carry_diag(old.line(p), differs))
-		if (
-			has == 1
-			and was.status == shcl2.Status.Good
-			and now_is.status != shcl.Status.Good
-			and now.read_raw(p).status != shcl.Status.Good
-		):
-			lost.add(old.line(p))
+		# A repeated key is read one instance at a time, the i-th against
+		# the i-th, as [#i] in 2.0 and (i) in 3.0 (2026102816332481).
+		for i, line in enumerate(lines[:had]):
+			p2, p3 = (f"{p}[#{i}]", f"{p}({i})") if had > 1 else (p, p)
+			was, now_is = old.read_string_array(p2), now.read_string_array(p3)
+			if was.status == shcl2.Status.Good and now_is.status == shcl.Status.Good and was.value != now_is.value:
+				bad.append(_carry_diag(line, differs))
+			if (
+				has == had
+				and was.status == shcl2.Status.Good
+				and now_is.status != shcl.Status.Good
+				and now.read_raw(p3).status != shcl.Status.Good
+			):
+				lost.add(line)
 	if not bad:
 		return sorted(lost)
 	n = len({b.line for b in bad})

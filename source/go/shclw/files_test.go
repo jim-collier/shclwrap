@@ -166,15 +166,32 @@ func TestReplaceRead(t *testing.T) {
 }
 
 // An edit made while UpgradeFile runs must not get past the 2.0 check. The
-// file flips between a clean 2.x text adn one 2.0 has errors on, so a backup
+// file flips between a clean 2.x text and one 2.0 has errors on, so a backup
 // holding the bad text means that text was converted unchecked.
+//
+// The flipping starts at a delay swept over what one upgrade takes on this
+// box. A flipper started with the upgrade lands its first flip in step with
+// it on a slow box, so every round there is refused (2026102818352324). An
+// edit after the last check is lost, as design.md says, so the late starts
+// let rounds finish.
 // Test ID: de00w
 func TestUpgradeFileEditedMeanwhile(t *testing.T) {
 	const bad = "x: [ab]\ny: 1\n"
 	root := t.TempDir()
-	deadline := time.Now().Add(2 * time.Second)
-	upgraded := 0
-	for i := 0; i < 200 && time.Now().Before(deadline); i++ {
+	// The first upgrade is slower, so the second one is timed.
+	var took time.Duration
+	for _, name := range []string{"cold", "timed"} {
+		path := filepath.Join(root, name+".shcl")
+		writeFile(t, path, clean2x, 0o644)
+		at := time.Now()
+		if _, err := shclw3.UpgradeFile(path, 2); err != nil {
+			t.Fatalf("upgrade with no edit: %v", err)
+		}
+		took = time.Since(at)
+	}
+	deadline := time.Now().Add(10 * time.Second)
+	upgraded, raced := 0, 0
+	for i := 0; i < 120 && time.Now().Before(deadline); i++ {
 		dir := filepath.Join(root, strconv.Itoa(i))
 		if err := os.Mkdir(dir, 0o755); err != nil {
 			t.Fatal(err)
@@ -182,8 +199,14 @@ func TestUpgradeFileEditedMeanwhile(t *testing.T) {
 		path := filepath.Join(dir, "c.shcl")
 		writeFile(t, path, clean2x, 0o644)
 		stop, done := make(chan struct{}), make(chan struct{})
+		wait := time.NewTimer(took * time.Duration(i%12) / 10)
 		go func() {
 			defer close(done)
+			select {
+			case <-stop:
+				return
+			case <-wait.C:
+			}
 			tmp := filepath.Join(dir, "flip")
 			for n := 0; ; n++ {
 				select {
@@ -203,6 +226,12 @@ func TestUpgradeFileEditedMeanwhile(t *testing.T) {
 		u, err := shclw3.UpgradeFile(path, 2)
 		close(stop)
 		<-done
+		wait.Stop()
+		// Any other failure ends the round too, as it always has. Only these
+		// two say the edit was seen.
+		if k := shclw.KindOf(err); k == shclw.ErrChanged || k == shclw.ErrRefused {
+			raced++
+		}
 		if err != nil || u.Backup == "" {
 			continue
 		}
@@ -212,7 +241,10 @@ func TestUpgradeFileEditedMeanwhile(t *testing.T) {
 		}
 	}
 	if upgraded == 0 {
-		t.Error("no round got as far as an upgrade")
+		t.Errorf("no round got as far as an upgrade, one takes %v", took)
+	}
+	if raced == 0 {
+		t.Errorf("no round was edited meanwhile, one upgrade takes %v", took)
 	}
 }
 
@@ -546,4 +578,60 @@ func TestWriteChangedOtherName(t *testing.T) {
 	if err := d.WriteWith(link, shclw.WriteOpts{Force: true}); err != nil {
 		t.Errorf("forced: %v", err)
 	}
+}
+
+// On Windows a file held open without delete sharing, as os.Open holds it,
+// can't be replaced. The save fails, and leaves the old file whole with
+// nothing beside it, for a current file, one Open upgraded, and UpgradeFile.
+// Test ID: dejfx
+func TestWriteHeldOpen(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("only Windows blocks a rename over an open file")
+	}
+	for _, c := range []struct{ name, text string }{{"current", "a: 1\n"}, {"upgraded", clean2x}} {
+		t.Run(c.name, func(t *testing.T) {
+			dir := t.TempDir()
+			path := filepath.Join(dir, "c.shcl")
+			writeFile(t, path, c.text, 0o644)
+			d, err := shclw3.Open(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := d.Put("n", 1); err != nil {
+				t.Fatal(err)
+			}
+			held, err := os.Open(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			err = d.Write(path)
+			held.Close()
+			if shclw.KindOf(err) != shclw.ErrIO {
+				t.Errorf("got %v, want io", err)
+			}
+			if readFile(t, path) != c.text || len(names(t, dir)) != 1 || d.BackupName() != "" {
+				t.Errorf("file %q, folder %v, backup %q", readFile(t, path), names(t, dir), d.BackupName())
+			}
+			if err := d.Write(path); err != nil || d.Int("n", 0) != 1 || !strings.Contains(readFile(t, path), "n: 1") {
+				t.Errorf("write once let go: %v, file %q", err, readFile(t, path))
+			}
+		})
+	}
+	t.Run("UpgradeFile", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "c.shcl")
+		writeFile(t, path, clean2x, 0o644)
+		held, err := os.Open(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = shclw3.UpgradeFile(path, 2)
+		held.Close()
+		if shclw.KindOf(err) != shclw.ErrIO || readFile(t, path) != clean2x || len(names(t, dir)) != 1 {
+			t.Errorf("got %v, file %q, folder %v", err, readFile(t, path), names(t, dir))
+		}
+		if _, err := shclw3.UpgradeFile(path, 2); err != nil || len(names(t, dir)) != 2 {
+			t.Errorf("upgrade once let go: %v, folder %v", err, names(t, dir))
+		}
+	})
 }

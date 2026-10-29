@@ -7,6 +7,7 @@
 #ifndef SHCLW3_V2_H
 #define SHCLW3_V2_H
 
+#include <stdbool.h>
 #include <stddef.h>
 
 #ifdef __cplusplus
@@ -31,13 +32,14 @@ size_t shclw_i_v2_errors(shclw_i_v2_doc *d, shclw_i_v2_each each, void *ctx);
 // The line of the one field at path, or 0.
 size_t shclw_i_v2_line(shclw_i_v2_doc *d, const char *path, size_t plen);
 
-// Called for element i of n of each path 2.0 reads one string array at, in
-// order, with the path's line.
-typedef void (*shclw_i_v2_elem)(void *ctx, const char *path, size_t plen, size_t line, size_t i, size_t n,
-                                const char *v, size_t vlen);
+// Called for element i of n of each string array 2.0 reads, in order: the
+// one at instance inst of the insts fields at path, with its line.
+typedef void (*shclw_i_v2_elem)(void *ctx, const char *path, size_t plen, size_t inst, size_t insts, size_t line,
+                                size_t i, size_t n, const char *v, size_t vlen);
 
-// Every value 2.0 reads at a path with one field, as strings, through each.
-void shclw_i_v2_reads(shclw_i_v2_doc *d, shclw_i_v2_elem each, void *ctx);
+// Every value 2.0 reads, as strings, through each. A repeated key is read one
+// instance at a time. False only when memory ran out.
+bool shclw_i_v2_reads(shclw_i_v2_doc *d, shclw_i_v2_elem each, void *ctx);
 
 // Called once per path 2.0 has, in order, with each instance's line, and
 // whether 2.0 reads one string array at a path with one field.

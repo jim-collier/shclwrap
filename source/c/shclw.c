@@ -293,16 +293,16 @@ static bool cut_at_tie(const char *exact, const char *digits, size_t n) {
 // glibc's %.*e is the closest at a given length, which next to a power of 2
 // can miss the interval that reads back while the digit above it is inside.
 // So that one is tried too. An exact tie glibc rounds to even, and Go's
-// Dragonbox does too, except at a power of 2, where it rounds up.
+// Dragonbox does too, except at a float64 power of 2, where it rounds up.
+// go1.26 also rounds up the float32 2^-12, which go1.25 and go1.27 don't.
 void shclw_i_shortest(double f, bool single, char *digits, int *exp) {
 	char s[80];
 	// 2^-1074 has 751 digits.
 	char exact[800] = "";
 	int e2 = 0;
 	// Go leaves one power of 2 at even, the one it holds as its mantissa
-	// times 2^-77: 2^-25, or as a float32, 2^-54.
-	bool tie_up = f != 0 && frexp(fabs(f), &e2) == 0.5 && fabs(f) >= (single ? FLT_MIN : DBL_MIN) &&
-	              e2 - 1 - (single ? 23 : 52) != -77;
+	// times 2^-77: 2^-25.
+	bool tie_up = !single && f != 0 && frexp(fabs(f), &e2) == 0.5 && fabs(f) >= DBL_MIN && e2 - 1 - 52 != -77;
 	if (tie_up) {
 		char all[820];
 		(void)snprintf(all, sizeof all, "%.780e", fabs(f));

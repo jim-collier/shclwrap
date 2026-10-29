@@ -19,6 +19,9 @@
 ##	   - profile (Go's Run over the shared cases, as a flamegraph in
 ##	     cicd/artifacts/profiling/, with flame-report.py's summary; never fails a run
 ##	     on what it finds)
+##	   - other hosts (the Go, Rust, Python and C tests and the shared cases on
+##	     Windows, on b29w, and macOS, on b26 or vmKt6m, through
+##	     cicd/remote-test.bash; a box that's away is a SKIP)
 ##	   - GitHub ci: result (waits for that run; only a finished run that failed
 ##	     fails it, and anything else is a SKIP)
 ##	- Syntax:
@@ -51,7 +54,8 @@
 ##	   --no-container  run C, Go, Rust and Python on the host, skipping what it has
 ##	                   no tool for, and the leak checks. Each also runs on the host
 ##	                   when docker is missing or its image won't build, and says so.
-##	   --no-remote     skip other hosts and VMs, and the ci workflow on GitHub
+##	   --no-remote     skip other hosts and VMs, and the ci workflow on GitHub.
+##	                   --quick and --backlog-run-quick skip them too.
 ##	  Other:
 ##	   --keep-temp     keep the run's scratch folder, and print where it is
 ##	   --dry-run       show which stages would run, and stop
@@ -177,7 +181,7 @@ export SHCLW_CARGO_LOCKED="${checkOnly}" SHCLW_AREAS="${areas[*]}"
 fArea(){ local a n; ((${#areas[@]})) || return 0; for a in "${areas[@]}"; do for n in "$@"; do [[ "${a}" != "${n}" ]] || return 0; done; done; return 1; }
 
 ## Every step in run order. A flag that turns one off adds a line here.
-fStep_Plan "Remote sync" "GitHub ci: start" "Format" "Lint" "Tests" "C leak checks" "Fuzz" "Profile" "GitHub ci: result"
+fStep_Plan "Remote sync" "GitHub ci: start" "Format" "Lint" "Tests" "C leak checks" "Fuzz" "Profile" "Other hosts" "GitHub ci: result"
 ((doSync))      || fStep_Off "Remote sync"   "${syncOffBy}"
 ## GitHub's run takes about as long as a full run here, so a quick run leaves it out.
 hostedOffBy=""
@@ -189,6 +193,8 @@ if [[ -n "${hostedOffBy}" ]]; then fStep_Off "GitHub ci: start" "${hostedOffBy}"
 ((doLeakcheck)) || fStep_Off "C leak checks" "${leakOffBy}"
 ((doFuzz))      || fStep_Off "Fuzz"          "${fuzzOffBy}"
 ((doProfile))   || fStep_Off "Profile"       "${profileOffBy}"
+## The boxes can keep a run waiting in line, so a quick run leaves them out too.
+if [[ -n "${hostedOffBy}" ]]; then fStep_Off "Other hosts" "${hostedOffBy}"; fi
 
 fuzzSecs="${SHCLW_FUZZ_SECONDS:-$( ((doQuick)) && echo 10 || echo 60)}"
 goFuzzSecs="${SHCLW_GOFUZZ_SECONDS:-$( ((doQuick)) && echo 0 || echo 30)}"
@@ -314,6 +320,7 @@ fCicdTests(){
 	fTest -q deean "run folders and safe removal" bash "${here}/temp-test.bash"
 	fTest -q deeap "profile flamegraphs and their summary" bash "${here}/profile-test.bash"
 	fTest -q defmn "the ci workflow on GitHub: which runs start it, and how its result reads" bash "${here}/hosted-test.bash"
+	fTest -q dejey "a test box that's away or can't be held is a SKIP, and the run goes on" bash "${here}/remote-skip-test.bash"
 }
 
 ## --list: the test IDs each step that's on would run, one line each, by the flags given.
@@ -343,6 +350,9 @@ fListStep(){
 		Fuzz)
 			if ((fuzzSecs > 0)); then "${py[@]}" "${here}/fuzz.py" --list; fi
 			if ((goFuzzSecs > 0)); then fTest ddzw3 "Go's fuzzer finds no panic in Run" :; fi ;;
+		"Other hosts")
+			fTest dejex "Windows tests on b29w" :
+			fTest dejgh "macOS tests on b26, or vmKt6m when b26 is away" : ;;
 		"GitHub ci: start")  fTest defmk "ci workflow started on GitHub" : ;;
 		"GitHub ci: result") fTest defmm "ci workflow passed on GitHub" : ;;
 	esac
@@ -373,6 +383,7 @@ fPreflight(){
 	fEcho_Clean "Fuzz .........: $( ((doFuzz)) && echo "${fuzzSecs}s Rust, C, and Python against Go, ${goFuzzSecs}s Go fuzzer" || echo '(skipped)')"
 	fEcho_Clean "GitHub ci ....: $( fStep_On "GitHub ci: start" && echo "${hostedWorkflow} on the pushed branch at HEAD, waited for at the end" || echo '(skipped)')"
 	fEcho_Clean "Profile ......: $( ((doProfile)) && echo "${profileSecs}s of Go's Run over the shared cases -> cicd/artifacts/profiling/" || echo '(skipped)')"
+	fEcho_Clean "Other hosts ..: $( fStep_On "Other hosts" && echo 'Windows on b29w and macOS on b26 or vmKt6m, held through the host lock' || echo '(skipped)')"
 	fEcho_Clean "CPU cap ......: $(fCpuNote)"
 	## ps, since a BSD nice with no command only prints its usage.
 	ni="$(ps -o ni= -p "$$" 2>/dev/null || true)"
@@ -630,6 +641,16 @@ if fStep_On "Profile"; then
 fi
 
 #•••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••
+## Natively on the boxes, outside the container, since they need this machine's
+## host lock and ssh. A box that's away is a SKIP, not a failure.
+if fStep_On "Other hosts"; then
+	fStep "Other hosts"
+	fShclFetch
+	bash "${here}/remote-test.bash" "${work}" || fDie "tests failed on another box; the output is above"
+	fStep_Pass
+fi
+
+#•••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••
 if fStep_On "GitHub ci: result"; then
 	fStep "GitHub ci: result"
 	fHosted_Result || fDie "the ci workflow failed on GitHub"
@@ -665,3 +686,5 @@ fEcho_Clean
 ##		- 2026-10-25 JC: A profile step: Go's Run over the shared cases as a flamegraph, rotated, with flame-report.py's summary. --no-profile.
 ##		- 2026-10-25 JC: The run's folder is ${HOST_TEMP}/shclwrap/<stamp>_<NNN>, and TMPDIR, TEMP and TMP point there. Stale run folders go. Every recursive removal goes through safe-rm.bash.
 ##		- 2026-10-26 JC: A full run starts the ci workflow on GitHub first and waits for it last. --no-remote skips it.
+##		- 2026-10-28 JC: An Other hosts step runs the tests on Windows, on b29w, held through the host lock. --no-remote and the quick runs skip it.
+##		- 2026-10-28 JC: The Other hosts step runs them on macOS too, on b26 or vmKt6m.

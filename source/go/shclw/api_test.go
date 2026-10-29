@@ -54,9 +54,9 @@ func TestPutFloat32(t *testing.T) {
 				t.Errorf("v%d %v: text %q, want %q", v.n, f, d.Text(), text)
 			}
 		}
-		// An exact tie goes to even, but at a float32 power of 2 Go rounds up.
-		// Rust and C follow both.
-		for bits, want := range map[uint32]float64{0x3b200000: 0.0024414062, 0xbb200000: -0.0024414062, 0x39800000: 0.00024414063} {
+		// An exact tie goes to even, 2^-12 included, which go1.26 rounds up.
+		// Rust and C do the same.
+		for bits, want := range map[uint32]float64{0x3b200000: 0.0024414062, 0xbb200000: -0.0024414062, 0x39800000: 0.00024414062, 0xb9800000: -0.00024414062} {
 			f := math.Float32frombits(bits)
 			d := v.lib.New()
 			if err := d.Put("f", f); err != nil {

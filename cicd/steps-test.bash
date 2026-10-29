@@ -119,16 +119,17 @@ fOff(){
 }
 fOff ""                        "none"
 fOff "--ci"                    "Remote sync (--merge-gate)"
-fOff "--quick"                 "Remote sync (--quick)" "GitHub ci: start (--quick)" "C leak checks (--quick without --leakcheck)" "Profile (--quick)" "GitHub ci: result (--quick)"
-fOff "--ci --quick"            "Remote sync (--quick)" "GitHub ci: start (--quick)" "C leak checks (--quick without --leakcheck)" "Profile (--quick)" "GitHub ci: result (--quick)"
+fOff "--quick"                 "Remote sync (--quick)" "GitHub ci: start (--quick)" "C leak checks (--quick without --leakcheck)" "Profile (--quick)" "Other hosts (--quick)" "GitHub ci: result (--quick)"
+fOff "--ci --quick"            "Remote sync (--quick)" "GitHub ci: start (--quick)" "C leak checks (--quick without --leakcheck)" "Profile (--quick)" "Other hosts (--quick)" "GitHub ci: result (--quick)"
 fOff "--ci --leakcheck"        "Remote sync (--merge-gate)"
 fOff "--leakcheck --no-leakcheck --no-sync --no-fuzz" "Remote sync (--no-sync)" "C leak checks (--no-leakcheck)" "Fuzz (--no-fuzz)"
-fOff "--quick --no-sync"       "Remote sync (--no-sync)" "GitHub ci: start (--quick)" "C leak checks (--quick without --leakcheck)" "Profile (--quick)" "GitHub ci: result (--quick)"
+fOff "--quick --no-sync"       "Remote sync (--no-sync)" "GitHub ci: start (--quick)" "C leak checks (--quick without --leakcheck)" "Profile (--quick)" "Other hosts (--quick)" "GitHub ci: result (--quick)"
 fOff "--quiet --ci --no-fuzz"  "Remote sync (--merge-gate)" "Fuzz (--no-fuzz)"
 fOff "--no-format --no-lint --no-tests" "Format (--no-format)" "Lint (--no-lint)" "Tests (--no-tests)"
-fOff "--backlog-run-quick"     "Remote sync (--backlog-run-quick)" "GitHub ci: start (--backlog-run-quick)" "C leak checks (--backlog-run-quick without --leakcheck)" "Fuzz (--backlog-run-quick)" "Profile (--backlog-run-quick)" "GitHub ci: result (--backlog-run-quick)"
+fOff "--backlog-run-quick"     "Remote sync (--backlog-run-quick)" "GitHub ci: start (--backlog-run-quick)" "C leak checks (--backlog-run-quick without --leakcheck)" "Fuzz (--backlog-run-quick)" "Profile (--backlog-run-quick)" "Other hosts (--backlog-run-quick)" "GitHub ci: result (--backlog-run-quick)"
 fOff "--backlog-run-full"      "Remote sync (--backlog-run-full)"
 fOff "--no-container"          "C leak checks (--no-container)"
+fOff "--no-remote"             "GitHub ci: start (--no-remote)" "Other hosts (--no-remote)" "GitHub ci: result (--no-remote)"
 
 ## Test lines: "PASS|FAIL|SKIP ID NAME", one per test, FAIL once whichever way it fails.
 fRun 'fTest abcde "a name" true; fTest -q abcdf "quiet one" echo noise; fTest_Skip abcdg "skipped one" "no box"'

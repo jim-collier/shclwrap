@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import errno
 import math
 import os
 import subprocess
@@ -15,6 +16,7 @@ import threading
 import unittest
 from collections.abc import Callable
 from pathlib import Path
+from unittest import mock
 
 import shclw
 
@@ -172,6 +174,30 @@ class Api(unittest.TestCase):
 			self.assertEqual(shclw.format_float(x), want)
 
 
+class CheckReads(unittest.TestCase):
+	# Test ID: dejeh
+	def test_repeated(self) -> None:
+		# Each instance of a repeated key is read back against 2.0, so one
+		# shcl split, as it did before a010fdf8, is refused on its own line
+		# (2026102816332481).
+		old = shclw.shcl2.Document.parse('row: idx=2, title="a, b"\nrow: idx=3\nt:\n\tx: 1\nt:\n\tx: 2\n')
+		good = "row: [idx=2, 'title=\"a, b\"']\nrow: idx=3\nt:\n\tx: 1\nt:\n\tx: 2\n"
+		self.assertEqual(shclw._check_reads(old, good, False), [])
+		for up, line in (
+			("row: [idx=2, 'title=\"a', 'b\"']\nrow: idx=3\nt:\n\tx: 1\nt:\n\tx: 2\n", 1),
+			("row: [idx=2, 'title=\"a, b\"']\nrow: idx=4\nt:\n\tx: 1\nt:\n\tx: 2\n", 2),
+			("row: [idx=2, 'title=\"a, b\"']\nrow: idx=3\nt:\n\tx: 1\nt:\n\tx: 3\n", 6),
+		):
+			with self.subTest(up=up):
+				with self.assertRaises(shclw.Error) as e:
+					shclw._check_reads(old, up, False)
+				self.assertEqual(e.exception.kind, shclw.ErrKind.Refused)
+				self.assertEqual([d.line for d in e.exception.diags], [line])
+		# An instance 3.0 reads as empty is lost, as a single key's would be.
+		up = "row: [idx=2, 'title=\"a, b\"']\nrow:\nt:\n\tx: 1\nt:\n\tx: 2\n"
+		self.assertEqual(shclw._check_reads(old, up, False), [2])
+
+
 if __name__ == "__main__":
 	unittest.main()
 
@@ -215,3 +241,74 @@ class CreateRace(unittest.TestCase):
 	# Test ID: de8hw
 	def test_in_place(self) -> None:
 		self.race(shclw._create_in_place)  # noqa: SLF001 - the no-hard-link path
+
+
+def _fat_link_error() -> OSError:
+	"""What os.link raises on FAT on Windows, built the same way elsewhere."""
+	e = OSError(errno.EINVAL, "Incorrect function")
+	e.winerror = 1  # type: ignore[attr-defined] - only Windows sets it
+	return e
+
+
+class CreateNoLinks(unittest.TestCase):
+	"""A link error that says the filesystem has no hard links falls back to
+	the exclusive create, and any other link error is io."""
+
+	# Test ID: dejdh
+	def test_no_links(self) -> None:
+		cases: list[tuple[OSError, str | None]] = [
+			(_fat_link_error(), None),
+			(PermissionError(errno.EPERM, "Operation not permitted"), None),
+			(OSError(errno.ENOTSUP, "Not supported"), None),
+			(OSError(errno.EIO, "I/O error"), "io"),
+		]
+		for err, want in cases:
+			link = mock.patch.object(os, "link", side_effect=err)
+			with self.subTest(err=err), tempfile.TemporaryDirectory() as tmp, link:
+				path = os.path.join(tmp, "a.shcl")
+				try:
+					shclw.create_new(path, "a: 1\n")
+					got = None
+				except shclw.Error as e:
+					got = e.kind.value
+				self.assertEqual(got, want)
+				if want is None:
+					self.assertEqual(Path(path).read_bytes(), b"a: 1\n")
+					self.assertEqual(os.listdir(tmp), ["a.shcl"])
+				else:
+					self.assertEqual(os.listdir(tmp), [])
+
+
+class WriteHeldOpen(unittest.TestCase):
+	"""On Windows a file held open without delete sharing, as open() holds it,
+	can't be replaced. The save fails, and leaves the old file whole with
+	nothing beside it, for a current file, one open() upgraded, and
+	upgrade_file()."""
+
+	# Test ID: dejfz
+	@unittest.skipUnless(os.name == "nt", "only Windows blocks a rename over an open file")
+	def test_held(self) -> None:
+		for name, text in (("current", b"a: 1\n"), ("upgraded", b"tags: a, b\n")):
+			with self.subTest(name=name), tempfile.TemporaryDirectory() as tmp:
+				path = os.path.join(tmp, "c.shcl")
+				Path(path).write_bytes(text)
+				d = shclw.open(path)
+				d.put("n", 1)
+				with open(path, "rb"), self.assertRaises(shclw.Error) as e:
+					d.write(path)
+				self.assertIs(e.exception.kind, shclw.ErrKind.IO)
+				self.assertEqual(Path(path).read_bytes(), text)
+				self.assertEqual(os.listdir(tmp), ["c.shcl"])
+				self.assertEqual(d.backup_name(), "")
+				d.write(path)
+				self.assertIn(b"n: 1", Path(path).read_bytes())
+		with self.subTest(name="upgrade_file"), tempfile.TemporaryDirectory() as tmp:
+			path = os.path.join(tmp, "c.shcl")
+			Path(path).write_bytes(b"tags: a, b\n")
+			with open(path, "rb"), self.assertRaises(shclw.Error) as e:
+				shclw.upgrade_file(path, 2)
+			self.assertIs(e.exception.kind, shclw.ErrKind.IO)
+			self.assertEqual(Path(path).read_bytes(), b"tags: a, b\n")
+			self.assertEqual(os.listdir(tmp), ["c.shcl"])
+			shclw.upgrade_file(path, 2)
+			self.assertEqual(len(os.listdir(tmp)), 2)

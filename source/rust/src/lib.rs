@@ -982,9 +982,20 @@ static TEMP_SEQ: AtomicU64 = AtomicU64::new(0);
 /// exactly one wins. A filesystem with no hard links gets an exclusive
 /// create of `path` itself (design.md, Loading and saving).
 pub fn create_new(path: &str, data: &str, mode: Option<u32>) -> Result<(), Error> {
+	create_linking(path, data, mode, |tmp, path| fs::hard_link(tmp, path))
+}
+
+/// `create_new` with its link given, so a test can stand in for a
+/// filesystem with no hard links.
+fn create_linking(
+	path: &str,
+	data: &str,
+	mode: Option<u32>,
+	link: fn(&Path, &Path) -> io::Result<()>,
+) -> Result<(), Error> {
 	check_mode(path, mode)?;
 	let tmp = write_temp(path, data, mode).map_err(|e| create_err(path, &e))?;
-	let linked = fs::hard_link(&tmp, path);
+	let linked = link(&tmp, Path::new(path));
 	let _ = fs::remove_file(&tmp);
 	match linked {
 		Ok(()) => {
@@ -992,11 +1003,17 @@ pub fn create_new(path: &str, data: &str, mode: Option<u32>) -> Result<(), Error
 			Ok(())
 		}
 		Err(e) if e.kind() == io::ErrorKind::AlreadyExists => Err(exists(path)),
-		Err(e) if matches!(e.kind(), io::ErrorKind::PermissionDenied | io::ErrorKind::Unsupported) => {
-			create_in_place(path, data, mode)
-		}
+		Err(e) if no_links(&e) => create_in_place(path, data, mode),
 		Err(e) => Err(create_err(path, &e)),
 	}
+}
+
+/// A link error that says the filesystem has no hard links. Linux gives
+/// EPERM, and Windows on FAT gives `ERROR_INVALID_FUNCTION` (1), which std
+/// doesn't count as `Unsupported`, nor `ERROR_NOT_SUPPORTED` (50).
+fn no_links(e: &io::Error) -> bool {
+	matches!(e.kind(), io::ErrorKind::PermissionDenied | io::ErrorKind::Unsupported)
+		|| (cfg!(windows) && matches!(e.raw_os_error(), Some(1 | 50)))
 }
 
 /// Writes `data` to a new file beside `path` and syncs it.
@@ -1198,8 +1215,8 @@ pub fn format_float(f: f64) -> String {
 
 /// The shortest digits that read back as `f`, or as `f` taken as an f32
 /// with `single`, in `{:e}` form, as Go's strconv gives them. Rust rounds an
-/// exact tie at that length away from zero, and Go to even, except at a power
-/// of 2 (`shclw_i_shortest` in the C wrapper has why).
+/// exact tie at that length away from zero, and Go to even, except at an f64
+/// power of 2 (`shclw_i_shortest` in the C wrapper has why).
 fn shortest(f: f64, single: bool) -> String {
 	#[allow(clippy::cast_possible_truncation)]
 	let at = |prec: Option<usize>| match (single, prec) {
@@ -1209,16 +1226,10 @@ fn shortest(f: f64, single: bool) -> String {
 		(true, Some(p)) => format!("{:.p$e}", f as f32),
 	};
 	let s = at(None);
-	#[allow(clippy::cast_possible_truncation)]
-	let (pow2, field, odd_one) = if single {
-		let b = (f as f32).to_bits();
-		(b.trailing_zeros() >= 23, u64::from((b >> 23) & 0xff), 73)
-	} else {
-		let b = f.to_bits();
-		(b.trailing_zeros() >= 52, (b >> 52) & 0x7ff, 998)
-	};
-	// Go leaves 2^-25, or as an f32 2^-54, at even.
-	if pow2 && field != 0 && field != odd_one {
+	let b = f.to_bits();
+	let field = (b >> 52) & 0x7ff;
+	// Go leaves 2^-25 at even.
+	if !single && b.trailing_zeros() >= 52 && field != 0 && field != 998 {
 		return s;
 	}
 	let n = s.bytes().take_while(|&c| c != b'e').filter(u8::is_ascii_digit).count();
@@ -1871,8 +1882,9 @@ fn perm_bits(m: &fs::Metadata) -> u32 {
 
 #[cfg(test)]
 mod create_tests {
-	use super::{create_in_place, create_new, ErrKind, Error};
+	use super::{create_in_place, create_linking, create_new, ErrKind, Error};
 	use std::fs;
+	use std::io;
 	use std::path::PathBuf;
 
 	fn text(i: usize) -> String {
@@ -1931,5 +1943,36 @@ mod create_tests {
 	#[test]
 	fn create_race_in_place() {
 		race("create-inplace", create_in_place);
+	}
+
+	// A link error that says the filesystem has no hard links falls back to
+	// the exclusive create, and any other link error is Io. Raw error 1 is
+	// what FAT gives: EPERM on Linux, ERROR_INVALID_FUNCTION on Windows.
+	// Test ID: dejdg
+	#[test]
+	fn create_no_links() {
+		type Link = fn(&std::path::Path, &std::path::Path) -> io::Result<()>;
+		let cases: [(Link, Option<ErrKind>); 3] = [
+			(|_, _| Err(io::Error::from_raw_os_error(1)), None),
+			(|_, _| Err(io::ErrorKind::Unsupported.into()), None),
+			(|_, _| Err(io::Error::other("bad link")), Some(ErrKind::Io)),
+		];
+		let base = std::env::var_os("TMPDIR").map_or_else(std::env::temp_dir, PathBuf::from);
+		for (i, (link, want)) in cases.into_iter().enumerate() {
+			let dir = base.join(format!("shclw-rust-nolinks-{}-{i}", std::process::id()));
+			let _ = fs::remove_dir_all(&dir); // a dead run's, if the pid came around again
+			fs::create_dir_all(&dir).unwrap();
+			let path = dir.join("a.shcl").to_string_lossy().into_owned();
+			let got = create_linking(&path, "a: 1\n", None, link);
+			assert_eq!(got.as_ref().err().map(|e| e.kind), want, "case {i}: {got:?}");
+			let left = fs::read_dir(&dir).unwrap().count();
+			if want.is_none() {
+				assert_eq!(fs::read_to_string(&path).unwrap(), "a: 1\n", "case {i}");
+				assert_eq!(left, 1, "case {i}");
+			} else {
+				assert_eq!(left, 0, "case {i}");
+			}
+			fs::remove_dir_all(&dir).unwrap(); // made above
+		}
 	}
 }
