@@ -283,7 +283,7 @@ Go names are listed. Rust uses the same words in snake case, and `ShclDoc` has t
 | `d.Remove(path)`          | Takes out a path and everything under it, and says how many instances went. That's every instance, and also the ones under any step that repeats.
 
 - A Go `float32` or Rust `f32` is written as its own shortest digits, so 0.9 is written `0.9` and not as the float64 it widens to. C has `shclw_put_float32` for a `float`.
-	- A tie between 2 spellings goes to the even one, except at a float32 power of 2, where Go rounds up. Rust and C give the same digits as Go.
+	- A tie between 2 spellings goes to the even one. Rust and C give the same digits as Go. go1.26 alone rounds the tie at 2^-12 up, so Go evens that one out itself (2026102519333440).
 
 - Infinity and NaN are refused with `BadValue`, and nothing changes, since no read would take them back.
 

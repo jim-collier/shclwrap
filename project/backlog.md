@@ -231,23 +231,6 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- shcl 2.0 on Windows could lose the old file when a replace failed. 3.0 fixed it, and Wovenshell still keeps its own restore. The wrapper's own 1.2 write needs the same check.
 		- 2026-10-24, CICD reset: this is the reset's `other hosts and VMs` item, raised to High, per `Other hosts and VMs` in the shared CICD rules. The default run builds and tests on the test boxes: Windows on b29w, with vm925w for timed work, and macOS on b26 or vmKt6m. Each box is held through the shared host lock by `wrap` for the whole time it's used, and a VM is put back the way it was found through the VM state helper. `--no-remote` skips them, a box that isn't there is a `SKIP` that never stops a run, and each box gets a work folder of its own under its temp root. `b29w`, never `b29w-wif`.
 
-- Go 1.27 prints a float32 halfway value differently
-	- ID: 2026102519333440
-	- Type: Bug
-	- Status: Queued
-	- Severity: Avg
-	- Opened: 2026-10-25 19:33
-	- Opened by: JC
-	- Related IDs: 2026102519333240
-	- Steps to reproduce [Bug]:
-		- In `source/go`, run `GOTOOLCHAIN=go1.27.3 go test -count=1 -run TestPutFloat32 ./shclw/`.
-	- Incorrect behavior [Bug]:
-		- `v3 0.00024414062: read back Good 0.00024414062, want 0.00024414063`.
-	- Expected behavior [Bug]:
-		- It passes, as it does on the pinned go1.26.2. Float ties print by Go's rule in every language, so a Go program built with 1.27 would write a value Rust, C and Python don't.
-	- Reproduced [Bug]: 2026-10-25, with go1.27.3 on b23 (linux/amd64) and on b26 (darwin/amd64). go1.26.2 passes on both.
-	- Possible cause [Bug]: Go 1.27 changed how `strconv` rounds a float32 halfway case. Not looked into yet.
-
 - The upgrade's read-back against 2.0 skips a repeated key
 	- ID: 2026102816332481
 	- Type: Bug
@@ -697,6 +680,43 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Opened by: JC
 	- Related IDs: 2026101513330009
 	- Note: `Merged` finds them with a second parse in each language. shcl's parser sees each fold, so a call there would be cheaper and could take that code's place.
+
+- Go 1.27 prints a float32 halfway value differently
+	- ID: 2026102519333440
+	- Type: Bug
+	- Status: Done
+	- Severity: Avg
+	- Opened: 2026-10-25 19:33
+	- Opened by: JC
+	- Related IDs: 2026102519333240, 2026101517145204
+	- Steps to reproduce [Bug]:
+		- In `source/go`, run `GOTOOLCHAIN=go1.27.3 go test -count=1 -run TestPutFloat32 ./shclw/`.
+	- Incorrect behavior [Bug]:
+		- `v3 0.00024414062: read back Good 0.00024414062, want 0.00024414063`.
+	- Expected behavior [Bug]:
+		- It passes, as it does on the pinned go1.26.2. Float ties print by Go's rule in every language, so a Go program built with 1.27 would write a value Rust, C and Python don't.
+	- Reproduced [Bug]: 2026-10-25, with go1.27.3 on b23 (linux/amd64) and on b26 (darwin/amd64). go1.26.2 passes on both.
+	- Possible cause [Bug]: Go 1.27 changed how `strconv` rounds a float32 halfway case. Not looked into yet.
+	- Actual cause [Bug]:
+		- go1.26's float32 shortest digits round the tie at 2^-12 up, the slip 2026101517145204 noted. go1.25 and go1.27 round it to even. Over every finite float32, that value and its negative are the only ones whose digits differ between go1.26.2 and go1.27.3, or go1.25.5. float64 digits are the same in all 3.
+		- Rust and C copied go1.26's round-up at every float32 power of 2, and the tests held 0.00024414063.
+	- Decisions:
+		- The even spelling everywhere, since it's Go's rule in every release but go1.26, and the round-up was a slip. A Go program then writes the same digits whatever Go builds it, and Rust and C lose a special case.
+		- Go evens out 2^-12 itself, by value, so go1.26 gives the same. It can go once the Go floor is past 1.26.
+		- The float64 round-up at a power of 2 stays. Go does it in all 3 releases.
+		- A file that already holds 0.00024414063 reads back as the same float32.
+	- Actual fix [Bug]: A float32 tie goes to even in Go, Rust and C, 2^-12 included. design.md says so.
+	- Progress log:
+		- 2026-10-28: Updated asserts in `TestPutFloat32` (ddzzn), `put_f32` (ddzzp), `test_put_float32` (de05j) and `test_shortest` (de05p): 2^-12 from 0.00024414063 to 0.00024414062, or digits 24414063 to 24414062. Its negative is added to the first 3.
+	- Verified:
+		- `TestPutFloat32` passes on go1.25.5, go1.26.2 and go1.27.3, and fails on go1.26.2 with the Go fix taken out. `put_f32`, `test_put_float32` and `test_shortest` fail with the old Rust and C and pass with the new.
+		- Rust's `f32` put and C's float32 digits give the same float64 as go1.27.3 for 3,986,088 float32 values: every power of 2 with 3 neighbors each side, both signs, and 2 million random ones.
+		- `--backlog-run-quick` over every area passed, lint CLEAN. `c-checks.bash lint 3` passed.
+	- Swept: every float32 path in the 4 bindings: Go `Normalize`, Rust `From<f32>` through `shortest`, C `shclw_put_float32` through `shclw_i_shortest`. Python has no float32 type, and the ops scripts and the fuzz have no float32. shcl's Go binding has no float32 path, so nothing for shcl.
+	- Branch: r1028
+	- Test case: Go `TestPutFloat32` (ddzzn), Rust `put_f32` (ddzzp), C `test_put_float32` (de05j) and `test_shortest` (de05p).
+	- Closed: 20261028-17082630
+	- Acceptance signoff: Self-closed: the test fails before and passes after on go1.26.2, and passes on go1.27.3. The issue expected the old want to pass on 1.27. Its want changed instead, since 1.27's digits are Go's rule and 1.26's were the slip.
 
 - Rename the project shclwrap
 	- ID: 2026101513524769

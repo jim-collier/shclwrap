@@ -1215,8 +1215,8 @@ pub fn format_float(f: f64) -> String {
 
 /// The shortest digits that read back as `f`, or as `f` taken as an f32
 /// with `single`, in `{:e}` form, as Go's strconv gives them. Rust rounds an
-/// exact tie at that length away from zero, and Go to even, except at a power
-/// of 2 (`shclw_i_shortest` in the C wrapper has why).
+/// exact tie at that length away from zero, and Go to even, except at an f64
+/// power of 2 (`shclw_i_shortest` in the C wrapper has why).
 fn shortest(f: f64, single: bool) -> String {
 	#[allow(clippy::cast_possible_truncation)]
 	let at = |prec: Option<usize>| match (single, prec) {
@@ -1226,16 +1226,10 @@ fn shortest(f: f64, single: bool) -> String {
 		(true, Some(p)) => format!("{:.p$e}", f as f32),
 	};
 	let s = at(None);
-	#[allow(clippy::cast_possible_truncation)]
-	let (pow2, field, odd_one) = if single {
-		let b = (f as f32).to_bits();
-		(b.trailing_zeros() >= 23, u64::from((b >> 23) & 0xff), 73)
-	} else {
-		let b = f.to_bits();
-		(b.trailing_zeros() >= 52, (b >> 52) & 0x7ff, 998)
-	};
-	// Go leaves 2^-25, or as an f32 2^-54, at even.
-	if pow2 && field != 0 && field != odd_one {
+	let b = f.to_bits();
+	let field = (b >> 52) & 0x7ff;
+	// Go leaves 2^-25 at even.
+	if !single && b.trailing_zeros() >= 52 && field != 0 && field != 998 {
 		return s;
 	}
 	let n = s.bytes().take_while(|&c| c != b'e').filter(u8::is_ascii_digit).count();

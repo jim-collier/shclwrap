@@ -540,9 +540,10 @@ static void test_put_float32(void) {
 		{FLT_MAX, 3.4028235e+38, NULL},
 		{16777216, 1.6777216e+07, NULL},
 		{FLT_TRUE_MIN, 1e-45, NULL},
-		// 2^-12 is an exact tie at 8 digits. Go rounds it up, where glibc's
-	    // printf goes to even.
-		{0x1p-12f, 0.00024414063, NULL},
+		// 2^-12 is an exact tie at 8 digits, which goes to even. go1.26
+	    // alone rounds it up.
+		{0x1p-12f, 0.00024414062, NULL},
+		{-0x1p-12f, -0.00024414062, NULL},
 		{-0.0f, -0.0, NULL},
 	};
 	for (size_t i = 0; i < sizeof cases / sizeof cases[0]; i++) {
@@ -562,8 +563,8 @@ static void test_put_float32(void) {
 }
 
 // The digits floats print and float32 puts write with, against Go's
-// strconv.FormatFloat. An exact tie goes to even. At a power of 2 it goes
-// up, except the one Go leaves at even.
+// strconv.FormatFloat. An exact tie goes to even. At a float64 power of 2
+// it goes up, except the one Go leaves at even.
 static void test_shortest(void) {
 	static const struct {
 		double f;
@@ -573,7 +574,7 @@ static void test_shortest(void) {
 	} cases[] = {
 		{0x1p-25, "29802322387695312", -8, false},
 		{-0x1p-25, "29802322387695312", -8, false},
-		{0x1p-12, "24414063", -4, true},
+		{0x1p-12, "24414062", -4, true},
 		{0x1p-54, "5551115", -17, true},
 		{7.120236347223045e-307, "7120236347223045", -307, false},
 		{0.1, "1", -1, false},
