@@ -717,6 +717,7 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Test case: Go `TestPutFloat32` (ddzzn), Rust `put_f32` (ddzzp), C `test_put_float32` (de05j) and `test_shortest` (de05p).
 	- Closed: 20261028-17082630
 	- Acceptance signoff: Self-closed: the test fails before and passes after on go1.26.2, and passes on go1.27.3. The issue expected the old want to pass on 1.27. Its want changed instead, since 1.27's digits are Go's rule and 1.26's were the slip.
+	- Commit: 82b18e2
 
 - Rename the project shclwrap
 	- ID: 2026101513524769
