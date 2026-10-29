@@ -38,6 +38,28 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Note: vmKt6m has only the command line tools' Python 3.9.6, and the cases' runner needs 3.11. Its Homebrew builds every formula from source.
 	- Waits on the question in questions.md about how to put Python there.
 
+- Upgrade splits a quoted comma on a repeated key
+	- ID: 2026102814295798
+	- Type: Bug
+	- Status: Waiting on automated testing
+	- Needs local test suite run?: Yes, the full run with 2026102816215624.
+	- Opened: 20261028-142957
+	- Opened by: JC
+	- Related IDs: 2026102618065640, gitniblet-floss:2026102621002700, shcl:2026102620591100
+	- Steps to reproduce [Bug]: `Upgrade("row: idx=2, title=\"a, b\"\nrow: idx=3, title='x=y'\n", 2)` at 54dc6c6.
+	- Incorrect behavior [Bug]: The first row comes out as `row: [idx=2, 'title="a', 'b"']`, split at the comma, so a program that reads the row by field loses data.
+	- Expected behavior [Bug]: `row: [idx=2, 'title="a, b"']`, as 2.0 read it. With one `row:` line, or each under its own parent, it does come out that way.
+	- Possible cause [Bug]: `mendReads` skips a path where `old.Count(p) != 1` or `now.Count(p) != 1`, so a key that repeats under one parent is never mended. Seed rows always repeat.
+	- Reproduced [Bug]: 20261028 at d55ac94, in Go, in shared case 064. A `#` inside quotes did worse: `note="x # y"` came out as `'note="x'`, with `# y"` left as a comment.
+	- Actual cause [Bug]:
+		- shcl's conversion split a 2.x element at a comma inside quotes, and ended it at a `#` there. `mendReads` set a value back only on a key with one instance, so a repeated key kept the split.
+	- Priority: High
+	- Found by gitniblet-floss 2026102621002700, which keeps its own seed-row rewrite until this is in. shcl 2026102620591100 now reads a closed mid-piece quote as 2.0 did, so the next shcl pin may make `mendReads` needless here. High, since the split loses a field's value.
+	- Actual fix [Bug]: The pin to shcl `a010fdf8` (2026102816215624), whose conversion reads a closed quote inside a piece as 2.0 did, repeated keys included. `mendReads` is gone.
+	- Branch: r1028
+	- Test case: tests/cases/064-upgrade-repeated-quoted-comma (dejcx). It failed at d55ac94 in Go, and passes after in Go, Rust, C and Python.
+	- Swept: the 4 bindings, as in 2026102816215624. The read-back against 2.0 skips a repeated key too, so nothing caught the split. That's 2026102816332481.
+
 - Run the tests on macOS
 	- ID: 2026102817403563
 	- Type: Task
@@ -72,28 +94,6 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Branch: r1028
 	- Commit: 4894748
 
-- Upgrade splits a quoted comma on a repeated key
-	- ID: 2026102814295798
-	- Type: Bug
-	- Status: Waiting on automated testing
-	- Needs local test suite run?: Yes, the full run with 2026102816215624.
-	- Opened: 20261028-142957
-	- Opened by: JC
-	- Related IDs: 2026102618065640, gitniblet-floss:2026102621002700, shcl:2026102620591100
-	- Steps to reproduce [Bug]: `Upgrade("row: idx=2, title=\"a, b\"\nrow: idx=3, title='x=y'\n", 2)` at 54dc6c6.
-	- Incorrect behavior [Bug]: The first row comes out as `row: [idx=2, 'title="a', 'b"']`, split at the comma, so a program that reads the row by field loses data.
-	- Expected behavior [Bug]: `row: [idx=2, 'title="a, b"']`, as 2.0 read it. With one `row:` line, or each under its own parent, it does come out that way.
-	- Possible cause [Bug]: `mendReads` skips a path where `old.Count(p) != 1` or `now.Count(p) != 1`, so a key that repeats under one parent is never mended. Seed rows always repeat.
-	- Reproduced [Bug]: 20261028 at d55ac94, in Go, in shared case 064. A `#` inside quotes did worse: `note="x # y"` came out as `'note="x'`, with `# y"` left as a comment.
-	- Actual cause [Bug]:
-		- shcl's conversion split a 2.x element at a comma inside quotes, and ended it at a `#` there. `mendReads` set a value back only on a key with one instance, so a repeated key kept the split.
-	- Priority: High
-	- Found by gitniblet-floss 2026102621002700, which keeps its own seed-row rewrite until this is in. shcl 2026102620591100 now reads a closed mid-piece quote as 2.0 did, so the next shcl pin may make `mendReads` needless here. High, since the split loses a field's value.
-	- Actual fix [Bug]: The pin to shcl `a010fdf8` (2026102816215624), whose conversion reads a closed quote inside a piece as 2.0 did, repeated keys included. `mendReads` is gone.
-	- Branch: r1028
-	- Test case: tests/cases/064-upgrade-repeated-quoted-comma (dejcx). It failed at d55ac94 in Go, and passes after in Go, Rust, C and Python.
-	- Swept: the 4 bindings, as in 2026102816215624. The read-back against 2.0 skips a repeated key too, so nothing caught the split. That's 2026102816332481.
-
 - Pin shcl dev a010fdf8, which reads 2.x quoted commas as 2.0 did and keeps each line on upgrade
 	- ID: 2026102816215624
 	- Type: Task
@@ -115,6 +115,65 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Test case: deftf, deftg and dejcx (shared cases 062, 063 and 064), and de5cq, de5cw, de5eq and de5es for the want files that moved.
 	- Swept: `mendReads` in Go, `mend_reads` in Rust, C and Python, each one's `Upgrade` call site, and the doc comments on `Upgrade` and `KeepBlanks` in all 4. design.md's Format and upgrade. `UpgradeFile` and `Open` go through `Upgrade`, and nothing else called it.
 	- Verified: `cicd/cicd.bash --backlog-run-quick go rust python c` passed, lint CLEAN, with all 64 shared cases in Go, Rust, C and Python. `bash cicd/c-checks.bash lint 3 WORK` passed, clang-tidy and analyze-shcl included, and so did `bash cicd/c-checks.bash leakcheck 3 WORK`: CodeQL, CTU, the analyzers and the heaptrack soak, with 0 shcl findings at the new pin.
+
+- Run the tests on Windows and macOS
+	- ID: 2026101512024174
+	- Type: Task
+	- Status: Waiting on automated testing
+	- Needs local test suite run?: Yes, `--backlog-run-full`, for the Other hosts step (dejex) inside a whole run, and dejey in its tests.
+	- Priority: High
+	- Opened: 2026-10-15
+	- Opened by: JC
+	- Requirements:
+		- The shared cases on Windows and macOS, mostly for the atomic write.
+		- Sweeping override, 2026-10-24: this supersedes any earlier decision on this project that conflicts with it.
+	- Notes:
+		- shcl 2.0 on Windows could lose the old file when a replace failed. 3.0 fixed it, and Wovenshell still keeps its own restore. The wrapper's own 1.2 write needs the same check.
+		- 2026-10-24, CICD reset: this is the reset's `other hosts and VMs` item, raised to High, per `Other hosts and VMs` in the shared CICD rules. The default run builds and tests on the test boxes: Windows on b29w, with vm925w for timed work, and macOS on b26 or vmKt6m. Each box is held through the shared host lock by `wrap` for the whole time it's used, and a VM is put back the way it was found through the VM state helper. `--no-remote` skips them, a box that isn't there is a `SKIP` that never stops a run, and each box gets a work folder of its own under its temp root. `b29w`, never `b29w-wif`.
+	- Children: macOS is 2026102817403563, and a test that makes a Windows replace fail is 2026102817403582. This item closes with them.
+	- Progress log:
+		- 2026-10-28: A full run's new Other hosts step runs the Go, Rust, Python and C tests and the shared cases natively on b29w, held through the host lock's wrap. The box gets the tracked tree as it is on disk and the pinned shcl caches, in a work folder of its own under its temp root, removed at the end. Each line keeps its test's ID with "on b29w" added. `--no-remote` and both quick runs leave it out. design.md, Testing, says how.
+		- `058-write-mode` failed on Windows in all 4 languages, since Windows ignores the mode by design. A `# Not on Windows:` line in its ops.txt now makes each language's runner say SKIP there with the reason.
+		- Verified: on b29w, 351 PASS lines and 7 SKIP lines (058 in all 4, plus 3 that skip on Windows already), with no FAIL, in about 3 minutes. Before the 058 line, the same run gave 4 FAIL lines, one for 058 in each language. dejey passes, and fails with a box that's away counted as a failure. deean fails on a removal in the box script that skips its guard. The box's run folder is gone after each run, and a planted run folder 5 days old went at the next run's start while a folder of another shape stayed. `--backlog-run-quick` over every area passed, lint CLEAN, and PSScriptAnalyzer is clean on the box script.
+	- Decisions:
+		- b29w only for now, per the shared rules, and vm925w not at all, since nothing here is timed.
+		- The box gets the tree on disk, not a commit, so it tests what the run tests here, uncommitted edits included.
+		- Not on Windows is a whole-case skip with its reason, not a second want file for Windows, since a second want file would need keeping by hand, and the case's writes are covered by others there.
+		- The quick runs leave the step out: waiting in line for a box can take 15 minutes.
+		- Rust builds cold in each run's folder on the box. A target folder kept between runs failed Rust's cases on the next run, since its test binary still pointed at the last run's folder.
+		- The box removes its own folder through a guard of the same kind as safe-rm.bash, and deean allows that one line.
+		- The 1.2 write that the note names was dropped with the 3.0 floor, along with the 2.0 adapter, so there's no wrapper write of its own left to check. The atomic write's failure path on Windows is 2026102817403582.
+	- Swept: the Not on Windows line in all 4 languages' case runners: Go's `TestCases`, Rust's `tests/cases.rs`, and `cicd/c_cases.py` for C and Python. Go's `BenchmarkCases` and the fuzz never run on Windows. The pre-push hook and ci.yml pass `--no-remote`, so neither reaches a box.
+	- Test case: dejex, the Other hosts step's line for the box, with each test's own line from b29w; dejey, `cicd/remote-skip-test.bash`, for a box that's away or can't be held.
+	- Commit: f453c15
+
+- The upgrade's read-back against 2.0 skips a repeated key
+	- ID: 2026102816332481
+	- Type: Bug
+	- Status: Waiting on automated testing
+	- Needs local test suite run?: Yes, the full run, for the C analyzers, CodeQL and CTU over the new walk in `shclw3_v2.c`.
+	- Severity: Avg
+	- Opened: 20261028-163324
+	- Opened by: JC
+	- Related IDs: 2026102814295798, 2026101910455900
+	- Steps to reproduce:
+		- At d55ac94, `Upgrade("row: idx=2, title=\"a, b\"\nrow: idx=3\n", 2)` in Go.
+	- Incorrect behavior: The split row came back with no error. `checkReads` and its twins read a value back only where 2.0 has one instance of the path, so a repeated key, such as a seed row, is never checked.
+	- Expected behavior: Each instance 2.0 read is read back, and one that reads differently is refused, as a single key is.
+	- Possible cause: 3.0 reads one instance with `(i)` on the segment, as `InstancePaths` writes it, and 2.0 with `[i]`, so the two walks need pairing instance by instance.
+	- Note: Nothing reads wrong at `a010fdf8`, as far as the shared cases go. This is the net for the next shcl change, in all 4 bindings.
+	- Reproduced: 20261028 at e7b574c, in Go, Rust, C and Python. The read-back of 2.0's two `row:` lines against the split text gave no error.
+	- Actual cause:
+		- `checkReads` and its twins skipped every path 2.0 has more than one instance of.
+	- Decisions:
+		- Instances are paired in order, the i-th 2.0 reads at `p[#i]` against the i-th 3.0 reads at `p(i)`, and only where both have as many. Where the counts differ, the ones past the shorter are lost, as before, and none is compared, since the pairing can't be trusted then.
+		- An instance 2.0 read that 3.0 reads as nothing is lost, as a single key's is.
+		- The tests call the read-back directly with the split text, since no real input splits at the pin. C has a test hook for it, `shclw_i_check_reads`.
+	- Actual fix: Each instance of a repeated key is read back on its own, in all 4. design.md's Format and upgrade says so.
+	- Branch: r1028
+	- Test case: dejef (Go `TestCheckReadsRepeated`), dejeg (Rust `check_reads_repeated`), dejeh (Python `CheckReads.test_repeated`), dejej (C `test_check_reads_repeated`). Each failed before the fix and passes after.
+	- Swept: `checkReads` in Go `shclw3`, `check_reads` in Rust `v3`, Python, and C, with the 2.0 walk in `shclw3_v2.c`. No other code compares 2.0's reads with 3.0's, since `mendReads` is gone. `UpgradeFile` and `Open` go through `Upgrade` in each.
+	- Verified: `cicd/cicd.bash --backlog-run-quick go rust python c` passed, lint CLEAN. 4,000 generated 2.x files with repeated keys and reopened blocks upgraded with no W002 in Go.
 
 - Create-only Write
 	- ID: 2026101513330015
@@ -263,65 +322,6 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- shcl's Go module path is still `.../v2`, and Go won't take a v3 tag on it. Go stays on a commit until that changes.
 		- Quillroute plans to have its release refuse a commit pin. The same check would fit here.
 		- 2026-10-25: Until the beta, the pin follows shcl's newest dev commit, not an old one. `cicd/bump-shcl.bash` moves every 3.0 pin at once. Moved from `ea0998fa` to `a65eceb8`.
-
-- Run the tests on Windows and macOS
-	- ID: 2026101512024174
-	- Type: Task
-	- Status: Waiting on automated testing
-	- Needs local test suite run?: Yes, `--backlog-run-full`, for the Other hosts step (dejex) inside a whole run, and dejey in its tests.
-	- Priority: High
-	- Opened: 2026-10-15
-	- Opened by: JC
-	- Requirements:
-		- The shared cases on Windows and macOS, mostly for the atomic write.
-		- Sweeping override, 2026-10-24: this supersedes any earlier decision on this project that conflicts with it.
-	- Notes:
-		- shcl 2.0 on Windows could lose the old file when a replace failed. 3.0 fixed it, and Wovenshell still keeps its own restore. The wrapper's own 1.2 write needs the same check.
-		- 2026-10-24, CICD reset: this is the reset's `other hosts and VMs` item, raised to High, per `Other hosts and VMs` in the shared CICD rules. The default run builds and tests on the test boxes: Windows on b29w, with vm925w for timed work, and macOS on b26 or vmKt6m. Each box is held through the shared host lock by `wrap` for the whole time it's used, and a VM is put back the way it was found through the VM state helper. `--no-remote` skips them, a box that isn't there is a `SKIP` that never stops a run, and each box gets a work folder of its own under its temp root. `b29w`, never `b29w-wif`.
-	- Children: macOS is 2026102817403563, and a test that makes a Windows replace fail is 2026102817403582. This item closes with them.
-	- Progress log:
-		- 2026-10-28: A full run's new Other hosts step runs the Go, Rust, Python and C tests and the shared cases natively on b29w, held through the host lock's wrap. The box gets the tracked tree as it is on disk and the pinned shcl caches, in a work folder of its own under its temp root, removed at the end. Each line keeps its test's ID with "on b29w" added. `--no-remote` and both quick runs leave it out. design.md, Testing, says how.
-		- `058-write-mode` failed on Windows in all 4 languages, since Windows ignores the mode by design. A `# Not on Windows:` line in its ops.txt now makes each language's runner say SKIP there with the reason.
-		- Verified: on b29w, 351 PASS lines and 7 SKIP lines (058 in all 4, plus 3 that skip on Windows already), with no FAIL, in about 3 minutes. Before the 058 line, the same run gave 4 FAIL lines, one for 058 in each language. dejey passes, and fails with a box that's away counted as a failure. deean fails on a removal in the box script that skips its guard. The box's run folder is gone after each run, and a planted run folder 5 days old went at the next run's start while a folder of another shape stayed. `--backlog-run-quick` over every area passed, lint CLEAN, and PSScriptAnalyzer is clean on the box script.
-	- Decisions:
-		- b29w only for now, per the shared rules, and vm925w not at all, since nothing here is timed.
-		- The box gets the tree on disk, not a commit, so it tests what the run tests here, uncommitted edits included.
-		- Not on Windows is a whole-case skip with its reason, not a second want file for Windows, since a second want file would need keeping by hand, and the case's writes are covered by others there.
-		- The quick runs leave the step out: waiting in line for a box can take 15 minutes.
-		- Rust builds cold in each run's folder on the box. A target folder kept between runs failed Rust's cases on the next run, since its test binary still pointed at the last run's folder.
-		- The box removes its own folder through a guard of the same kind as safe-rm.bash, and deean allows that one line.
-		- The 1.2 write that the note names was dropped with the 3.0 floor, along with the 2.0 adapter, so there's no wrapper write of its own left to check. The atomic write's failure path on Windows is 2026102817403582.
-	- Swept: the Not on Windows line in all 4 languages' case runners: Go's `TestCases`, Rust's `tests/cases.rs`, and `cicd/c_cases.py` for C and Python. Go's `BenchmarkCases` and the fuzz never run on Windows. The pre-push hook and ci.yml pass `--no-remote`, so neither reaches a box.
-	- Test case: dejex, the Other hosts step's line for the box, with each test's own line from b29w; dejey, `cicd/remote-skip-test.bash`, for a box that's away or can't be held.
-	- Commit: f453c15
-
-- The upgrade's read-back against 2.0 skips a repeated key
-	- ID: 2026102816332481
-	- Type: Bug
-	- Status: Waiting on automated testing
-	- Needs local test suite run?: Yes, the full run, for the C analyzers, CodeQL and CTU over the new walk in `shclw3_v2.c`.
-	- Severity: Avg
-	- Opened: 20261028-163324
-	- Opened by: JC
-	- Related IDs: 2026102814295798, 2026101910455900
-	- Steps to reproduce:
-		- At d55ac94, `Upgrade("row: idx=2, title=\"a, b\"\nrow: idx=3\n", 2)` in Go.
-	- Incorrect behavior: The split row came back with no error. `checkReads` and its twins read a value back only where 2.0 has one instance of the path, so a repeated key, such as a seed row, is never checked.
-	- Expected behavior: Each instance 2.0 read is read back, and one that reads differently is refused, as a single key is.
-	- Possible cause: 3.0 reads one instance with `(i)` on the segment, as `InstancePaths` writes it, and 2.0 with `[i]`, so the two walks need pairing instance by instance.
-	- Note: Nothing reads wrong at `a010fdf8`, as far as the shared cases go. This is the net for the next shcl change, in all 4 bindings.
-	- Reproduced: 20261028 at e7b574c, in Go, Rust, C and Python. The read-back of 2.0's two `row:` lines against the split text gave no error.
-	- Actual cause:
-		- `checkReads` and its twins skipped every path 2.0 has more than one instance of.
-	- Decisions:
-		- Instances are paired in order, the i-th 2.0 reads at `p[#i]` against the i-th 3.0 reads at `p(i)`, and only where both have as many. Where the counts differ, the ones past the shorter are lost, as before, and none is compared, since the pairing can't be trusted then.
-		- An instance 2.0 read that 3.0 reads as nothing is lost, as a single key's is.
-		- The tests call the read-back directly with the split text, since no real input splits at the pin. C has a test hook for it, `shclw_i_check_reads`.
-	- Actual fix: Each instance of a repeated key is read back on its own, in all 4. design.md's Format and upgrade says so.
-	- Branch: r1028
-	- Test case: dejef (Go `TestCheckReadsRepeated`), dejeg (Rust `check_reads_repeated`), dejeh (Python `CheckReads.test_repeated`), dejej (C `test_check_reads_repeated`). Each failed before the fix and passes after.
-	- Swept: `checkReads` in Go `shclw3`, `check_reads` in Rust `v3`, Python, and C, with the 2.0 walk in `shclw3_v2.c`. No other code compares 2.0's reads with 3.0's, since `mendReads` is gone. `UpgradeFile` and `Open` go through `Upgrade` in each.
-	- Verified: `cicd/cicd.bash --backlog-run-quick go rust python c` passed, lint CLEAN. 4,000 generated 2.x files with repeated keys and reopened blocks upgraded with no W002 in Go.
 
 - Let an upgrade keep a backtick value as 3.0 reads it
 	- ID: 2026102618065645
@@ -773,72 +773,6 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Related IDs: 2026101513330009
 	- Note: `Merged` finds them with a second parse in each language. shcl's parser sees each fold, so a call there would be cheaper and could take that code's place.
 
-- Windows: a replace that fails keeps the old file
-	- ID: 2026102817403582
-	- Type: Task
-	- Status: Done
-	- Opened: 20261028-174035
-	- Opened by: JC
-	- Parent ID: 2026101512024174
-	- Related IDs: 2026101513330015
-	- Priority: High
-	- Requirements:
-		- A test in each of the 4 languages, Windows only: the file is held open so the replace fails, and the old file is still whole after, with no temp file left beside it.
-		- It runs in the Other hosts step, on b29w.
-	- Note: split from 2026101512024174. shcl 2.0 on Windows could lose the old file when a replace failed, and that issue's Windows run has no test that makes a replace fail.
-	- Progress log:
-		- 2026-10-28: A Windows only test in each language holds the file open without delete sharing, so the replace fails. The save is `io`, the old file is whole, nothing else is in the folder, and no backup is named. Once the file is let go the save goes through. It does this for a current file, one `Open` upgraded in memory, and `UpgradeFile`. Elsewhere each says SKIP with its reason. design.md, Other hosts, names them.
-		- No binding failed it, so nothing else changed. shcl 3.0's ReplaceFile and its rename fallback both fail on the held file, and the temp file goes.
-		- Verified: on b29w through `cicd/remote-test.bash windows`, dejfx, dejfy, dejfz and dejg0 PASS, with no FAIL line. `--backlog-run-quick` over every area passed, lint CLEAN, with all 4 saying SKIP there. The C container lint passed, `make mingw` (decbj) included.
-		- Watched to fail on b29w: with the failed save's backup kept, Python's and C's tests failed on the upgraded file and `UpgradeFile`, and so did C's `test_replace_read`. With the old file overwritten in place after a failed replace, Go's and Rust's failed on the upgraded file.
-		- Not covered: a failed replace that deletes the old file, since the hold blocks a delete too. ReplaceFile's own case for that (1177) is shcl's `TestFailedPublishLosesNeitherFile`.
-	- Decisions:
-		- The hold keeps read and write sharing and drops only delete, as Go's `os.Open`, Python's `open` and C's `fopen` open a file there. The wrapper's read before the save still works, and only the replace fails. Rust's std shares delete by default, so its test sets the share mode itself.
-		- `UpgradeFile` is in the test too, since it replaces the file the same way and makes a backup that has to go when the replace fails.
-	- Swept: the failed replace in all 4 bindings, Go `ReplaceRead`, Rust `replace_read`, Python `_replace_read` and C `shclw_i_replace_read`, through `Write` over a current and an upgraded file and through `UpgradeFile`. A write with a mode over a file that's there goes through the same atomic write. `WriteOpts.Create` never replaces, and 057 and the create races already run on Windows.
-	- Test case: dejfx Go `TestWriteHeldOpen`, dejfy Rust `write_held_open`, dejfz Python `WriteHeldOpen.test_held` and dejg0 C `test_write_held_open`, each on b29w in the Other hosts step (dejex).
-	- Closed: 2026-10-28 18:20
-	- Acceptance signoff: Self-closed: the test runs in all 4 languages on b29w, passes, and was watched to fail. No binding needed a change.
-	- Commit: 5e92a2d
-
-- Go 1.27 prints a float32 halfway value differently
-	- ID: 2026102519333440
-	- Type: Bug
-	- Status: Done
-	- Severity: Avg
-	- Opened: 2026-10-25 19:33
-	- Opened by: JC
-	- Related IDs: 2026102519333240, 2026101517145204
-	- Steps to reproduce [Bug]:
-		- In `source/go`, run `GOTOOLCHAIN=go1.27.3 go test -count=1 -run TestPutFloat32 ./shclw/`.
-	- Incorrect behavior [Bug]:
-		- `v3 0.00024414062: read back Good 0.00024414062, want 0.00024414063`.
-	- Expected behavior [Bug]:
-		- It passes, as it does on the pinned go1.26.2. Float ties print by Go's rule in every language, so a Go program built with 1.27 would write a value Rust, C and Python don't.
-	- Reproduced [Bug]: 2026-10-25, with go1.27.3 on b23 (linux/amd64) and on b26 (darwin/amd64). go1.26.2 passes on both.
-	- Possible cause [Bug]: Go 1.27 changed how `strconv` rounds a float32 halfway case. Not looked into yet.
-	- Actual cause [Bug]:
-		- go1.26's float32 shortest digits round the tie at 2^-12 up, the slip 2026101517145204 noted. go1.25 and go1.27 round it to even. Over every finite float32, that value and its negative are the only ones whose digits differ between go1.26.2 and go1.27.3, or go1.25.5. float64 digits are the same in all 3.
-		- Rust and C copied go1.26's round-up at every float32 power of 2, and the tests held 0.00024414063.
-	- Decisions:
-		- The even spelling everywhere, since it's Go's rule in every release but go1.26, and the round-up was a slip. A Go program then writes the same digits whatever Go builds it, and Rust and C lose a special case.
-		- Go evens out 2^-12 itself, by value, so go1.26 gives the same. It can go once the Go floor is past 1.26.
-		- The float64 round-up at a power of 2 stays. Go does it in all 3 releases.
-		- A file that already holds 0.00024414063 reads back as the same float32.
-	- Actual fix [Bug]: A float32 tie goes to even in Go, Rust and C, 2^-12 included. design.md says so.
-	- Progress log:
-		- 2026-10-28: Updated asserts in `TestPutFloat32` (ddzzn), `put_f32` (ddzzp), `test_put_float32` (de05j) and `test_shortest` (de05p): 2^-12 from 0.00024414063 to 0.00024414062, or digits 24414063 to 24414062. Its negative is added to the first 3.
-	- Verified:
-		- `TestPutFloat32` passes on go1.25.5, go1.26.2 and go1.27.3, and fails on go1.26.2 with the Go fix taken out. `put_f32`, `test_put_float32` and `test_shortest` fail with the old Rust and C and pass with the new.
-		- Rust's `f32` put and C's float32 digits give the same float64 as go1.27.3 for 3,986,088 float32 values: every power of 2 with 3 neighbors each side, both signs, and 2 million random ones.
-		- `--backlog-run-quick` over every area passed, lint CLEAN. `c-checks.bash lint 3` passed.
-	- Swept: every float32 path in the 4 bindings: Go `Normalize`, Rust `From<f32>` through `shortest`, C `shclw_put_float32` through `shclw_i_shortest`. Python has no float32 type, and the ops scripts and the fuzz have no float32. shcl's Go binding has no float32 path, so nothing for shcl.
-	- Branch: r1028
-	- Test case: Go `TestPutFloat32` (ddzzn), Rust `put_f32` (ddzzp), C `test_put_float32` (de05j) and `test_shortest` (de05p).
-	- Closed: 20261028-17082630
-	- Acceptance signoff: Self-closed: the test fails before and passes after on go1.26.2, and passes on go1.27.3. The issue expected the old want to pass on 1.27. Its want changed instead, since 1.27's digits are Go's rule and 1.26's were the slip.
-	- Commit: 82b18e2
-
 - Rename the project shclwrap
 	- ID: 2026101513524769
 	- Type: Task
@@ -1077,6 +1011,34 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Swept: `Upgrade` and `UpgradeFile` in Go `shclw3` and Rust `v3`. The 1.2 and 2.0 adapters convert nothing. A format 3 file passed with `from` 2 that 2.0 has errors on, such as `tags: [a, b]`, is still left alone.
 	- Closed: 20261017-11325800
 	- Acceptance signoff: Self-closed: the 2.0 check is now required in every build, per 2026101613005800, and the test failed before the fix and passes after.
+
+- Windows: a replace that fails keeps the old file
+	- ID: 2026102817403582
+	- Type: Task
+	- Status: Done
+	- Opened: 20261028-174035
+	- Opened by: JC
+	- Parent ID: 2026101512024174
+	- Related IDs: 2026101513330015
+	- Priority: High
+	- Requirements:
+		- A test in each of the 4 languages, Windows only: the file is held open so the replace fails, and the old file is still whole after, with no temp file left beside it.
+		- It runs in the Other hosts step, on b29w.
+	- Note: split from 2026101512024174. shcl 2.0 on Windows could lose the old file when a replace failed, and that issue's Windows run has no test that makes a replace fail.
+	- Progress log:
+		- 2026-10-28: A Windows only test in each language holds the file open without delete sharing, so the replace fails. The save is `io`, the old file is whole, nothing else is in the folder, and no backup is named. Once the file is let go the save goes through. It does this for a current file, one `Open` upgraded in memory, and `UpgradeFile`. Elsewhere each says SKIP with its reason. design.md, Other hosts, names them.
+		- No binding failed it, so nothing else changed. shcl 3.0's ReplaceFile and its rename fallback both fail on the held file, and the temp file goes.
+		- Verified: on b29w through `cicd/remote-test.bash windows`, dejfx, dejfy, dejfz and dejg0 PASS, with no FAIL line. `--backlog-run-quick` over every area passed, lint CLEAN, with all 4 saying SKIP there. The C container lint passed, `make mingw` (decbj) included.
+		- Watched to fail on b29w: with the failed save's backup kept, Python's and C's tests failed on the upgraded file and `UpgradeFile`, and so did C's `test_replace_read`. With the old file overwritten in place after a failed replace, Go's and Rust's failed on the upgraded file.
+		- Not covered: a failed replace that deletes the old file, since the hold blocks a delete too. ReplaceFile's own case for that (1177) is shcl's `TestFailedPublishLosesNeitherFile`.
+	- Decisions:
+		- The hold keeps read and write sharing and drops only delete, as Go's `os.Open`, Python's `open` and C's `fopen` open a file there. The wrapper's read before the save still works, and only the replace fails. Rust's std shares delete by default, so its test sets the share mode itself.
+		- `UpgradeFile` is in the test too, since it replaces the file the same way and makes a backup that has to go when the replace fails.
+	- Swept: the failed replace in all 4 bindings, Go `ReplaceRead`, Rust `replace_read`, Python `_replace_read` and C `shclw_i_replace_read`, through `Write` over a current and an upgraded file and through `UpgradeFile`. A write with a mode over a file that's there goes through the same atomic write. `WriteOpts.Create` never replaces, and 057 and the create races already run on Windows.
+	- Test case: dejfx Go `TestWriteHeldOpen`, dejfy Rust `write_held_open`, dejfz Python `WriteHeldOpen.test_held` and dejg0 C `test_write_held_open`, each on b29w in the Other hosts step (dejex).
+	- Closed: 2026-10-28 18:20
+	- Acceptance signoff: Self-closed: the test runs in all 4 languages on b29w, passes, and was watched to fail. No binding needed a change.
+	- Commit: 5e92a2d
 
 - Follow shcl's newest dev commit
 	- ID: 2026102616480100
@@ -2129,6 +2091,44 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Swept: every row of design.md's "evens out" table has a case or an API test that runs on C 1.2 and 2.0, but the 2.x upgrade refusal, which is 3.0's alone. Every call `shclw3.c` defines is in `shclw1.c` and `shclw2.c`, which each link checks. The notes in `shclw.h` and design.md that hold only on 3.0 now say so.
 	- Closed: 20261017-11325800
 	- Acceptance signoff: Self-closed: every shared case passes on all 3 versions. The memory growth goes away with 1.2 and 2.0, in 2026101613005800.
+
+- Go 1.27 prints a float32 halfway value differently
+	- ID: 2026102519333440
+	- Type: Bug
+	- Status: Done
+	- Severity: Avg
+	- Opened: 2026-10-25 19:33
+	- Opened by: JC
+	- Related IDs: 2026102519333240, 2026101517145204
+	- Steps to reproduce [Bug]:
+		- In `source/go`, run `GOTOOLCHAIN=go1.27.3 go test -count=1 -run TestPutFloat32 ./shclw/`.
+	- Incorrect behavior [Bug]:
+		- `v3 0.00024414062: read back Good 0.00024414062, want 0.00024414063`.
+	- Expected behavior [Bug]:
+		- It passes, as it does on the pinned go1.26.2. Float ties print by Go's rule in every language, so a Go program built with 1.27 would write a value Rust, C and Python don't.
+	- Reproduced [Bug]: 2026-10-25, with go1.27.3 on b23 (linux/amd64) and on b26 (darwin/amd64). go1.26.2 passes on both.
+	- Possible cause [Bug]: Go 1.27 changed how `strconv` rounds a float32 halfway case. Not looked into yet.
+	- Actual cause [Bug]:
+		- go1.26's float32 shortest digits round the tie at 2^-12 up, the slip 2026101517145204 noted. go1.25 and go1.27 round it to even. Over every finite float32, that value and its negative are the only ones whose digits differ between go1.26.2 and go1.27.3, or go1.25.5. float64 digits are the same in all 3.
+		- Rust and C copied go1.26's round-up at every float32 power of 2, and the tests held 0.00024414063.
+	- Decisions:
+		- The even spelling everywhere, since it's Go's rule in every release but go1.26, and the round-up was a slip. A Go program then writes the same digits whatever Go builds it, and Rust and C lose a special case.
+		- Go evens out 2^-12 itself, by value, so go1.26 gives the same. It can go once the Go floor is past 1.26.
+		- The float64 round-up at a power of 2 stays. Go does it in all 3 releases.
+		- A file that already holds 0.00024414063 reads back as the same float32.
+	- Actual fix [Bug]: A float32 tie goes to even in Go, Rust and C, 2^-12 included. design.md says so.
+	- Progress log:
+		- 2026-10-28: Updated asserts in `TestPutFloat32` (ddzzn), `put_f32` (ddzzp), `test_put_float32` (de05j) and `test_shortest` (de05p): 2^-12 from 0.00024414063 to 0.00024414062, or digits 24414063 to 24414062. Its negative is added to the first 3.
+	- Verified:
+		- `TestPutFloat32` passes on go1.25.5, go1.26.2 and go1.27.3, and fails on go1.26.2 with the Go fix taken out. `put_f32`, `test_put_float32` and `test_shortest` fail with the old Rust and C and pass with the new.
+		- Rust's `f32` put and C's float32 digits give the same float64 as go1.27.3 for 3,986,088 float32 values: every power of 2 with 3 neighbors each side, both signs, and 2 million random ones.
+		- `--backlog-run-quick` over every area passed, lint CLEAN. `c-checks.bash lint 3` passed.
+	- Swept: every float32 path in the 4 bindings: Go `Normalize`, Rust `From<f32>` through `shortest`, C `shclw_put_float32` through `shclw_i_shortest`. Python has no float32 type, and the ops scripts and the fuzz have no float32. shcl's Go binding has no float32 path, so nothing for shcl.
+	- Branch: r1028
+	- Test case: Go `TestPutFloat32` (ddzzn), Rust `put_f32` (ddzzp), C `test_put_float32` (de05j) and `test_shortest` (de05p).
+	- Closed: 20261028-17082630
+	- Acceptance signoff: Self-closed: the test fails before and passes after on go1.26.2, and passes on go1.27.3. The issue expected the old want to pass on 1.27. Its want changed instead, since 1.27's digits are Go's rule and 1.26's were the slip.
+	- Commit: 82b18e2
 
 - Create-only Write fails on a FAT volume on Windows
 	- ID: 2026102412381602
