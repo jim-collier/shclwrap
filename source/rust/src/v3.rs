@@ -472,8 +472,8 @@ fn old_errors(old: &shcl2::Document) -> Option<Error> {
 	Some(e)
 }
 
-/// Reads every path 2.0 reads one value at in `old` back against `up`, the
-/// upgraded text. shcl's migrate writes the text 2.x read, backslash escapes
+/// Reads every value 2.0 reads in `old` back against `up`, the upgraded
+/// text. shcl's migrate writes the text 2.x read, backslash escapes
 /// included (2026101910455900), so this checks its answer rather than
 /// trusting it. A name 2.0 read with an escape resolved stays as typed, so
 /// it's refused, unless the file names format 1, since 1.2 read names as
@@ -492,25 +492,34 @@ fn check_reads(old: &shcl2::Document, up: &str, names_as_typed: bool) -> Result<
 	}
 	let mut lost = Vec::new();
 	for p in old.paths() {
+		let (had, has, lines) = (old.count(&p), now.count(&p), old.lines(&p));
 		// Instances past the ones 3.0 still has are gone.
-		let (had, has) = (old.count(&p), now.count(&p));
-		lost.extend(old.lines(&p).into_iter().skip(has.min(had)).filter(|&l| l > 0));
-		if had != 1 {
+		lost.extend(lines.iter().skip(has.min(had)).copied().filter(|&l| l > 0));
+		if had != 1 && has != had {
 			continue;
 		}
-		let (was, is) = (old.read_string_array(&p), now.read_string_array(&p));
-		if was.status == shcl2::Status::Good && is.status == shcl::Status::Good && was.value != is.value {
-			bad.push(carry_diag(
-				old.line(&p),
-				"the upgraded file doesn't read this value as shcl 2.0 read it",
-			));
-		}
-		if has == 1
-			&& was.status == shcl2::Status::Good
-			&& is.status != shcl::Status::Good
-			&& now.read_raw(&p).status != shcl::Status::Good
-		{
-			lost.push(old.line(&p));
+		// A repeated key is read one instance at a time, the i-th against
+		// the i-th, as [#i] in 2.0 and (i) in 3.0 (2026102816332481).
+		for (i, &line) in lines.iter().enumerate().take(had) {
+			let (p2, p3) = if had > 1 {
+				(format!("{p}[#{i}]"), format!("{p}({i})"))
+			} else {
+				(p.clone(), p.clone())
+			};
+			let (was, is) = (old.read_string_array(&p2), now.read_string_array(&p3));
+			if was.status == shcl2::Status::Good && is.status == shcl::Status::Good && was.value != is.value {
+				bad.push(carry_diag(
+					line,
+					"the upgraded file doesn't read this value as shcl 2.0 read it",
+				));
+			}
+			if has == had
+				&& was.status == shcl2::Status::Good
+				&& is.status != shcl::Status::Good
+				&& now.read_raw(&p3).status != shcl::Status::Good
+			{
+				lost.push(line);
+			}
 		}
 	}
 	if bad.is_empty() {
@@ -1148,4 +1157,42 @@ fn undiags(v: &[Diag]) -> Vec<shcl::Diagnostic> {
 			message: d.message.clone(),
 		})
 		.collect()
+}
+
+#[cfg(test)]
+mod check_tests {
+	use super::check_reads;
+	use crate::ErrKind;
+
+	// Test ID: dejeg
+	// Each instance of a repeated key is read back against 2.0, so one shcl
+	// split, as it did before a010fdf8, is refused on its own line
+	// (2026102816332481).
+	#[test]
+	fn check_reads_repeated() {
+		let old = shcl2::Document::parse("row: idx=2, title=\"a, b\"\nrow: idx=3\nt:\n\tx: 1\nt:\n\tx: 2\n");
+		let good = "row: [idx=2, 'title=\"a, b\"']\nrow: idx=3\nt:\n\tx: 1\nt:\n\tx: 2\n";
+		assert_eq!(check_reads(&old, good, false).unwrap(), Vec::<usize>::new());
+		for (up, line) in [
+			(
+				"row: [idx=2, 'title=\"a', 'b\"']\nrow: idx=3\nt:\n\tx: 1\nt:\n\tx: 2\n",
+				1,
+			),
+			(
+				"row: [idx=2, 'title=\"a, b\"']\nrow: idx=4\nt:\n\tx: 1\nt:\n\tx: 2\n",
+				2,
+			),
+			(
+				"row: [idx=2, 'title=\"a, b\"']\nrow: idx=3\nt:\n\tx: 1\nt:\n\tx: 3\n",
+				6,
+			),
+		] {
+			let e = check_reads(&old, up, false).expect_err(up);
+			assert_eq!(e.kind, ErrKind::Refused, "{up}");
+			assert_eq!(e.diags.iter().map(|d| d.line).collect::<Vec<_>>(), [line], "{up}");
+		}
+		// An instance 3.0 reads as empty is lost, as a single key's would be.
+		let up = "row: [idx=2, 'title=\"a, b\"']\nrow:\nt:\n\tx: 1\nt:\n\tx: 2\n";
+		assert_eq!(check_reads(&old, up, false).unwrap(), [2]);
+	}
 }

@@ -130,6 +130,11 @@ shclw_upgraded *shclw_i_upgraded_lines(const shclw_upgraded *u, const char *back
 // *out, which is NULL with none. False only when memory ran out.
 bool shclw_i_rewritten_lines(const char *was, size_t was_len, const char *now, size_t now_len, const size_t *lost,
                              size_t n_lost, size_t **out, size_t *n);
+// The upgrade's read-back of old's text against up, for the tests: the lines
+// that read differently in bad, and the lost lines, sorted, in lost, up to cap
+// of each.
+shclw_kind shclw_i_check_reads(const char *old, size_t old_len, const char *up, size_t up_len, size_t *bad,
+                               size_t *n_bad, size_t *lost, size_t *n_lost, size_t cap);
 
 // Nothing at path, not even a dangling link.
 bool shclw_i_missing(const char *path);

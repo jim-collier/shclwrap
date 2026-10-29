@@ -1888,21 +1888,25 @@ def _check_reads(old: Any, up: str, names_as_typed: bool) -> list[int]:
 	differs = "the upgraded file doesn't read this value as shcl 2.0 read it"
 	lost: set[int] = set()
 	for p in old.paths():
-		had, has = old.count(p), now.count(p)
+		had, has, lines = old.count(p), now.count(p), old.lines(p)
 		# Instances past the ones 3.0 still has are gone.
-		lost.update(line for line in old.lines(p)[min(had, has) :] if line > 0)
-		if had != 1:
+		lost.update(line for line in lines[min(had, has) :] if line > 0)
+		if had != 1 and has != had:
 			continue
-		was, now_is = old.read_string_array(p), now.read_string_array(p)
-		if was.status == shcl2.Status.Good and now_is.status == shcl.Status.Good and was.value != now_is.value:
-			bad.append(_carry_diag(old.line(p), differs))
-		if (
-			has == 1
-			and was.status == shcl2.Status.Good
-			and now_is.status != shcl.Status.Good
-			and now.read_raw(p).status != shcl.Status.Good
-		):
-			lost.add(old.line(p))
+		# A repeated key is read one instance at a time, the i-th against
+		# the i-th, as [#i] in 2.0 and (i) in 3.0 (2026102816332481).
+		for i, line in enumerate(lines[:had]):
+			p2, p3 = (f"{p}[#{i}]", f"{p}({i})") if had > 1 else (p, p)
+			was, now_is = old.read_string_array(p2), now.read_string_array(p3)
+			if was.status == shcl2.Status.Good and now_is.status == shcl.Status.Good and was.value != now_is.value:
+				bad.append(_carry_diag(line, differs))
+			if (
+				has == had
+				and was.status == shcl2.Status.Good
+				and now_is.status != shcl.Status.Good
+				and now.read_raw(p3).status != shcl.Status.Good
+			):
+				lost.add(line)
 	if not bad:
 		return sorted(lost)
 	n = len({b.line for b in bad})

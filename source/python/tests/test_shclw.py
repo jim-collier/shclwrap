@@ -174,6 +174,30 @@ class Api(unittest.TestCase):
 			self.assertEqual(shclw.format_float(x), want)
 
 
+class CheckReads(unittest.TestCase):
+	# Test ID: dejeh
+	def test_repeated(self) -> None:
+		# Each instance of a repeated key is read back against 2.0, so one
+		# shcl split, as it did before a010fdf8, is refused on its own line
+		# (2026102816332481).
+		old = shclw.shcl2.Document.parse('row: idx=2, title="a, b"\nrow: idx=3\nt:\n\tx: 1\nt:\n\tx: 2\n')
+		good = "row: [idx=2, 'title=\"a, b\"']\nrow: idx=3\nt:\n\tx: 1\nt:\n\tx: 2\n"
+		self.assertEqual(shclw._check_reads(old, good, False), [])
+		for up, line in (
+			("row: [idx=2, 'title=\"a', 'b\"']\nrow: idx=3\nt:\n\tx: 1\nt:\n\tx: 2\n", 1),
+			("row: [idx=2, 'title=\"a, b\"']\nrow: idx=4\nt:\n\tx: 1\nt:\n\tx: 2\n", 2),
+			("row: [idx=2, 'title=\"a, b\"']\nrow: idx=3\nt:\n\tx: 1\nt:\n\tx: 3\n", 6),
+		):
+			with self.subTest(up=up):
+				with self.assertRaises(shclw.Error) as e:
+					shclw._check_reads(old, up, False)
+				self.assertEqual(e.exception.kind, shclw.ErrKind.Refused)
+				self.assertEqual([d.line for d in e.exception.diags], [line])
+		# An instance 3.0 reads as empty is lost, as a single key's would be.
+		up = "row: [idx=2, 'title=\"a, b\"']\nrow:\nt:\n\tx: 1\nt:\n\tx: 2\n"
+		self.assertEqual(shclw._check_reads(old, up, False), [2])
+
+
 if __name__ == "__main__":
 	unittest.main()
 

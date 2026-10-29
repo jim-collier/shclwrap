@@ -433,9 +433,9 @@ func oldErrors(old *shcl2.Document) *shclw.Error {
 	return &shclw.Error{Kind: shclw.ErrRefused, Diags: errs, Msg: fmt.Sprintf("shcl 2.0 reports errors on %d lines; fix them and upgrade again", len(lines))}
 }
 
-// checkReads reads every path 2.0 reads one value at in old back against up,
-// the upgraded text. shcl's migrate writes the text 2.x read, backslash
-// escapes included (2026101910455900), so this checks its answer rather than
+// checkReads reads every value 2.0 reads in old back against up, the
+// upgraded text. shcl's migrate writes the text 2.x read, backslash escapes
+// included (2026101910455900), so this checks its answer rather than
 // trusting it. A name 2.0 read with an escape resolved stays as typed, so
 // it's refused, unless the file names format 1, since 1.2 read names as
 // typed. So is a value that reads differently. The lines with a value 2.0
@@ -450,21 +450,30 @@ func checkReads(old *shcl2.Document, up string, namesAsTyped bool) ([]int, error
 	}
 	var lost []int
 	for _, p := range old.Paths() {
+		had, has, lines := old.Count(p), now.Count(p), old.Lines(p)
 		// Instances past the ones 3.0 still has are gone.
-		for _, l := range old.Lines(p)[min(now.Count(p), old.Count(p)):] {
+		for _, l := range lines[min(has, had):] {
 			if l > 0 {
 				lost = append(lost, l)
 			}
 		}
-		if old.Count(p) != 1 {
+		if had != 1 && has != had {
 			continue
 		}
-		was, is := old.ReadStringArray(p), now.ReadStringArray(p)
-		if was.Status == shcl2.Good && is.Status == shcl.Good && !slices.Equal(was.Value, is.Value) {
-			bad = append(bad, carryDiag(old.Line(p), "the upgraded file doesn't read this value as shcl 2.0 read it"))
-		}
-		if now.Count(p) == 1 && was.Status == shcl2.Good && is.Status != shcl.Good && now.ReadRaw(p).Status != shcl.Good {
-			lost = append(lost, old.Line(p))
+		// A repeated key is read one instance at a time, the i-th against
+		// the i-th, as [#i] in 2.0 and (i) in 3.0 (2026102816332481).
+		for i := 0; i < had; i++ {
+			p2, p3 := p, p
+			if had > 1 {
+				p2, p3 = fmt.Sprintf("%s[#%d]", p, i), fmt.Sprintf("%s(%d)", p, i)
+			}
+			was, is := old.ReadStringArray(p2), now.ReadStringArray(p3)
+			if was.Status == shcl2.Good && is.Status == shcl.Good && !slices.Equal(was.Value, is.Value) {
+				bad = append(bad, carryDiag(lines[i], "the upgraded file doesn't read this value as shcl 2.0 read it"))
+			}
+			if has == had && was.Status == shcl2.Good && is.Status != shcl.Good && now.ReadRaw(p3).Status != shcl.Good {
+				lost = append(lost, lines[i])
+			}
 		}
 	}
 	if len(bad) == 0 {

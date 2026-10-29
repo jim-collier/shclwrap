@@ -234,7 +234,8 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 - The upgrade's read-back against 2.0 skips a repeated key
 	- ID: 2026102816332481
 	- Type: Bug
-	- Status: Queued
+	- Status: Waiting on automated testing
+	- Needs local test suite run?: Yes, the full run, for the C analyzers, CodeQL and CTU over the new walk in `shclw3_v2.c`.
 	- Severity: Avg
 	- Opened: 20261028-163324
 	- Opened by: JC
@@ -245,6 +246,18 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Expected behavior: Each instance 2.0 read is read back, and one that reads differently is refused, as a single key is.
 	- Possible cause: 3.0 reads one instance with `(i)` on the segment, as `InstancePaths` writes it, and 2.0 with `[i]`, so the two walks need pairing instance by instance.
 	- Note: Nothing reads wrong at `a010fdf8`, as far as the shared cases go. This is the net for the next shcl change, in all 4 bindings.
+	- Reproduced: 20261028 at e7b574c, in Go, Rust, C and Python. The read-back of 2.0's two `row:` lines against the split text gave no error.
+	- Actual cause:
+		- `checkReads` and its twins skipped every path 2.0 has more than one instance of.
+	- Decisions:
+		- Instances are paired in order, the i-th 2.0 reads at `p[#i]` against the i-th 3.0 reads at `p(i)`, and only where both have as many. Where the counts differ, the ones past the shorter are lost, as before, and none is compared, since the pairing can't be trusted then.
+		- An instance 2.0 read that 3.0 reads as nothing is lost, as a single key's is.
+		- The tests call the read-back directly with the split text, since no real input splits at the pin. C has a test hook for it, `shclw_i_check_reads`.
+	- Actual fix: Each instance of a repeated key is read back on its own, in all 4. design.md's Format and upgrade says so.
+	- Branch: r1028
+	- Test case: dejef (Go `TestCheckReadsRepeated`), dejeg (Rust `check_reads_repeated`), dejeh (Python `CheckReads.test_repeated`), dejej (C `test_check_reads_repeated`). Each failed before the fix and passes after.
+	- Swept: `checkReads` in Go `shclw3`, `check_reads` in Rust `v3`, Python, and C, with the 2.0 walk in `shclw3_v2.c`. No other code compares 2.0's reads with 3.0's, since `mendReads` is gone. `UpgradeFile` and `Open` go through `Upgrade` in each.
+	- Verified: `cicd/cicd.bash --backlog-run-quick go rust python c` passed, lint CLEAN. 4,000 generated 2.x files with repeated keys and reopened blocks upgraded with no W002 in Go.
 
 - Let an upgrade keep a backtick value as 3.0 reads it
 	- ID: 2026102618065645

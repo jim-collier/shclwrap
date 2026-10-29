@@ -1377,31 +1377,6 @@ static bool v2_changes(const char *s, size_t n) {
 	return false;
 }
 
-// What check_reads checks 2.0's reads against, one element at a time.
-typedef struct {
-	shcl_doc *now;
-	old_list *bad;
-	shcl_read_str_arr is;
-	bool differs;
-} carry_check;
-
-static void check_old(void *ctx, const char *path, size_t plen, size_t line, size_t i, size_t n, const char *v,
-                      size_t vlen) {
-	carry_check *c = (carry_check *)ctx;
-	if (i == 0) {
-		c->is = shcl_read_string_array(c->now, path, plen);
-		c->differs = false;
-	}
-	if (c->differs || c->is.status != SHCL_GOOD) {
-		return;
-	}
-	// The walk keeps i < n, but clang's CTU pass starts here without it.
-	if (c->is.n != n || i >= n || c->is.values[i].n != vlen || (vlen && memcmp(c->is.values[i].p, v, vlen) != 0)) {
-		c->differs = true;
-		keep_old(c->bad, line, "W002", not_as_read, sizeof not_as_read - 1);
-	}
-}
-
 // The lines with a value 2.0 read that the upgraded text doesn't have.
 typedef struct {
 	shcl_doc *now;
@@ -1425,6 +1400,53 @@ static void keep_lost(lost_list *l, size_t line) {
 		l->cap = cap;
 	}
 	l->v[l->n++] = line;
+}
+
+// What check_reads checks 2.0's reads against, one element at a time.
+typedef struct {
+	shcl_doc *now;
+	old_list *bad;
+	lost_list *lost;
+	shcl_read_str_arr is;
+	bool differs, oom;
+} carry_check;
+
+static void check_old(void *ctx, const char *path, size_t plen, size_t inst, size_t insts, size_t line, size_t i,
+                      size_t n, const char *v, size_t vlen) {
+	carry_check *c = (carry_check *)ctx;
+	if (i == 0) {
+		c->differs = false;
+		c->is.status = SHCL_NOT_FOUND;
+		// A repeated key is read one instance at a time, the i-th against the
+		// i-th, as [#i] in 2.0 and (i) in 3.0 (2026102816332481).
+		if (insts == 1) {
+			c->is = shcl_read_string_array(c->now, path, plen);
+		} else if (shcl_count(c->now, path, plen) == insts) {
+			char *at = (char *)malloc(plen + 24);
+			if (!at) {
+				c->oom = true;
+				return;
+			}
+			memcpy(at, path, plen);
+			size_t an = plen + (size_t)snprintf(at + plen, 24, "(%zu)", inst);
+			// The raw read goes first, so it can't move what is points at. A
+			// single key's lost line is in check_lost.
+			bool raw = shcl_read_raw(c->now, at, an).status == SHCL_GOOD;
+			c->is = shcl_read_string_array(c->now, at, an);
+			free(at);
+			if (c->is.status != SHCL_GOOD && !raw) {
+				keep_lost(c->lost, line);
+			}
+		}
+	}
+	if (c->differs || c->is.status != SHCL_GOOD) {
+		return;
+	}
+	// The walk keeps i < n, but clang's CTU pass starts here without it.
+	if (c->is.n != n || i >= n || c->is.values[i].n != vlen || (vlen && memcmp(c->is.values[i].p, v, vlen) != 0)) {
+		c->differs = true;
+		keep_old(c->bad, line, "W002", not_as_read, sizeof not_as_read - 1);
+	}
 }
 
 static void check_lost(void *ctx, const char *path, size_t plen, const size_t *lines, size_t n, int reads) {
@@ -1460,9 +1482,11 @@ static shclw_kind check_reads(shclw_i_v2_doc *old, const char *up, size_t up_len
 			keep_old(bad, shclw_i_v2_line(old, fs[k].path.p, fs[k].path.n), "W002", bad_name, sizeof bad_name - 1);
 		}
 	}
-	carry_check c = {now, bad, {NULL, 0, SHCL_NOT_FOUND, NULL}, false};
-	shclw_i_v2_reads(old, check_old, &c);
 	lost->now = now;
+	carry_check c = {now, bad, lost, {NULL, 0, SHCL_NOT_FOUND, NULL}, false, false};
+	if (!shclw_i_v2_reads(old, check_old, &c) || c.oom) {
+		lost->oom = true;
+	}
 	shclw_i_v2_paths(old, check_lost, lost);
 	size_t kept = 0;
 	if (lost->n) {
@@ -1476,6 +1500,29 @@ static shclw_kind check_reads(shclw_i_v2_doc *old, const char *up, size_t up_len
 	lost->n = kept;
 	shcl_free(now);
 	return lost->oom || bad->oom ? SHCLW_ERR_NO_MEMORY : SHCLW_OK;
+}
+
+shclw_kind shclw_i_check_reads(const char *old, size_t old_len, const char *up, size_t up_len, size_t *bad,
+                               size_t *n_bad, size_t *lost, size_t *n_lost, size_t cap) {
+	shclw_i_v2_doc *v2 = shclw_i_v2_parse(old, old_len);
+	if (!v2) {
+		return SHCLW_ERR_NO_MEMORY;
+	}
+	old_list l = {NULL, 0, 0, false};
+	lost_list ls = {NULL, NULL, 0, 0, false};
+	shclw_kind k = check_reads(v2, up, up_len, false, &l, &ls);
+	shclw_i_v2_free(v2);
+	*n_bad = !l.v ? 0 : l.n < cap ? l.n : cap;
+	for (size_t i = 0; i < *n_bad; i++) {
+		bad[i] = l.v[i].line;
+	}
+	*n_lost = !ls.v ? 0 : ls.n < cap ? ls.n : cap;
+	for (size_t i = 0; i < *n_lost; i++) {
+		lost[i] = ls.v[i];
+	}
+	free_old(&l);
+	free(ls.v);
+	return k;
 }
 
 // The result of an upgrade of text to up, with text's line ends, and with the

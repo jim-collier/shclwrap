@@ -525,6 +525,36 @@ static void test_verify_put(void) {
 	shclw_free(d);
 }
 
+// Go's TestCheckReadsRepeated: each instance of a repeated key is read back
+// against 2.0, so one shcl split, as it did before a010fdf8, is refused on its
+// own line (2026102816332481).
+static void test_check_reads_repeated(void) {
+	static const char old[] = "row: idx=2, title=\"a, b\"\nrow: idx=3\nt:\n\tx: 1\nt:\n\tx: 2\n";
+	static const char good[] = "row: [idx=2, 'title=\"a, b\"']\nrow: idx=3\nt:\n\tx: 1\nt:\n\tx: 2\n";
+	static const struct {
+		const char *up;
+		size_t line;
+	} cases[] = {
+		{"row: [idx=2, 'title=\"a', 'b\"']\nrow: idx=3\nt:\n\tx: 1\nt:\n\tx: 2\n", 1},
+		{"row: [idx=2, 'title=\"a, b\"']\nrow: idx=4\nt:\n\tx: 1\nt:\n\tx: 2\n", 2},
+		{"row: [idx=2, 'title=\"a, b\"']\nrow: idx=3\nt:\n\tx: 1\nt:\n\tx: 3\n", 6},
+	};
+	size_t bad[4], lost[4], n_bad = 9, n_lost = 9;
+	CHECK(shclw_i_check_reads(old, sizeof old - 1, good, sizeof good - 1, bad, &n_bad, lost, &n_lost, 4) == SHCLW_OK);
+	CHECK(n_bad == 0 && n_lost == 0);
+	for (size_t i = 0; i < sizeof cases / sizeof cases[0]; i++) {
+		n_bad = n_lost = 9;
+		CHECK(shclw_i_check_reads(old, sizeof old - 1, cases[i].up, strlen(cases[i].up), bad, &n_bad, lost, &n_lost,
+		                          4) == SHCLW_OK);
+		CHECK(n_bad == 1 && bad[0] == cases[i].line);
+	}
+	// An instance 3.0 reads as empty is lost, as a single key's would be.
+	static const char empty[] = "row: [idx=2, 'title=\"a, b\"']\nrow:\nt:\n\tx: 1\nt:\n\tx: 2\n";
+	n_bad = n_lost = 9;
+	CHECK(shclw_i_check_reads(old, sizeof old - 1, empty, sizeof empty - 1, bad, &n_bad, lost, &n_lost, 4) == SHCLW_OK);
+	CHECK(n_bad == 0 && n_lost == 1 && lost[0] == 2);
+}
+
 // A float32 goes in as its own shortest digits. Go's TestPutFloat32, with
 // want from Go's strconv.FormatFloat(float64(f), 'g', -1, 32).
 static void test_put_float32(void) {
@@ -1647,6 +1677,7 @@ int main(void) {
 		{"de05h", "test_first_last", test_first_last},
 		{"de05k", "test_puts", test_puts},
 		{"de05q", "test_verify_put", test_verify_put},
+		{"dejej", "test_check_reads_repeated", test_check_reads_repeated},
 		{"de05j", "test_put_float32", test_put_float32},
 		{"de05p", "test_shortest", test_shortest},
 		{"de05n", "test_several", test_several},

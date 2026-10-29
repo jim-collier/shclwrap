@@ -10,7 +10,9 @@
 
 #include "shclw3_v2.h"
 
+#include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #ifdef SHCL_FORMAT_MAJOR
 #error "shclw3_v2.c wants shcl 2.0's shcl.h, and this one is 3.0 or newer"
@@ -53,25 +55,39 @@ size_t shclw_i_v2_errors(shclw_i_v2_doc *v2, shclw_i_v2_each each, void *ctx) {
 
 size_t shclw_i_v2_line(shclw_i_v2_doc *d, const char *path, size_t plen) { return shcl_line(doc_of(d), path, plen); }
 
-void shclw_i_v2_reads(shclw_i_v2_doc *v2, shclw_i_v2_elem each, void *ctx) {
+bool shclw_i_v2_reads(shclw_i_v2_doc *v2, shclw_i_v2_elem each, void *ctx) {
 	shcl_doc *d = doc_of(v2);
 	shcl_str *paths = NULL;
 	size_t n = shcl_paths(d, &paths);
 	for (size_t k = 0; k < n; k++) {
 		const char *p = paths[k].p;
 		size_t pn = paths[k].n;
-		if (shcl_count(d, p, pn) != 1) {
-			continue;
+		size_t *lines = NULL;
+		size_t insts = shcl_lines(d, p, pn, &lines);
+		// The j-th instance is p[#j], as 3.0's is p(j) (2026102816332481).
+		char *at = insts > 1 ? (char *)malloc(pn + 24) : NULL;
+		if (insts > 1 && !at) {
+			return false;
 		}
-		shcl_read_str_arr a = shcl_read_string_array(d, p, pn);
-		if (a.status != SHCL_GOOD) {
-			continue;
+		for (size_t j = 0; j < insts; j++) {
+			const char *q = p;
+			size_t qn = pn;
+			if (at) {
+				memcpy(at, p, pn);
+				qn = pn + (size_t)snprintf(at + pn, 24, "[#%zu]", j);
+				q = at;
+			}
+			shcl_read_str_arr a = shcl_read_string_array(d, q, qn);
+			if (a.status != SHCL_GOOD) {
+				continue;
+			}
+			for (size_t i = 0; i < a.n; i++) {
+				each(ctx, p, pn, j, insts, lines[j], i, a.n, a.values[i].p, a.values[i].n);
+			}
 		}
-		size_t line = shcl_line(d, p, pn);
-		for (size_t i = 0; i < a.n; i++) {
-			each(ctx, p, pn, line, i, a.n, a.values[i].p, a.values[i].n);
-		}
+		free(at);
 	}
+	return true;
 }
 
 void shclw_i_v2_paths(shclw_i_v2_doc *v2, shclw_i_v2_path each, void *ctx) {
