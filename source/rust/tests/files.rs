@@ -528,3 +528,56 @@ fn open_fails_both() {
 		}
 	}
 }
+
+/// Opens `p` without delete sharing, as most Windows programs open a file.
+fn hold(p: &Path) -> fs::File {
+	let mut o = fs::OpenOptions::new();
+	o.read(true);
+	#[cfg(windows)]
+	{
+		use std::os::windows::fs::OpenOptionsExt;
+		const FILE_SHARE_READ: u32 = 1;
+		const FILE_SHARE_WRITE: u32 = 2;
+		o.share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE);
+	}
+	o.open(p).unwrap_or_else(|e| panic!("{}: {e}", p.display()))
+}
+
+/// On Windows a file held open without delete sharing can't be replaced. The
+/// save fails, and leaves the old file whole with nothing beside it, for a
+/// current file, one `open` upgraded, and `upgrade_file`.
+// Test ID: dejfy
+#[test]
+#[cfg_attr(not(windows), ignore = "only Windows blocks a rename over an open file")]
+fn write_held_open() {
+	for (name, text) in [("current", "a: 1\n"), ("upgraded", CLEAN_2X)] {
+		let scratch = Scratch::new(&format!("held-open-{name}"));
+		let dir = scratch.path();
+		let path = dir.join("c.shcl");
+		let p = s(&path);
+		fs::write(&path, text).unwrap();
+		let mut d = shclw::v3::open(&p).expect("open");
+		d.put("n", 1).expect("put");
+		let held = hold(&path);
+		let got = d.write(&p).err().map(|e| e.kind);
+		drop(held);
+		assert_eq!(got, Some(ErrKind::Io), "{name}");
+		assert_eq!(read(&path), text, "{name}");
+		assert_eq!(names(dir), ["c.shcl"], "{name}");
+		assert_eq!(d.backup_name(), "", "{name}");
+		d.write(&p).unwrap_or_else(|e| panic!("{name}: write once let go: {e}"));
+		assert!(read(&path).contains("n: 1"), "{name}");
+	}
+	let scratch = Scratch::new("held-open-upgrade-file");
+	let dir = scratch.path();
+	let path = dir.join("c.shcl");
+	fs::write(&path, CLEAN_2X).unwrap();
+	let held = hold(&path);
+	let got = shclw::v3::upgrade_file(&s(&path), 2).err().map(|e| e.kind);
+	drop(held);
+	assert_eq!(got, Some(ErrKind::Io), "upgrade_file");
+	assert_eq!(read(&path), CLEAN_2X);
+	assert_eq!(names(dir), ["c.shcl"]);
+	shclw::v3::upgrade_file(&s(&path), 2).expect("upgrade once let go");
+	assert_eq!(names(dir).len(), 2);
+}

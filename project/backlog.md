@@ -25,20 +25,6 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 
 ## Issues
 
-- Windows: a replace that fails keeps the old file
-	- ID: 2026102817403582
-	- Type: Task
-	- Status: Queued
-	- Opened: 20261028-174035
-	- Opened by: JC
-	- Parent ID: 2026101512024174
-	- Related IDs: 2026101513330015
-	- Priority: High
-	- Requirements:
-		- A test in each of the 4 languages, Windows only: the file is held open so the replace fails, and the old file is still whole after, with no temp file left beside it.
-		- It runs in the Other hosts step, on b29w.
-	- Note: split from 2026101512024174. shcl 2.0 on Windows could lose the old file when a replace failed, and that issue's Windows run has no test that makes a replace fail.
-
 - Run the tests on macOS
 	- ID: 2026102817403563
 	- Type: Task
@@ -738,6 +724,33 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Opened by: JC
 	- Related IDs: 2026101513330009
 	- Note: `Merged` finds them with a second parse in each language. shcl's parser sees each fold, so a call there would be cheaper and could take that code's place.
+
+- Windows: a replace that fails keeps the old file
+	- ID: 2026102817403582
+	- Type: Task
+	- Status: Done
+	- Opened: 20261028-174035
+	- Opened by: JC
+	- Parent ID: 2026101512024174
+	- Related IDs: 2026101513330015
+	- Priority: High
+	- Requirements:
+		- A test in each of the 4 languages, Windows only: the file is held open so the replace fails, and the old file is still whole after, with no temp file left beside it.
+		- It runs in the Other hosts step, on b29w.
+	- Note: split from 2026101512024174. shcl 2.0 on Windows could lose the old file when a replace failed, and that issue's Windows run has no test that makes a replace fail.
+	- Progress log:
+		- 2026-10-28: A Windows only test in each language holds the file open without delete sharing, so the replace fails. The save is `io`, the old file is whole, nothing else is in the folder, and no backup is named. Once the file is let go the save goes through. It does this for a current file, one `Open` upgraded in memory, and `UpgradeFile`. Elsewhere each says SKIP with its reason. design.md, Other hosts, names them.
+		- No binding failed it, so nothing else changed. shcl 3.0's ReplaceFile and its rename fallback both fail on the held file, and the temp file goes.
+		- Verified: on b29w through `cicd/remote-test.bash windows`, dejfx, dejfy, dejfz and dejg0 PASS, with no FAIL line. `--backlog-run-quick` over every area passed, lint CLEAN, with all 4 saying SKIP there. The C container lint passed, `make mingw` (decbj) included.
+		- Watched to fail on b29w: with the failed save's backup kept, Python's and C's tests failed on the upgraded file and `UpgradeFile`, and so did C's `test_replace_read`. With the old file overwritten in place after a failed replace, Go's and Rust's failed on the upgraded file.
+		- Not covered: a failed replace that deletes the old file, since the hold blocks a delete too. ReplaceFile's own case for that (1177) is shcl's `TestFailedPublishLosesNeitherFile`.
+	- Decisions:
+		- The hold keeps read and write sharing and drops only delete, as Go's `os.Open`, Python's `open` and C's `fopen` open a file there. The wrapper's read before the save still works, and only the replace fails. Rust's std shares delete by default, so its test sets the share mode itself.
+		- `UpgradeFile` is in the test too, since it replaces the file the same way and makes a backup that has to go when the replace fails.
+	- Swept: the failed replace in all 4 bindings, Go `ReplaceRead`, Rust `replace_read`, Python `_replace_read` and C `shclw_i_replace_read`, through `Write` over a current and an upgraded file and through `UpgradeFile`. A write with a mode over a file that's there goes through the same atomic write. `WriteOpts.Create` never replaces, and 057 and the create races already run on Windows.
+	- Test case: dejfx Go `TestWriteHeldOpen`, dejfy Rust `write_held_open`, dejfz Python `WriteHeldOpen.test_held` and dejg0 C `test_write_held_open`, each on b29w in the Other hosts step (dejex).
+	- Closed: 2026-10-28 18:20
+	- Acceptance signoff: Self-closed: the test runs in all 4 languages on b29w, passes, and was watched to fail. No binding needed a change.
 
 - Go 1.27 prints a float32 halfway value differently
 	- ID: 2026102519333440

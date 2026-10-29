@@ -547,3 +547,59 @@ func TestWriteChangedOtherName(t *testing.T) {
 		t.Errorf("forced: %v", err)
 	}
 }
+
+// On Windows a file held open without delete sharing, as os.Open holds it,
+// can't be replaced. The save fails, and leaves the old file whole with
+// nothing beside it, for a current file, one Open upgraded, and UpgradeFile.
+// Test ID: dejfx
+func TestWriteHeldOpen(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("only Windows blocks a rename over an open file")
+	}
+	for _, c := range []struct{ name, text string }{{"current", "a: 1\n"}, {"upgraded", clean2x}} {
+		t.Run(c.name, func(t *testing.T) {
+			dir := t.TempDir()
+			path := filepath.Join(dir, "c.shcl")
+			writeFile(t, path, c.text, 0o644)
+			d, err := shclw3.Open(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := d.Put("n", 1); err != nil {
+				t.Fatal(err)
+			}
+			held, err := os.Open(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			err = d.Write(path)
+			held.Close()
+			if shclw.KindOf(err) != shclw.ErrIO {
+				t.Errorf("got %v, want io", err)
+			}
+			if readFile(t, path) != c.text || len(names(t, dir)) != 1 || d.BackupName() != "" {
+				t.Errorf("file %q, folder %v, backup %q", readFile(t, path), names(t, dir), d.BackupName())
+			}
+			if err := d.Write(path); err != nil || d.Int("n", 0) != 1 || !strings.Contains(readFile(t, path), "n: 1") {
+				t.Errorf("write once let go: %v, file %q", err, readFile(t, path))
+			}
+		})
+	}
+	t.Run("UpgradeFile", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "c.shcl")
+		writeFile(t, path, clean2x, 0o644)
+		held, err := os.Open(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = shclw3.UpgradeFile(path, 2)
+		held.Close()
+		if shclw.KindOf(err) != shclw.ErrIO || readFile(t, path) != clean2x || len(names(t, dir)) != 1 {
+			t.Errorf("got %v, file %q, folder %v", err, readFile(t, path), names(t, dir))
+		}
+		if _, err := shclw3.UpgradeFile(path, 2); err != nil || len(names(t, dir)) != 2 {
+			t.Errorf("upgrade once let go: %v, folder %v", err, names(t, dir))
+		}
+	})
+}

@@ -277,3 +277,38 @@ class CreateNoLinks(unittest.TestCase):
 					self.assertEqual(os.listdir(tmp), ["a.shcl"])
 				else:
 					self.assertEqual(os.listdir(tmp), [])
+
+
+class WriteHeldOpen(unittest.TestCase):
+	"""On Windows a file held open without delete sharing, as open() holds it,
+	can't be replaced. The save fails, and leaves the old file whole with
+	nothing beside it, for a current file, one open() upgraded, and
+	upgrade_file()."""
+
+	# Test ID: dejfz
+	@unittest.skipUnless(os.name == "nt", "only Windows blocks a rename over an open file")
+	def test_held(self) -> None:
+		for name, text in (("current", b"a: 1\n"), ("upgraded", b"tags: a, b\n")):
+			with self.subTest(name=name), tempfile.TemporaryDirectory() as tmp:
+				path = os.path.join(tmp, "c.shcl")
+				Path(path).write_bytes(text)
+				d = shclw.open(path)
+				d.put("n", 1)
+				with open(path, "rb"), self.assertRaises(shclw.Error) as e:
+					d.write(path)
+				self.assertIs(e.exception.kind, shclw.ErrKind.IO)
+				self.assertEqual(Path(path).read_bytes(), text)
+				self.assertEqual(os.listdir(tmp), ["c.shcl"])
+				self.assertEqual(d.backup_name(), "")
+				d.write(path)
+				self.assertIn(b"n: 1", Path(path).read_bytes())
+		with self.subTest(name="upgrade_file"), tempfile.TemporaryDirectory() as tmp:
+			path = os.path.join(tmp, "c.shcl")
+			Path(path).write_bytes(b"tags: a, b\n")
+			with open(path, "rb"), self.assertRaises(shclw.Error) as e:
+				shclw.upgrade_file(path, 2)
+			self.assertIs(e.exception.kind, shclw.ErrKind.IO)
+			self.assertEqual(Path(path).read_bytes(), b"tags: a, b\n")
+			self.assertEqual(os.listdir(tmp), ["c.shcl"])
+			shclw.upgrade_file(path, 2)
+			self.assertEqual(len(os.listdir(tmp)), 2)

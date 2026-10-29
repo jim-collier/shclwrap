@@ -1632,6 +1632,68 @@ static void test_check(void) {
 	shclw_free(d);
 }
 
+#ifdef _WIN32
+static HANDLE hold(const char *path) {
+	HANDLE h = CreateFileA(path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING,
+	                       FILE_ATTRIBUTE_NORMAL, NULL);
+	CHECK(h != INVALID_HANDLE_VALUE);
+	return h;
+}
+#endif
+
+// On Windows a file held open without delete sharing, as most programs open
+// one, can't be replaced. The save fails, and leaves the old file whole with
+// nothing beside it, for a current file, one shclw_open upgraded, and
+// shclw_upgrade_file.
+static void test_write_held_open(void) {
+#ifdef _WIN32
+	static const char *const texts[] = {"a: 1\n", clean2x};
+	for (size_t i = 0; i < sizeof texts / sizeof texts[0]; i++) {
+		char dir[4200], path[8192];
+		make_dir(dir, sizeof dir, i ? "held-upgraded" : "held-current");
+		path_in(path, sizeof path, dir, "c.shcl");
+		write_mode(path, texts[i], 0644);
+		shclw_doc *d = NULL;
+		CHECK(shclw_open(path, &d, NULL) == SHCLW_OK && shclw_put_int(d, "n", 1, NULL) == SHCLW_OK);
+		HANDLE held = hold(path);
+		shclw_kind k = shclw_write(d, path, NULL);
+		if (held != INVALID_HANDLE_VALUE) {
+			(void)CloseHandle(held);
+		}
+		CHECK(k == SHCLW_ERR_IO);
+		CHECK(file_is(path, texts[i]) && count_dir(dir) == 1);
+		size_t n = 1;
+		char *name = shclw_backup_name(d, &n);
+		CHECK(name != NULL && n == 0);
+		free(name);
+		CHECK(shclw_write(d, path, NULL) == SHCLW_OK);
+		shclw_free(d);
+		d = NULL;
+		CHECK(shclw_open(path, &d, NULL) == SHCLW_OK && shclw_get_int(d, "n").value == 1);
+		shclw_free(d);
+		drop_dir(dir);
+	}
+	char dir[4200], path[8192];
+	make_dir(dir, sizeof dir, "held-upgrade-file");
+	path_in(path, sizeof path, dir, "c.shcl");
+	write_mode(path, clean2x, 0644);
+	HANDLE held = hold(path);
+	shclw_upgraded *u = NULL;
+	shclw_kind k = shclw_upgrade_file(path, 2, &u, NULL);
+	if (held != INVALID_HANDLE_VALUE) {
+		(void)CloseHandle(held);
+	}
+	free(u);
+	u = NULL;
+	CHECK(k == SHCLW_ERR_IO && file_is(path, clean2x) && count_dir(dir) == 1);
+	CHECK(shclw_upgrade_file(path, 2, &u, NULL) == SHCLW_OK && count_dir(dir) == 2);
+	free(u);
+	drop_dir(dir);
+#else
+	skip_why = "only Windows blocks a rename over an open file";
+#endif
+}
+
 static void cleanup(void) {
 	static const char *const made[] = {"nul0.shcl", "bad.shcl", "newer.shcl", "good.shcl", "strict.shcl", "loop.shcl"};
 	// Each test from test_replace_read on takes away its own folders.
@@ -1695,6 +1757,7 @@ int main(void) {
 		{"de07h", "test_info", test_info},
 		{"de07k", "test_rewrites", test_rewrites},
 		{"de07g", "test_check", test_check},
+		{"dejg0", "test_write_held_open", test_write_held_open},
 	};
 	for (size_t i = 0; i < sizeof tests / sizeof tests[0]; i++) {
 		int before = failures;
