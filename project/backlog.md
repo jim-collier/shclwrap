@@ -70,6 +70,7 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 	- Swept: every `remote-test.bash` caller: cicd.bash's Other hosts step, which runs every target, its `--list` and `--dry-run` lines, and dejey. The Windows path moved into `fOnBox_Windows` as it was, and passed on b29w. The held-open tests' SKIP off Windows already covers macOS in all 4 languages: dejfx, dejfy, dejfz and dejg0 each said SKIP on b26.
 	- Test case: dejgh, the Other hosts step's line for the Mac, with each test's own line from b26; dejey, `cicd/remote-skip-test.bash`, now also for a Mac that's away, can't be held, or lacks a tool.
 	- Branch: r1028
+	- Commit: 4894748
 
 - Upgrade splits a quoted comma on a repeated key
 	- ID: 2026102814295798
