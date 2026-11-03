@@ -123,6 +123,21 @@ Other projects are named here by stand-in names. The [project name map](../../pr
 		- 2026-10-25: Until the beta, the pin follows shcl's newest dev commit, not an old one. `cicd/bump-shcl.bash` moves every 3.0 pin at once. Moved from `ea0998fa` to `a65eceb8`.
 	- Held for shcl's v3.0.0-beta1 tag. The pin is at shcl dev a010fdf8 until then.
 
+- The pipeline prunes every project's docker build cache
+	- ID: 2026110311291904
+	- Type: Bug
+	- Status: Queued
+	- Severity: High
+	- Opened: 20261103-112919
+	- Opened by: JC
+	- Related IDs: common 2026110311291900
+	- Incorrect behavior: The pipeline runs `docker builder prune` after a run, in `cicd/docker-tidy-test.bash` and `cicd/utility/include/docker-tidy.bash`. That prunes docker's default builder, which every project shares, so a run here drops any other project's cache once it's a week unused. common's `Cleanup after a run` rule said to do it.
+	- Expected behavior: The pipeline doesn't prune docker's build cache at all. Docker trims the cache itself on b23, through `builder.gc` in `/etc/docker/daemon.json`. Cache unused for a week goes first, then the rest is cut to 120 GB, or further when the disk is under 10% free, but never below 20 GB. The label cleanup of this project's containers, dangling images and old tags stays.
+		- Do it once b23's `/etc/docker/daemon.json` has the `builder.gc` block. `grep -q '"gc"' /etc/docker/daemon.json` checks. Until then the prune stays.
+	- Decisions:
+		- Don't move to a buildx builder of the project's own instead. shcl tried that on 2026-11-02. A cold build of a 2 GB image took 299 s against 266 s on the default builder, and the builder kept a second 3 GB copy of the layers for a week. shcl is going back to the default builder. (JC, me)
+	- Estimated effort: Low
+
 - Show the text a value would be written as
 	- ID: 2026101513330024
 	- Type: Feature
